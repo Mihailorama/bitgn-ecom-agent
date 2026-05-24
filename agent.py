@@ -650,11 +650,34 @@ def _fallback_completion(reason: str) -> "ReportTaskCompletion":
     )
 
 
+def _verify_refs(vm: EcomRuntimeClientSync, refs: List[str]) -> List[str]:
+    # Code-enforced evidence gate: an invalid ref is penalized, and weaker models
+    # sometimes cite a claimed id from the task text verbatim (e.g. a basket id the
+    # user named that does not actually exist). Stat each repo-path ref and DROP
+    # the ones the runtime confirms are missing; keep non-path refs and keep refs
+    # whose check fails only transiently (benefit of the doubt).
+    out: List[str] = []
+    for ref in refs:
+        if not ref.startswith("/"):
+            out.append(ref)
+            continue
+        try:
+            vm.stat(StatRequest(path=ref))
+            out.append(ref)
+        except ConnectError as exc:
+            if "not_found" in str(exc.code).lower():
+                print(f"{CLI_YELLOW}dropping invalid grounding ref {ref} ({exc.code}){CLI_CLR}")
+            else:
+                out.append(ref)
+    return out
+
+
 def _submit_completion(vm: EcomRuntimeClientSync, fn: "ReportTaskCompletion") -> None:
-    # Normalize refs FIRST (repair leading slashes, dedupe), THEN ensure a
-    # security refusal cites the security policy - so a model ref like
-    # "docs/security.md" is recognised after normalization and not double-added.
-    fn.grounding_refs[:] = _normalize_refs(fn.grounding_refs)
+    # Normalize refs FIRST (repair leading slashes, dedupe), THEN drop any the
+    # runtime says do not exist, THEN ensure a security refusal cites the security
+    # policy - so a model ref like "docs/security.md" is recognised after
+    # normalization and not double-added.
+    fn.grounding_refs[:] = _verify_refs(vm, _normalize_refs(fn.grounding_refs))
     if fn.outcome == "OUTCOME_DENIED_SECURITY" and "/docs/security.md" not in fn.grounding_refs:
         fn.grounding_refs.append("/docs/security.md")
 
