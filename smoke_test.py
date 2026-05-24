@@ -76,6 +76,7 @@ class FakeVM:
         self.writes = []
         self.deletes = []
         self.raise_on_read_path = None
+        self.stat_not_found = set()
 
     def tree(self, req):
         return SimpleNamespace(root=SimpleNamespace(name="", children=[]), truncated=False)
@@ -106,7 +107,9 @@ class FakeVM:
         return SimpleNamespace()
 
     def stat(self, req):
-        return SimpleNamespace()
+        if req.path in self.stat_not_found:
+            raise ConnectError("not_found", f"no such: {req.path}")
+        return SimpleNamespace(path=req.path)
 
     def answer(self, req):
         self.answered = req
@@ -156,13 +159,24 @@ def _tool(fn):
 
 # --- scenarios -------------------------------------------------------------
 
-def _run(script, vm=None):
+def _run(script, vm=None, task="do the task"):
     vm = vm or FakeVM()
     parse_step, leftover = _scripted_parse_step(script)
     agent.parse_step = parse_step
     agent.EcomRuntimeClientSync = lambda url: vm
-    agent.run_agent("fake-model", "http://fake", "do the task")
+    agent.run_agent("fake-model", "http://fake", task)
     return vm, leftover
+
+
+def _mk_completion(message, outcome="OUTCOME_OK", refs=None):
+    return agent.ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["x"],
+        message=message,
+        grounding_refs=refs or [],
+        outcome=outcome,
+        verified=True,
+    )
 
 
 def test_normal_completion():
@@ -203,10 +217,91 @@ def test_connect_error_recovery():
     print("ok: ConnectError is fed back and the loop recovers")
 
 
+def test_sql_path_extraction():
+    csv_out = (
+        "sku,path,brand,name\n"
+        "FST-1HE3ZSQ6,/proc/catalog/FST-1HE3ZSQ6.json,Heco,Wood Screw\n"
+        "WRK-24ARZRCH,/proc/catalog/Engelbert Strauss/WRK-24ARZRCH.json,Engelbert Strauss,Work Trousers\n"
+    )
+    pairs = agent._extract_paths_with_labels(csv_out)
+    paths = [p for p, _ in pairs]
+    assert paths == [
+        "/proc/catalog/FST-1HE3ZSQ6.json",
+        "/proc/catalog/Engelbert Strauss/WRK-24ARZRCH.json",
+    ], f"space-in-path must survive; got {paths}"
+    assert "sku=FST-1HE3ZSQ6" in pairs[0][1]
+    # scalar aggregate (no path column) -> nothing
+    assert agent._extract_paths_with_labels("count(*)\n7\n") == []
+    # header only -> nothing
+    assert agent._extract_paths_with_labels("sku,path,brand\n") == []
+    # non-/proc or non-.json values skipped
+    assert agent._extract_paths_with_labels("sku,path\nX,not_a_path\n") == []
+    # path column resolved by header name, not position
+    one = agent._extract_paths_with_labels("a,b,path\n1,2,/proc/stores/s1.json\n")
+    assert one == [("/proc/stores/s1.json", "")], one
+    print("ok: SQL path extraction (header-index, spaces, scalars, ragged)")
+
+
+def test_format_enforcement():
+    fn = _mk_completion("<COUNT:7>")
+    assert agent._enforce_format_inplace("Answer exactly as <COUNT:%d>", fn) is None
+    assert fn.message == "<COUNT:7>", "already-valid must be untouched"
+
+    fn = _mk_completion("The store has 7 units.")
+    assert agent._enforce_format_inplace("Answer exactly as <COUNT:%d>", fn) is None
+    assert fn.message == "<COUNT:7>", "single int must coerce into the tag"
+
+    fn = _mk_completion("9")
+    assert agent._enforce_format_inplace("reply [QTY:%d]", fn) is None
+    assert fn.message == "[QTY:9]"
+
+    fn = _mk_completion("7 of 12")
+    corr = agent._enforce_format_inplace("Answer exactly as <COUNT:%d>", fn)
+    assert corr is not None and "FORMAT REQUIRED" in corr, "ambiguous ints must not coerce"
+
+    fn = _mk_completion("some prose answer")
+    assert agent._enforce_format_inplace("Describe the policy", fn) is None
+    assert fn.message == "some prose answer", "free-form answers must never be touched"
+
+    fn = _mk_completion("It is not stocked")
+    assert agent._enforce_format_inplace("answer <YES> or <NO>", fn) is not None, \
+        "malformed yes/no must re-prompt (cannot coerce polarity)"
+    print("ok: format detection + safe coercion + conservative re-prompt")
+
+
+def test_verify_refs_drop_safety():
+    vm = FakeVM()
+    vm.stat_not_found = {"/proc/baskets/ghost.json"}
+    kept = agent._verify_refs(
+        vm, ["/proc/baskets/ghost.json", "/docs/security.md", "/proc/stores/store_x.json"]
+    )
+    assert "/proc/baskets/ghost.json" not in kept, "must drop a not_found ref"
+    assert "/docs/security.md" in kept, "must keep a stat-valid doc absent from any ledger"
+    assert "/proc/stores/store_x.json" in kept
+    print("ok: _verify_refs drops only not_found, keeps stat-valid refs")
+
+
+def test_format_loopback():
+    # First answer is ambiguous (two ints, cannot coerce) -> gate re-prompts once;
+    # second answer conforms -> submitted. Exactly one extra step consumed.
+    script = [
+        _completion("OUTCOME_OK", "7 of 12 match", []),
+        _completion("OUTCOME_OK", "<COUNT:7>", []),
+    ]
+    vm, leftover = _run(script, task="How many match? Answer exactly as <COUNT:%d>")
+    assert vm.answered is not None and vm.answered.message == "<COUNT:7>"
+    assert not leftover, "should consume exactly the two scripted steps"
+    print("ok: format re-prompt loop-back (one correction, then submit)")
+
+
 def main():
     test_normal_completion()
     test_security_denial()
     test_connect_error_recovery()
+    test_sql_path_extraction()
+    test_format_enforcement()
+    test_verify_refs_drop_safety()
+    test_format_loopback()
     print("\nALL SMOKE TESTS PASSED")
 
 

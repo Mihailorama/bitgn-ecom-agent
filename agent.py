@@ -1,5 +1,7 @@
+import csv
 import json
 import os
+import re
 import shlex
 import time
 from typing import Annotated, List, Literal, Union
@@ -434,6 +436,9 @@ OUTCOME_BY_NAME = {
 
 
 MAX_STEPS = int(os.environ.get("MAX_STEPS", "40"))
+# Bounded corrective re-prompts (format / grounding) per trial. Shared budget so
+# total extra LLM calls stay capped and the never-blank guarantee is preserved.
+MAX_CORRECTIONS = int(os.environ.get("MAX_CORRECTIONS", "2"))
 
 
 def _format_tree_entry(entry, prefix: str = "", is_last: bool = True) -> list[str]:
@@ -640,23 +645,237 @@ def _call_signature(fn: BaseModel) -> str:
 _REF_FILE_EXTS = (".md", ".json", ".txt", ".yaml", ".yml", ".csv")
 
 
+def _normalize_one_ref(raw: str) -> "str | None":
+    # Repair a single ref: trim, and add a leading slash to a repo path that is
+    # missing it (incl. root files like AGENTS.MD that contain no '/'). Returns
+    # None for an empty ref.
+    ref = (raw or "").strip()
+    if not ref:
+        return None
+    if not ref.startswith(("/", "http://", "https://")) and (
+        "/" in ref or ref.lower().endswith(_REF_FILE_EXTS)
+    ):
+        ref = "/" + ref
+    return ref
+
+
 def _normalize_refs(refs: List[str]) -> List[str]:
-    # Code-level evidence gate (the #1 fix cited by PAC1 winners): refs are graded
-    # as full repo paths, and "right in substance but missing a leading slash" is a
-    # common silent miss. Repair leading slash (incl. root files like AGENTS.MD
-    # that have no '/'), trim, and dedupe in code.
+    # Refs are graded as full repo paths, and "right in substance but missing a
+    # leading slash" is a common silent miss. Repair, trim, and dedupe in code.
     out: List[str] = []
     for raw in refs:
-        ref = (raw or "").strip()
-        if not ref:
-            continue
-        if not ref.startswith(("/", "http://", "https://")) and (
-            "/" in ref or ref.lower().endswith(_REF_FILE_EXTS)
-        ):
-            ref = "/" + ref
-        if ref not in out:
+        ref = _normalize_one_ref(raw)
+        if ref and ref not in out:
             out.append(ref)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Evidence ledger: a per-trial, code-tracked set of record paths the agent
+# actually confirmed (SQL `path` columns, and read/stat/find targets). Grounding
+# refs are graded as exact repo paths, and weak models fabricate or omit them;
+# surfacing the confirmed set lets the agent CITE real paths instead of building
+# them, and drives one corrective re-prompt when an OK answer is ungrounded.
+# ---------------------------------------------------------------------------
+
+
+class EvidenceLedger:
+    def __init__(self) -> None:
+        self._by_path: "dict[str, dict]" = {}
+
+    def add(self, path: str, label: str = "", source: str = "") -> None:
+        ref = _normalize_one_ref(path)
+        if not ref or not ref.startswith("/"):
+            return
+        cur = self._by_path.get(ref)
+        if cur is None:
+            self._by_path[ref] = {"label": label, "source": source}
+        elif label and not cur["label"]:
+            cur["label"] = label  # fill a missing label, never clobber an SQL one
+
+    def __contains__(self, path: str) -> bool:
+        return path in self._by_path
+
+    def __len__(self) -> int:
+        return len(self._by_path)
+
+    def paths(self) -> "list[str]":
+        return list(self._by_path)
+
+    def render(self, limit: int = 40) -> str:
+        items = list(self._by_path.items())
+        lines = [
+            f"- {p}" + (f"  ({m['label']})" if m["label"] else "")
+            for p, m in items[:limit]
+        ]
+        if len(items) > limit:
+            lines.append(f"- ... (+{len(items) - limit} more confirmed paths)")
+        return "\n".join(lines)
+
+
+def _sql_rows(stdout: str) -> "tuple[list[str], list[list[str]]]":
+    lines = [ln for ln in (stdout or "").splitlines() if ln.strip()]
+    if not lines:
+        return [], []
+    rows = list(csv.reader(lines))
+    if not rows:
+        return [], []
+    return rows[0], rows[1:]
+
+
+def _col_index(header: "list[str]", *names: str) -> int:
+    low = [h.strip().lower() for h in header]
+    for name in names:
+        if name in low:
+            return low.index(name)
+    return -1
+
+
+def _build_label(header: "list[str]", row: "list[str]", sku_i: int, name_i: int) -> str:
+    parts = []
+    if 0 <= sku_i < len(row) and row[sku_i].strip():
+        parts.append(f"{header[sku_i].strip()}={row[sku_i].strip()}")
+    if 0 <= name_i < len(row) and row[name_i].strip():
+        parts.append(f"{header[name_i].strip()}={row[name_i].strip()[:40]}")
+    return " ".join(parts)
+
+
+def _extract_paths_with_labels(stdout: str) -> "list[tuple[str, str]]":
+    # Parse /bin/sql CSV stdout and return (path, label) for every data row whose
+    # `path` column looks like a real record path. Resolve `path` by header name
+    # (column order varies). Skip ragged rows, scalar aggregates, and summary
+    # lines rather than corrupting the ledger.
+    header, rows = _sql_rows(stdout)
+    pi = _col_index(header, "path")
+    if pi < 0:
+        return []
+    sku_i = _col_index(header, "sku", "id")
+    name_i = _col_index(header, "name", "brand", "model", "series", "title")
+    out: "list[tuple[str, str]]" = []
+    for row in rows:
+        if len(row) <= pi:
+            continue
+        path = row[pi].strip()
+        if not (path.startswith("/proc") and path.endswith(".json")):
+            continue
+        out.append((path, _build_label(header, row, sku_i, name_i)))
+    return out
+
+
+def _harvest(ledger: EvidenceLedger, cmd: BaseModel, result) -> None:
+    # Capture confirmed record paths from a successful tool result. Must never
+    # raise - a malformed result cannot be allowed to break the never-blank loop.
+    try:
+        if result is None:
+            return
+        if isinstance(cmd, (Req_Read, Req_Stat)):
+            path = getattr(result, "path", "") or getattr(cmd, "path", "")
+            ledger.add(path, source="read" if isinstance(cmd, Req_Read) else "stat")
+        elif isinstance(cmd, Req_Find):
+            for p in getattr(result, "paths", []) or []:
+                ledger.add(p, source="find")
+        elif isinstance(cmd, Req_Exec) and getattr(cmd, "path", "") == "/bin/sql":
+            for path, label in _extract_paths_with_labels(getattr(result, "stdout", "")):
+                ledger.add(path, label=label, source="sql")
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Answer-format enforcement: some tasks demand an exact token (<YES>/<NO>,
+# <COUNT:%d>, [QTY:%d], "count : %d"). Weak models often get the value right but
+# the wrapper wrong. Detect a REQUIRED format from the instruction and, when
+# unambiguous, coerce the message in place (zero extra LLM calls); else re-prompt
+# once. Conservative: only acts when the instruction explicitly shows the token.
+# ---------------------------------------------------------------------------
+
+
+def _only_int(text: str) -> "int | None":
+    nums = re.findall(r"-?\d+", text or "")
+    if len(set(nums)) == 1:
+        return int(nums[0])
+    return None
+
+
+def _required_format(instruction: str):
+    """Return (name, validate_fn, coerce_fn) or None. coerce_fn(msg) -> str|None."""
+    low = (instruction or "").lower()
+    if re.search(r"<count:\s*(%d|n|-?\d+)\s*>", low):
+        return (
+            "count_tag",
+            lambda m: re.fullmatch(r"<COUNT:-?\d+>", m.strip()) is not None,
+            lambda m: (lambda n: f"<COUNT:{n}>" if n is not None else None)(_only_int(m)),
+        )
+    if re.search(r"\[qty:\s*(%d|n|-?\d+)\s*\]", low):
+        return (
+            "qty_tag",
+            lambda m: re.fullmatch(r"\[QTY:-?\d+\]", m.strip()) is not None,
+            lambda m: (lambda n: f"[QTY:{n}]" if n is not None else None)(_only_int(m)),
+        )
+    if re.search(r"count\s*:\s*(%d|n|-?\d+)", low):
+        return (
+            "count_colon",
+            lambda m: re.fullmatch(r"count\s*:\s*-?\d+", m.strip(), re.I) is not None,
+            lambda m: (lambda n: f"count : {n}" if n is not None else None)(_only_int(m)),
+        )
+    if "<yes>" in low or "<no>" in low:
+        return (
+            "yesno",
+            lambda m: ("<YES>" in m.upper()) ^ ("<NO>" in m.upper()),
+            lambda m: None,  # polarity cannot be synthesized safely
+        )
+    return None
+
+
+def _enforce_format_inplace(instruction: str, fn: "ReportTaskCompletion") -> "str | None":
+    # Coerce fn.message in place when a required format is unambiguous and the
+    # value is recoverable; return a correction string to re-prompt once if not;
+    # return None (and leave message, modulo strip) when no format is required or
+    # the message already conforms.
+    spec = _required_format(instruction)
+    if spec is None:
+        return None
+    name, validate, coerce = spec
+    if validate(fn.message.strip()):
+        fn.message = fn.message.strip()
+        return None
+    coerced = coerce(fn.message)
+    if coerced is not None:
+        fn.message = coerced
+        return None
+    return (
+        f"FORMAT REQUIRED. The task demands the answer in an exact format ({name}); "
+        f"your message {fn.message!r} does not match. Re-issue report_completion with "
+        f"`message` set to EXACTLY the required token (e.g. <COUNT:7> / [QTY:7] / "
+        f"<YES> / <NO> / count : 7) and nothing else - keep the same grounding_refs "
+        f"and outcome."
+    )
+
+
+def _completion_gate(
+    ledger: EvidenceLedger, task_text: str, fn: "ReportTaskCompletion"
+) -> "str | None":
+    # Bounded pre-submit check. Returns one correction string to re-prompt once,
+    # or None to submit. Format coercion is applied in place (no re-prompt needed).
+    correction = _enforce_format_inplace(task_text, fn)
+    if correction is not None:
+        return correction
+    # Cite-from-ledger: only nudge an OK answer when the agent actually CONFIRMED
+    # record paths (/proc rows pulled via SQL/read/find) yet cites none of them -
+    # the fabricated-or-omitted-ref case. Never fires on a refusal, on a ledger
+    # with no records (pure /docs reasoning), and never DROPS a ref.
+    if fn.outcome == "OUTCOME_OK":
+        record_paths = [p for p in ledger.paths() if p.startswith("/proc")]
+        refs = _normalize_refs(fn.grounding_refs)
+        if record_paths and not any(r in ledger for r in refs):
+            return (
+                "GROUNDING CHECK. Your answer cites no confirmed record path. Cite the "
+                "EXACT paths of the records you relied on, copied verbatim from these "
+                "confirmed records:\n" + ledger.render() + "\n(Policy/doc files under "
+                "/docs are cited as-is and need not be in this list.) Re-issue "
+                "report_completion citing the real paths."
+            )
+    return None
 
 
 def _fallback_completion(reason: str) -> "ReportTaskCompletion":
@@ -695,7 +914,14 @@ def _verify_refs(vm: EcomRuntimeClientSync, refs: List[str]) -> List[str]:
     return out
 
 
-def _submit_completion(vm: EcomRuntimeClientSync, fn: "ReportTaskCompletion") -> None:
+def _submit_completion(
+    vm: EcomRuntimeClientSync, fn: "ReportTaskCompletion", task_text: str = ""
+) -> None:
+    # Final coercion-only format pass (no re-prompt): on the budget-exhausted and
+    # fallback paths the gate did not run, so apply a safe in-place format fix
+    # here. Idempotent when the message already conforms.
+    if task_text:
+        _enforce_format_inplace(task_text, fn)
     # Normalize refs FIRST (repair leading slashes, dedupe), THEN drop any the
     # runtime says do not exist, THEN ensure a security refusal cites the security
     # policy - so a model ref like "docs/security.md" is recognised after
@@ -732,21 +958,30 @@ def _submit_completion(vm: EcomRuntimeClientSync, fn: "ReportTaskCompletion") ->
 
 def _drive(vm: EcomRuntimeClientSync, model: str, task_text: str) -> None:
     log = [{"role": "system", "content": system_prompt}]
+    ledger = EvidenceLedger()
 
-    # Deterministic discovery turn: establishes policy, identity, and clock
-    # grounding up front and keeps these tokens stable at the head of the
-    # context so the provider can cache the prefix across steps.
+    # Deterministic discovery turn: establishes policy, identity, clock, and the
+    # SQL table/column structure up front and keeps these tokens stable at the
+    # head of the context so the provider can cache the prefix across steps. The
+    # sqlite_schema dump grounds every trial in the real table/column names (so
+    # the model queries SQL for record paths instead of constructing them).
     must = [
         Req_Tree(level=2, tool="tree", root="/"),
         Req_Read(path="/AGENTS.MD", tool="read"),
         Req_Tree(level=2, tool="tree", root="/docs"),
         Req_Exec(path="/bin/date", tool="exec"),
         Req_Exec(path="/bin/id", tool="exec"),
+        Req_Exec(
+            path="/bin/sql",
+            tool="exec",
+            stdin="SELECT name, sql FROM sqlite_schema WHERE type='table';",
+        ),
     ]
 
     for cmd in must:
         try:
             result = dispatch(vm, cmd)
+            _harvest(ledger, cmd, result)
             formatted = _format_result(cmd, result)
         except ConnectError as exc:
             formatted = f"[{exc.code}] {exc.message}"
@@ -756,6 +991,7 @@ def _drive(vm: EcomRuntimeClientSync, model: str, task_text: str) -> None:
     log.append({"role": "user", "content": task_text})
 
     recent_signatures: list[str] = []
+    corrections_used = 0
 
     for i in range(MAX_STEPS):
         step = f"step_{i + 1}"
@@ -778,11 +1014,22 @@ def _drive(vm: EcomRuntimeClientSync, model: str, task_text: str) -> None:
         log.append({"role": "assistant", "content": job.model_dump_json()})
 
         if isinstance(job.function, ReportTaskCompletion):
-            _submit_completion(vm, job.function)
+            correction = (
+                _completion_gate(ledger, task_text, job.function)
+                if corrections_used < MAX_CORRECTIONS
+                else None
+            )
+            if correction is not None:
+                corrections_used += 1
+                print(f"{CLI_YELLOW}correction {corrections_used}/{MAX_CORRECTIONS}: re-prompting{CLI_CLR}")
+                log.append({"role": "user", "content": correction})
+                continue
+            _submit_completion(vm, job.function, task_text)
             return
 
         try:
             result = dispatch(vm, job.function)
+            _harvest(ledger, job.function, result)
             txt = _format_result(job.function, result)
             print(f"{CLI_GREEN}OUT{CLI_CLR}: {txt}")
         except ConnectError as exc:
@@ -821,7 +1068,7 @@ def _drive(vm: EcomRuntimeClientSync, model: str, task_text: str) -> None:
     fn = final.function
     if not isinstance(fn, ReportTaskCompletion):
         fn = _fallback_completion("step budget exhausted; no completion produced")
-    _submit_completion(vm, fn)
+    _submit_completion(vm, fn, task_text)
 
 
 def run_agent(model: str, harness_url: str, task_text: str) -> None:
