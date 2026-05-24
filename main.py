@@ -1,6 +1,11 @@
 import os
 import textwrap
 
+from dotenv import load_dotenv
+
+# Load a local .env (gitignored) so keys can live in a file instead of the shell.
+load_dotenv()
+
 from bitgn.harness_connect import HarnessServiceClientSync
 from bitgn.harness_pb2 import (
     EndTrialRequest,

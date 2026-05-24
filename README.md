@@ -56,11 +56,13 @@ route to the **OAuth CLI**; the `anthropic/` prefix routes to the metered API.
 
 ## Setup
 
-1. Export `BITGN_API_KEY` - see [Getting the BitGN API key](#getting-the-bitgn-api-key).
-2. Pick a provider and export its credential (see the table above). For the
-   default `gpt-5.5`, export `OPENAI_API_KEY`.
-3. `make sync`
-4. `make run`  (tests: `MODEL_ID=claude:opus make run`)
+1. `cp .env.example .env` and fill in `BITGN_API_KEY` (see
+   [Getting the BitGN API key](#getting-the-bitgn-api-key)), `MODEL_ID`, and the
+   matching provider credential. `.env` is gitignored and loaded automatically.
+   (Plain shell `export`s work too.)
+2. `make sync`
+3. `make test`  - offline loop check, no keys/network needed.
+4. `make run`   - tests: set `MODEL_ID=claude:opus`; challenge: `gemini/gemini-3.5-flash`.
 
 ## Getting the BitGN API key
 
@@ -101,6 +103,9 @@ The key ties a run to your account so its score shows on
 - `llm.py` - provider routing + structured output (LiteLLM for API models, the
   `claude` CLI for OAuth).
 - `main.py` - control-plane flow: start run, iterate trials, score, submit.
+- `smoke_test.py` - offline loop test (`make test`): stubs the SDK + the LLM so
+  discovery, tool dispatch, error recovery, denial, and completion run without keys.
+- `BENCHMARK_NOTES.md` - the ECOM1 task taxonomy the system prompt is tuned against.
 - `proto/` - the relevant slice of the BitGN schema for reference (SDKs are
   pulled from the Buf registry, not generated locally).
 

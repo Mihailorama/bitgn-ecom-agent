@@ -12,6 +12,7 @@ dependencies = [
     "openai>=2.26.0",
     "protobuf>=7.34.1",
     "pydantic>=2.12.5",
+    "python-dotenv>=1.2.2",
 ]
 
 [[tool.uv.index]]

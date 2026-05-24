@@ -161,6 +161,7 @@ dependencies = [
     { name = "openai" },
     { name = "protobuf" },
     { name = "pydantic" },
+    { name = "python-dotenv" },
 ]
 
 [package.metadata]
@@ -172,6 +173,7 @@ requires-dist = [
     { name = "openai", specifier = ">=2.26.0" },
     { name = "protobuf", specifier = ">=7.34.1" },
     { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
 ]
 
 [[package]]
