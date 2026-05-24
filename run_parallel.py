@@ -62,12 +62,13 @@ def run_one(trial_id: str, task_filter: list[str]):
     try:
         trial = _retry(lambda: client.start_trial(StartTrialRequest(trial_id=trial_id)))
     except ConnectError as exc:
-        return (trial_id, None, None, f"start_trial: {exc.code} {exc.message}")
+        return (trial_id, None, None, f"start_trial: {exc.code} {exc.message}", 0.0)
 
     if task_filter and trial.task_id not in task_filter:
-        return (trial.task_id, "skip", None, None)
+        return (trial.task_id, "skip", None, None, 0.0)
 
     log_path = os.path.join(LOG_DIR, f"{trial.task_id}.log")
+    t0 = time.time()
     with open(log_path, "w", encoding="utf-8") as fh, redirect_stdout(fh):
         print(f"TASK {trial.task_id} (model {MODEL_ID})")
         print(f"INSTRUCTION: {trial.instruction}\n{'-' * 80}")
@@ -75,14 +76,15 @@ def run_one(trial_id: str, task_filter: list[str]):
             run_agent(MODEL_ID, trial.harness_url, trial.instruction)
         except Exception as exc:  # keep the sweep going if one task throws
             print(f"agent crashed: {exc!r}")
+    elapsed = time.time() - t0
 
     try:
         res = _retry(lambda: client.end_trial(EndTrialRequest(trial_id=trial.trial_id)))
     except ConnectError as exc:
-        return (trial.task_id, None, None, f"end_trial: {exc.code} {exc.message}")
+        return (trial.task_id, None, None, f"end_trial: {exc.code} {exc.message}", elapsed)
 
     score = res.score if res.score_available else None
-    return (trial.task_id, score, list(res.score_detail), None)
+    return (trial.task_id, score, list(res.score_detail), None, elapsed)
 
 
 def main() -> None:
@@ -107,40 +109,72 @@ def main() -> None:
 
     results = []
     ctx = mp.get_context("spawn")  # avoid fork-after-threads with the gRPC client
+    wall0 = time.time()
     try:
         with ProcessPoolExecutor(max_workers=PARALLEL, mp_context=ctx) as pool:
             futures = {
                 pool.submit(run_one, tid, task_filter): tid for tid in run.trial_ids
             }
             for fut in as_completed(futures):
-                task_id, score, detail, err = fut.result()
+                task_id, score, detail, err, secs = fut.result()
                 if score == "skip":
                     continue
-                results.append((task_id, score, detail, err))
+                results.append((task_id, score, detail, err, secs))
                 tag = f"{score:.2f}" if isinstance(score, (int, float)) else (err or "n/a")
-                print(f"[done] {task_id}: {tag}", flush=True)
+                print(f"[done] {task_id}: {tag} ({secs:.0f}s)", flush=True)
     finally:
         client.submit_run(SubmitRunRequest(run_id=run.run_id, force=True))
+    wall = time.time() - wall0
 
     print("\n==== SUMMARY ====")
-    scored = []
-    for task_id, score, detail, err in sorted(results):
+    scored, times = [], []
+    for task_id, score, detail, err, secs in sorted(results):
+        times.append(secs)
         if isinstance(score, (int, float)):
             scored.append(score)
-            line = f"{task_id}: {score:.2f}"
+            line = f"{task_id}: {score:.2f} ({secs:.0f}s)"
             if score < 1.0 and detail:
                 line += "  | " + " ; ".join(detail)[:240]
         else:
             line = f"{task_id}: ERROR {err}"
         print(line)
 
+    pct = passed = 0
     if scored:
         passed = sum(1 for s in scored if s >= 0.999)
+        pct = sum(scored) / len(scored) * 100
+        avg = sum(times) / len(times) if times else 0
+        slowest = max(times) if times else 0
         print(
-            f"\nFINAL: {sum(scored) / len(scored) * 100:.2f}%  "
-            f"({passed}/{len(scored)} perfect, {len(scored)} scored)"
+            f"\nFINAL: {pct:.2f}%  ({passed}/{len(scored)} perfect, {len(scored)} scored)\n"
+            f"SPEED: wall {wall:.0f}s | avg/task {avg:.0f}s | slowest {slowest:.0f}s | "
+            f"parallel {PARALLEL}"
         )
+        # Record score-vs-speed per model for full sweeps (skip partial reruns).
+        if not task_filter:
+            _append_result(MODEL_ID, pct, passed, len(scored), wall, avg, PARALLEL)
     print(f"per-task logs: {LOG_DIR}/<task>.log")
+
+
+def _append_result(model, pct, passed, total, wall, avg, parallel):
+    import datetime
+
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "RESULTS.md")
+    header = (
+        "# Model score vs speed (bitgn/ecom1-dev)\n\n"
+        "| date (UTC) | model | score | perfect | wall | avg/task | parallel |\n"
+        "|---|---|---|---|---|---|---|\n"
+    )
+    if not os.path.exists(path):
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(header)
+    row = (
+        f"| {datetime.datetime.now(datetime.UTC):%Y-%m-%d %H:%M} | {model} | {pct:.1f}% | "
+        f"{passed}/{total} | {wall:.0f}s | {avg:.0f}s | {parallel} |\n"
+    )
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(row)
+    print(f"recorded result to {path}")
 
 
 if __name__ == "__main__":
