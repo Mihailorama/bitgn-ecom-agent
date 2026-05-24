@@ -266,6 +266,12 @@ ANSWERS:
   `SQL:products#...`. Always SELECT the `path` column for every product, store,
   payment, customer, employee, or return you rely on, and cite only paths you
   confirmed exist.
+- CITE EVERY RECORD YOUR ANSWER TOUCHES - completeness of refs is graded, not just
+  correctness. If you count or aggregate over a store's inventory, cite that store's
+  `path`. If you verify a person's role at a store, cite the store record (and the
+  employee record) you checked. If you reason over a basket / payment / return, cite
+  it. A right answer that omits a required record ref still scores zero. List the
+  store, every product, and every record the conclusion depends on - not just some.
 - POLICY CITATION: any task that applies a /docs policy MUST cite that exact doc.
   - count / inventory-report tasks: find the dated reporting note under /docs
     (policy-updates, ops-policy-notes, current-updates) for the requested
@@ -321,16 +327,19 @@ ECOM DOMAIN POLICY (the runtime randomizes ids/products, but these rules hold):
 - FRAUD / INCIDENT REVIEW: the fraud signal lives in the DATA, not in a doc named
   "fraud". A stated "confirmed incident" IS real - never refuse it for lack of a
   criteria document. Query the payment records (especially archived/historical
-  ones) with /bin/sql. The incident is ONE specific ring: a single outlier value of
-  the shared signal (device_fingerprint, card / payment_method fingerprint, IP) tied
-  to an unusual number of records, usually further narrowed by a status
-  (disputed / chargeback / flagged / archived) or a date window. Identify that one
-  outlier group with a PRECISE filter (the specific flagged value(s) plus the status),
-  not a blanket GROUP BY that returns large legitimate groups - over-inclusion floods
-  false positives and tanks the set-exact grade as badly as missing members. Return
-  every record in that one ring, no more, no fewer; cite each member's exact `path`.
-  Never refuse a stated incident for lack of a doc. If the task says do not modify,
-  classify only - make no writes.
+  ones) with /bin/sql. The incident is ONE specific ring - find it by CORROBORATING
+  signals, not a single one: a shared device_fingerprint AND/OR card
+  (payment_method_fingerprint), tightened by anomalies like an observed location
+  (observed_lat/lon) far from the customer's home_lat/lon, a tight created_at window,
+  shared store, or a flagged/disputed/archived status. A single-signal blanket
+  GROUP BY returns large LEGITIMATE groups (families share a device, repeat buyers
+  share a card) - that floods false positives and scores ~0.
+- WHEN UNSURE ON FRAUD, PREFER PRECISION. If you cannot pin the full ring exactly,
+  mark only the high-confidence core that shares MULTIPLE corroborating signals. A
+  precise partial set is scored on overlap and earns real credit; a broad sweep that
+  marks legitimate payments scores near zero and is the worst outcome. Return that
+  set, cite each member's exact `path`, no more no fewer. If the task says do not
+  modify, classify only - make no writes.
 - NUMBERS COME FROM SQL, NOT YOUR HEAD. Counts, sums, totals, and availability
   must be a single `/bin/sql` aggregation (COUNT / SUM / GROUP BY), never mental
   arithmetic - bad numeric reasoning is the top accuracy killer. Search broadly
