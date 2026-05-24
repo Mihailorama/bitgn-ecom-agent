@@ -57,25 +57,43 @@ def _retry(fn, attempts: int = 5):
 
 
 def run_one(trial_id: str, task_filter: list[str]):
-    """Worker: start one trial, run the agent into its own log, score it."""
+    """Worker entry point. Wrapped so no worker exception can propagate through
+    fut.result() and abort the whole sweep - a failed worker becomes an error
+    row instead."""
+    try:
+        return _run_one(trial_id, task_filter)
+    except Exception as exc:  # never let one worker kill the pool
+        return (trial_id, None, None, f"worker error: {exc!r}"[:200], 0.0)
+
+
+def _run_one(trial_id: str, task_filter: list[str]):
+    """Start one trial, run the agent into its own log, score it."""
     client = HarnessServiceClientSync(BITGN_URL)
     try:
         trial = _retry(lambda: client.start_trial(StartTrialRequest(trial_id=trial_id)))
     except ConnectError as exc:
         return (trial_id, None, None, f"start_trial: {exc.code} {exc.message}", 0.0)
 
+    # End filtered-out trials immediately (task_id is only known after start) so a
+    # subset run does not leak dozens of open trials on the harness.
     if task_filter and trial.task_id not in task_filter:
+        try:
+            _retry(lambda: client.end_trial(EndTrialRequest(trial_id=trial.trial_id)))
+        except ConnectError:
+            pass
         return (trial.task_id, "skip", None, None, 0.0)
 
     log_path = os.path.join(LOG_DIR, f"{trial.task_id}.log")
     t0 = time.time()
+    agent_error = None
     with open(log_path, "w", encoding="utf-8") as fh, redirect_stdout(fh):
         print(f"TASK {trial.task_id} (model {MODEL_ID})")
         print(f"INSTRUCTION: {trial.instruction}\n{'-' * 80}")
         try:
             run_agent(MODEL_ID, trial.harness_url, trial.instruction)
-        except Exception as exc:  # keep the sweep going if one task throws
-            print(f"agent crashed: {exc!r}")
+        except Exception as exc:  # run_agent self-guards; reaching here means even
+            agent_error = f"agent crashed: {exc!r}"  # its fallback answer failed
+            print(agent_error)
     elapsed = time.time() - t0
 
     try:
@@ -83,6 +101,10 @@ def run_one(trial_id: str, task_filter: list[str]):
     except ConnectError as exc:
         return (trial.task_id, None, None, f"end_trial: {exc.code} {exc.message}", elapsed)
 
+    # Surface a genuinely blank trial (the agent never managed to answer) as an
+    # error, not as an ordinary 0.0 that hides among legitimately-wrong answers.
+    if agent_error:
+        return (trial.task_id, None, None, agent_error, elapsed)
     score = res.score if res.score_available else None
     return (trial.task_id, score, list(res.score_detail), None, elapsed)
 
