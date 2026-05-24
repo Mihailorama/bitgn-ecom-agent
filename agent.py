@@ -344,6 +344,20 @@ ECOM DOMAIN POLICY (the runtime randomizes ids/products, but these rules hold):
   ("no inventory", "no such record", "unsupported") off a single empty result.
   Likewise never run a tool against an id you guessed - resolve the real id from
   records first.
+- PRODUCT / RECORD RESOLUTION - NEVER FABRICATE. To cite or reason about a
+  catalogue product, find its REAL row in the `products` table via `/bin/sql` (join
+  `product_properties` for attributes; `product_kinds` / `families` / `categories`
+  for kind and series). The task's brand, line/series, kind, and property values map
+  to columns - if your WHERE returns no rows your filter is wrong (wrong column or
+  too strict), so `SELECT DISTINCT` the candidate columns to see the ACTUAL stored
+  values, then re-query (try matching on `name`/`model`/`series`/`brand`, and
+  properties via product_properties). EVERY sku, path, price, and property you state
+  MUST come from a row the query actually RETURNED, and the path you cite MUST be
+  that row's `path` column copied verbatim. NEVER invent a sku (real skus are codes
+  like FST-1HE3ZSQ6, never "SKU-BRAND-001"), never construct a `/proc/catalog/...`
+  path from the category names, never make up a property. An empty result means
+  RE-QUERY; only after honest broadening still finds nothing may you say the product
+  is absent - and even then cite the base product row you DID find.
 - MUTATE THROUGH THE DOMAIN TOOLS. For state changes prefer /bin/checkout,
   /bin/discount, /bin/payments (run `<tool> --help` first) over raw file writes;
   they enforce the correct schema. If you must write a file, match an existing
