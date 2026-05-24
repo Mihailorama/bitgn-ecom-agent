@@ -12,6 +12,7 @@ trace goes to its own log under SWEEP_LOG_DIR; the parent prints a score summary
 import multiprocessing as mp
 import os
 import sys
+import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from contextlib import redirect_stdout
 
@@ -41,11 +42,25 @@ PARALLEL = int(os.getenv("PARALLEL", "6"))
 LOG_DIR = os.getenv("SWEEP_LOG_DIR", "/tmp/sweep_logs")
 
 
+def _retry(fn, attempts: int = 5):
+    """Retry idempotent control-plane calls through transient TLS/network blips
+    (e.g. brief cert-rotation clock skew) with exponential backoff."""
+    delay = 1.0
+    for i in range(attempts):
+        try:
+            return fn()
+        except ConnectError:
+            if i == attempts - 1:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 8.0)
+
+
 def run_one(trial_id: str, task_filter: list[str]):
     """Worker: start one trial, run the agent into its own log, score it."""
     client = HarnessServiceClientSync(BITGN_URL)
     try:
-        trial = client.start_trial(StartTrialRequest(trial_id=trial_id))
+        trial = _retry(lambda: client.start_trial(StartTrialRequest(trial_id=trial_id)))
     except ConnectError as exc:
         return (trial_id, None, None, f"start_trial: {exc.code} {exc.message}")
 
@@ -62,7 +77,7 @@ def run_one(trial_id: str, task_filter: list[str]):
             print(f"agent crashed: {exc!r}")
 
     try:
-        res = client.end_trial(EndTrialRequest(trial_id=trial.trial_id))
+        res = _retry(lambda: client.end_trial(EndTrialRequest(trial_id=trial.trial_id)))
     except ConnectError as exc:
         return (trial.task_id, None, None, f"end_trial: {exc.code} {exc.message}")
 
@@ -75,8 +90,8 @@ def main() -> None:
     os.makedirs(LOG_DIR, exist_ok=True)
 
     client = HarnessServiceClientSync(BITGN_URL)
-    print("Connecting to BitGN:", client.status(StatusRequest()).status)
-    bench = client.get_benchmark(GetBenchmarkRequest(benchmark_id=BENCH_ID))
+    print("Connecting to BitGN:", _retry(lambda: client.status(StatusRequest())).status)
+    bench = _retry(lambda: client.get_benchmark(GetBenchmarkRequest(benchmark_id=BENCH_ID)))
     print(
         f"{EvalPolicy.Name(bench.policy)} {bench.benchmark_id}: {len(bench.tasks)} tasks "
         f"| model {MODEL_ID} | parallel {PARALLEL} | logs {LOG_DIR}"
