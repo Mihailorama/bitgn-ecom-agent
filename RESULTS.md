@@ -31,3 +31,4 @@ lookups, strong model for security/fraud/mutation.
 | 2026-05-24 16:49 | claude:sonnet | 60.4% | 26/44 | 1075s | 143s | 8 |
 | 2026-05-24 17:31 | openrouter/deepseek/deepseek-v4-flash | 58.1% | 24/44 | 469s | 62s | 8 |
 | 2026-05-24 18:01 | claude:sonnet | 61.7% | 26/44 | 1237s | 176s | 8 |
+| 2026-05-24 18:18 | claude:sonnet | 64.8% | 28/44 | 904s | 134s | 8 |
