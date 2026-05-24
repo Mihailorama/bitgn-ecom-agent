@@ -33,3 +33,5 @@ lookups, strong model for security/fraud/mutation.
 | 2026-05-24 18:01 | claude:sonnet | 61.7% | 26/44 | 1237s | 176s | 8 |
 | 2026-05-24 18:18 | claude:sonnet | 64.8% | 28/44 | 904s | 134s | 8 |
 | 2026-05-24 20:27 | codex:gpt-5.5 | 72.9% | 31/44 | 667s | 84s | 6 |
+| 2026-05-24 21:18 | claude:sonnet | 50.2% | 21/44 | 1320s | 157s | 8 |
+| 2026-05-24 21:55 | claude:sonnet | 48.0% | 20/44 | 1581s | 187s | 8 |

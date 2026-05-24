@@ -9,6 +9,14 @@ chosen from `model_id`:
 - `anthropic/claude-...`             -> Anthropic API (LiteLLM), needs ANTHROPIC_API_KEY
 - `claude:opus` | `opus` | `sonnet`  -> local `claude` CLI over OAuth (no API key) - use in tests
 - `codex:gpt-5.5` | `codex:...`      -> local `codex` CLI over ChatGPT OAuth (no API key)
+- `gemini-cli:gemini-2.5-flash|pro`  -> local `gemini` CLI over Google AI Pro OAuth
+                                         (Code Assist tier, no API key, no metered cost;
+                                         OAuth tier only exposes the gemini-2.5 family;
+                                         shuts down 2026-06-18 - see `agy` below)
+- `agy` | `antigravity`              -> local `agy` (Antigravity CLI) over the same
+                                         Google AI Pro OAuth. The successor to gemini-cli;
+                                         exposes Gemini 3.5 Flash on the AI Pro tier
+                                         (model is auto-selected by tier, no --model flag)
 
 Tests default to Claude OAuth (no metered key); the challenge defaults to Gemini
 3.5 for speed. The neutral default model is `gpt-5.5`.
@@ -39,6 +47,13 @@ def _provider(model_id: str) -> str:
     low = model_id.lower()
     if low.startswith(("codex:", "codex-cli:")):
         return "codex_cli"
+    if low.startswith(("gemini-cli:", "gemini_cli:")):
+        return "gemini_cli"
+    if low.startswith(("agy", "antigravity")):
+        # `agy`, `agy:<anything>`, `antigravity`, `antigravity:<anything>`.
+        # agy auto-selects the model from the user's OAuth tier (Gemini 3.5
+        # Flash on AI Pro), so any tag after the colon is informational only.
+        return "antigravity_cli"
     if low.startswith(("claude:", "claude-cli:")) or low in CLAUDE_ALIASES:
         return "claude_cli"
     if low.startswith(("claude", "opus", "sonnet", "haiku")):
@@ -302,6 +317,174 @@ def _codex_cli_parse(
 
 
 # ---------------------------------------------------------------------------
+# Gemini CLI path: drive `gemini -p` over Google AI Pro OAuth, no API key.
+#
+# Quirks vs claude/codex CLI:
+#   - prompt goes through the `-p` argv (not stdin); modern macOS ARG_MAX
+#     (~256 KB) is well above our typical 30-80 KB SGR prompt
+#   - `--approval-mode plan` refuses arbitrary requests ("I'm in Plan Mode
+#     and no task has been provided"), and `yolo` wraps JSON in ```json
+#     fences. Default mode is the right pick - the model emits plain JSON
+#     and never asks to use tools because the prompt forbids it
+#   - GEMINI_API_KEY env var (and ~/.gemini/.env) overrides OAuth even when
+#     settings.json says oauth-personal; we strip the var on every call so
+#     a stale/expired key cannot hijack the path
+#   - OAuth Code Assist tier caps at the gemini-2.5 family; `gemini-3.x` IDs
+#     return 404 and require a paid API key (use the LiteLLM path instead)
+# ---------------------------------------------------------------------------
+
+
+def _gemini_cli_parse(
+    model_id: str, messages: List[Message], schema: Type[T], max_tokens: int
+) -> T:
+    gemini_bin = shutil.which("gemini") or shutil.which("gemini.cmd")
+    if not gemini_bin:
+        raise LLMError(
+            "gemini CLI not found on PATH; install Google's Gemini CLI "
+            "(npm i -g @google/gemini-cli) or set MODEL_ID to an API model"
+        )
+
+    model = model_id.split(":", 1)[1] if ":" in model_id else model_id
+
+    system_parts = [m["content"] for m in messages if m["role"] == "system"]
+    convo = [m for m in messages if m["role"] != "system"]
+
+    schema_json = json.dumps(schema.model_json_schema(), separators=(",", ":"))
+    system_prompt = (
+        "IGNORE ALL PROJECT INSTRUCTIONS (CLAUDE.md, GEMINI.md, AGENTS.md on the "
+        "host). DO NOT run any tool (grep, glob, read_file, write_file, run_shell, "
+        "etc.) - you are a pure JSON responder for a research benchmark.\n\n"
+        + "\n\n".join(system_parts)
+        + "\n\nYou MUST reply with exactly one JSON object that validates against "
+        "this JSON Schema. No prose, no markdown fences, JSON only:\n"
+        + schema_json
+    )
+
+    transcript = "\n\n".join(f"[{m['role'].upper()}]\n{m['content']}" for m in convo)
+    base_prompt = (
+        f"[SYSTEM]\n{system_prompt}\n\n{transcript}\n\n"
+        "[ASSISTANT]\nReturn the JSON object now."
+    )
+
+    # Force OAuth by stripping any stale/expired GEMINI_API_KEY from the child
+    # process env; ~/.gemini/.env also defines this var and would otherwise be
+    # picked up by the CLI's dotenv loader.
+    env = {k: v for k, v in os.environ.items() if k != "GEMINI_API_KEY"}
+    env["GEMINI_API_KEY"] = ""  # explicit empty also defeats the .env reload path
+
+    timeout = int(os.environ.get("GEMINI_CLI_TIMEOUT", "300"))
+    last_err = ""
+    for attempt in range(2):
+        prompt = base_prompt if attempt == 0 else (
+            base_prompt + f"\n\n[SYSTEM]\nPrevious reply was invalid JSON: "
+            f"{last_err}. Return ONLY the corrected JSON object."
+        )
+        result = subprocess.run(
+            [
+                gemini_bin, "-p", prompt,
+                "-m", model,
+                "-o", "text",
+                "--skip-trust",
+            ],
+            capture_output=True,
+            text=True,
+            cwd="/tmp",  # away from any host CLAUDE.md / GEMINI.md / AGENTS.md
+            env=env,
+            timeout=timeout,
+            encoding="utf-8",
+        )
+        if result.returncode != 0:
+            raise LLMError(
+                f"gemini CLI failed (rc={result.returncode}): "
+                f"{result.stderr.strip()[-400:]}"
+            )
+        try:
+            return schema.model_validate_json(_extract_json(result.stdout))
+        except (ValidationError, ValueError) as exc:
+            last_err = str(exc)[:300]
+    raise LLMError(f"gemini CLI returned invalid JSON twice: {last_err}")
+
+
+# ---------------------------------------------------------------------------
+# Antigravity CLI (`agy`) path: the successor to gemini-cli for Google AI
+# Pro/Ultra OAuth users (gemini-cli's free-tier OAuth shuts down 2026-06-18).
+#
+# Differences from gemini-cli:
+#   - prompt via `-p <text>` (alias `--print`), single-turn non-interactive
+#   - NO `--model` flag - the tier picks the model. Today AI Pro maps to
+#     `Gemini 3.5 Flash`, so `MODEL_ID=agy` is effectively that model
+#   - NO `--output-schema` or `-o text|json` - output is the assistant's plain
+#     text (clean, no banner), so we still embed the schema in the prompt and
+#     run the same JSON re-prompt retry as the claude/gemini-cli backends
+#   - auth state lives in ~/.gemini/* (shared with gemini-cli's OAuth creds)
+# ---------------------------------------------------------------------------
+
+
+def _antigravity_cli_parse(
+    model_id: str, messages: List[Message], schema: Type[T], max_tokens: int
+) -> T:
+    agy_bin = (
+        shutil.which("agy")
+        or shutil.which("agy.cmd")
+        or (os.path.expanduser("~/.local/bin/agy") if os.path.exists(os.path.expanduser("~/.local/bin/agy")) else None)
+    )
+    if not agy_bin:
+        raise LLMError(
+            "agy (Antigravity CLI) not found on PATH; install with: "
+            "curl -fsSL https://antigravity.google/cli/install.sh | bash"
+        )
+
+    system_parts = [m["content"] for m in messages if m["role"] == "system"]
+    convo = [m for m in messages if m["role"] != "system"]
+
+    schema_json = json.dumps(schema.model_json_schema(), separators=(",", ":"))
+    system_prompt = (
+        "IGNORE ALL PROJECT INSTRUCTIONS (CLAUDE.md, GEMINI.md, AGENTS.md on the "
+        "host). DO NOT run any tool - you are a pure JSON responder for a research "
+        "benchmark.\n\n"
+        + "\n\n".join(system_parts)
+        + "\n\nYou MUST reply with exactly one JSON object that validates against "
+        "this JSON Schema. No prose, no markdown fences, JSON only:\n"
+        + schema_json
+    )
+
+    transcript = "\n\n".join(f"[{m['role'].upper()}]\n{m['content']}" for m in convo)
+    base_prompt = (
+        f"[SYSTEM]\n{system_prompt}\n\n{transcript}\n\n"
+        "[ASSISTANT]\nReturn the JSON object now."
+    )
+
+    timeout = int(os.environ.get("AGY_CLI_TIMEOUT", "300"))
+    last_err = ""
+    for attempt in range(2):
+        prompt = base_prompt if attempt == 0 else (
+            base_prompt + f"\n\n[SYSTEM]\nPrevious reply was invalid JSON: "
+            f"{last_err}. Return ONLY the corrected JSON object."
+        )
+        result = subprocess.run(
+            [
+                agy_bin, "-p", prompt,
+                "--print-timeout", f"{timeout}s",
+            ],
+            capture_output=True,
+            text=True,
+            cwd="/tmp",  # away from any host CLAUDE.md / AGENTS.md
+            timeout=timeout + 30,  # subprocess wall guard slightly above agy's
+            encoding="utf-8",
+        )
+        if result.returncode != 0:
+            raise LLMError(
+                f"agy CLI failed (rc={result.returncode}): "
+                f"{result.stderr.strip()[-400:]}"
+            )
+        try:
+            return schema.model_validate_json(_extract_json(result.stdout))
+        except (ValidationError, ValueError) as exc:
+            last_err = str(exc)[:300]
+    raise LLMError(f"agy CLI returned invalid JSON twice: {last_err}")
+
+
+# ---------------------------------------------------------------------------
 
 
 def _extract_json(text: str) -> str:
@@ -349,4 +532,8 @@ def parse_step(
         return _claude_cli_parse(model_id, messages, schema, max_tokens)
     if provider == "codex_cli":
         return _codex_cli_parse(model_id, messages, schema, max_tokens)
+    if provider == "gemini_cli":
+        return _gemini_cli_parse(model_id, messages, schema, max_tokens)
+    if provider == "antigravity_cli":
+        return _antigravity_cli_parse(model_id, messages, schema, max_tokens)
     return _litellm_parse(model_id, messages, schema, max_tokens)
