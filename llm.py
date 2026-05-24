@@ -50,6 +50,11 @@ def _provider(model_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+_TOOL_NAMES = (
+    "tree, find, search, list, read, write, delete, stat, exec, report_completion"
+)
+
+
 def _litellm_parse(
     model_id: str, messages: List[Message], schema: Type[T], max_tokens: int
 ) -> T:
@@ -57,15 +62,35 @@ def _litellm_parse(
 
     # LiteLLM maps response_format=PydanticModel to each provider's native
     # structured-output mechanism (OpenAI json_schema, Gemini responseSchema,
-    # Anthropic tool-use) and normalises param names like max_tokens.
-    resp = litellm.completion(
-        model=model_id,
-        messages=messages,
-        response_format=schema,
-        max_tokens=max_tokens,
-    )
-    content = resp.choices[0].message.content
-    return schema.model_validate_json(_extract_json(content))
+    # Anthropic tool-use) and normalises param names like max_tokens. Weaker
+    # models (e.g. Gemini Flash) do not strictly honour the discriminated-union
+    # const fields, so validate and re-prompt with the error until it conforms.
+    msgs = messages
+    last_err = ""
+    for attempt in range(3):
+        resp = litellm.completion(
+            model=model_id,
+            messages=msgs,
+            response_format=schema,
+            max_tokens=max_tokens,
+        )
+        content = resp.choices[0].message.content
+        try:
+            return schema.model_validate_json(_extract_json(content))
+        except (ValidationError, ValueError) as exc:
+            last_err = str(exc)[:600]
+            msgs = list(messages) + [
+                {"role": "assistant", "content": content or ""},
+                {
+                    "role": "user",
+                    "content": (
+                        f"That JSON did not match the required schema:\n{last_err}\n"
+                        "Return ONLY one corrected JSON object that validates. The "
+                        f"`function.tool` value MUST be exactly one of: {_TOOL_NAMES}."
+                    ),
+                },
+            ]
+    raise LLMError(f"{model_id} returned invalid JSON after retries: {last_err}")
 
 
 # ---------------------------------------------------------------------------
