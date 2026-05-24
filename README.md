@@ -38,14 +38,41 @@ context, prompt injection, and unsafe requests. The agent is built around that:
 - **Robust loop.** Errors are fed back to the model for recovery, a stall guard
   breaks repeated identical calls, and the step budget is configurable.
 
+## LLM providers
+
+The agent is provider-agnostic - one model string in `MODEL_ID` selects the
+backend (routing in `llm.py`). Structured output (the SGR schema) is enforced on
+every provider.
+
+| Context | `MODEL_ID` | Auth | Why |
+|---|---|---|---|
+| **Tests** | `claude:opus` (or `sonnet`) | local `claude` CLI over OAuth - no API key | drives the Claude Code subscription, free for dev iteration |
+| **Challenge** | `gemini/gemini-3.5-flash` (or `gemini/gemini-3.5-pro`) | `GEMINI_API_KEY` | very fast - matters when the leaderboard runs many trials |
+| Neutral default | `gpt-5.5` | `OPENAI_API_KEY` | strong general reasoning |
+| (also) | `anthropic/claude-...` | `ANTHROPIC_API_KEY` | Claude over the metered API |
+
+Bare Claude family names (`opus`, `sonnet`, `claude-opus-4-6`, `claude:opus`)
+route to the **OAuth CLI**; the `anthropic/` prefix routes to the metered API.
+
 ## Setup
 
-1. Export `BITGN_API_KEY` (get it at <https://bitgn.com/me>) - required for
-   official leaderboard runs.
-2. Export `OPENAI_API_KEY` (or point the OpenAI client at another provider via
-   `OPENAI_BASE_URL`).
+1. Export `BITGN_API_KEY` - see [Getting the BitGN API key](#getting-the-bitgn-api-key).
+2. Pick a provider and export its credential (see the table above). For the
+   default `gpt-5.5`, export `OPENAI_API_KEY`.
 3. `make sync`
-4. `make run`
+4. `make run`  (tests: `MODEL_ID=claude:opus make run`)
+
+## Getting the BitGN API key
+
+`BITGN_API_KEY` is required for official leaderboard runs (not for the
+`bitgn/sandbox` benchmark). Get it from your BitGN profile:
+
+1. Sign in at <https://bitgn.com/auth/login>.
+2. Open your profile / settings page at <https://bitgn.com/me>.
+3. Copy the API key and `export BITGN_API_KEY=...`.
+
+The key ties a run to your account so its score shows on
+[the ECOM leaderboard](https://bitgn.com/challenge/ecom).
 
 ## Commands
 
@@ -58,17 +85,21 @@ context, prompt injection, and unsafe requests. The agent is built around that:
 
 | Var | Default | Purpose |
 |---|---|---|
-| `BITGN_API_KEY` | _(empty)_ | required for official ECOM runs |
-| `OPENAI_API_KEY` | _(empty)_ | LLM provider key |
-| `MODEL_ID` | `gpt-5.4` | reasoning model; e.g. `gpt-4.1-2025-04-14` for a cheaper run |
+| `BITGN_API_KEY` | _(empty)_ | required for official ECOM runs (<https://bitgn.com/me>) |
+| `MODEL_ID` | `gpt-5.5` | provider/model (see table above) |
+| `OPENAI_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` | _(empty)_ | provider credential for the chosen `MODEL_ID` |
 | `BENCH_ID` / `BENCHMARK_ID` | `bitgn/ecom1-dev` | benchmark id |
 | `MAX_STEPS` | `40` | per-trial action budget |
+| `MAX_TOKENS` | `16384` | max completion tokens per LLM step |
+| `CLAUDE_CLI_TIMEOUT` | `300` | per-step timeout for the Claude OAuth CLI (seconds) |
 | `HINT` | _(empty)_ | extra system guidance (open benchmarks expose hints) |
 | `BITGN_HOST` / `BENCHMARK_HOST` | `https://api.bitgn.com` | control-plane URL |
 
 ## Layout
 
 - `agent.py` - SGR reasoning schema, tool surface, the per-trial run loop.
+- `llm.py` - provider routing + structured output (LiteLLM for API models, the
+  `claude` CLI for OAuth).
 - `main.py` - control-plane flow: start run, iterate trials, score, submit.
 - `proto/` - the relevant slice of the BitGN schema for reference (SDKs are
   pulled from the Buf registry, not generated locally).

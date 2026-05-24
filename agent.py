@@ -22,8 +22,9 @@ from bitgn.vm.ecom.ecom_pb2 import (
 )
 from connectrpc.errors import ConnectError
 from google.protobuf.json_format import MessageToDict
-from openai import OpenAI
 from pydantic import BaseModel, Field
+
+from llm import parse_step
 
 
 # ---------------------------------------------------------------------------
@@ -458,7 +459,6 @@ def _call_signature(fn: BaseModel) -> str:
 
 
 def run_agent(model: str, harness_url: str, task_text: str) -> None:
-    client = OpenAI()
     vm = EcomRuntimeClientSync(harness_url)
     log = [{"role": "system", "content": system_prompt}]
 
@@ -488,14 +488,8 @@ def run_agent(model: str, harness_url: str, task_text: str) -> None:
     for i in range(MAX_STEPS):
         step = f"step_{i + 1}"
         started = time.time()
-        resp = client.beta.chat.completions.parse(
-            model=model,
-            response_format=NextStep,
-            messages=log,
-            max_completion_tokens=16384,
-        )
+        job = parse_step(model, log, NextStep)
         elapsed_ms = int((time.time() - started) * 1000)
-        job = resp.choices[0].message.parsed
 
         sec = job.assessment.security
         sec_color = CLI_GREEN if sec == "safe" else CLI_RED
@@ -506,29 +500,10 @@ def run_agent(model: str, harness_url: str, task_text: str) -> None:
         if sec != "safe" and job.assessment.security_note:
             print(f"  {CLI_YELLOW}! {job.assessment.security_note}{CLI_CLR}")
 
-        # Preserve the reasoning chain in the transcript so the model keeps its
-        # state across steps instead of re-deriving it each call.
-        assistant_note = (
-            f"state: {job.current_state}\n"
-            f"observation: {job.assessment.observation}\n"
-            f"security: {sec} {job.assessment.security_note}".strip()
-        )
-        log.append(
-            {
-                "role": "assistant",
-                "content": assistant_note,
-                "tool_calls": [
-                    {
-                        "type": "function",
-                        "id": step,
-                        "function": {
-                            "name": job.function.__class__.__name__,
-                            "arguments": job.function.model_dump_json(),
-                        },
-                    }
-                ],
-            }
-        )
+        # Preserve the full structured decision in the transcript (portable
+        # across OpenAI / Gemini / Claude) so the model keeps its reasoning
+        # chain instead of re-deriving state each step.
+        log.append({"role": "assistant", "content": job.model_dump_json()})
 
         if isinstance(job.function, ReportTaskCompletion):
             try:
@@ -564,7 +539,7 @@ def run_agent(model: str, harness_url: str, task_text: str) -> None:
                 "answer and the matching outcome.]"
             )
 
-        log.append({"role": "tool", "content": txt, "tool_call_id": step})
+        log.append({"role": "user", "content": f"[result @ {step}]\n{txt}"})
     else:
         # Step budget exhausted without an explicit completion.
         print(f"{CLI_YELLOW}step budget ({MAX_STEPS}) exhausted without report{CLI_CLR}")

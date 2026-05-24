@@ -23,9 +23,10 @@ BITGN_URL = (
 )
 BITGN_API_KEY = os.getenv("BITGN_API_KEY") or ""
 BENCH_ID = os.getenv("BENCH_ID") or os.getenv("BENCHMARK_ID") or "bitgn/ecom1-dev"
-# Default to the strongest reasoning model; override with MODEL_ID for a cheaper
-# model or a different provider (the OpenAI client honours OPENAI_BASE_URL).
-MODEL_ID = os.getenv("MODEL_ID") or "gpt-5.4"
+# Neutral default. Override per context (provider routing lives in llm.py):
+#   tests      -> MODEL_ID=claude:opus            (Claude OAuth via claude CLI, no key)
+#   challenge  -> MODEL_ID=gemini/gemini-3.5-flash (fast) or gemini/gemini-3.5-pro
+MODEL_ID = os.getenv("MODEL_ID") or "gpt-5.5"
 
 CLI_RED = "\x1B[31m"
 CLI_GREEN = "\x1B[32m"
