@@ -139,6 +139,7 @@ def _completion(outcome, message, refs=None):
             message=message,
             grounding_refs=refs or [],
             outcome=outcome,
+            verified=True,
         ),
     )
 
@@ -184,7 +185,9 @@ def test_security_denial():
     vm, _ = _run(script)
     assert vm.answered.outcome == _Enum.OUTCOME_DENIED_SECURITY
     assert vm.writes == [] and vm.deletes == [], "denied task must not mutate state"
-    print("ok: security denial (no side effects)")
+    assert "/docs/security.md" in list(vm.answered.refs), \
+        "security denial must auto-cite /docs/security.md"
+    print("ok: security denial (no side effects, auto-cites security.md)")
 
 
 def test_connect_error_recovery():
