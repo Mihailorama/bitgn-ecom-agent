@@ -45,3 +45,31 @@ deterministic filesystem/action grading.
 4. **Protect PII**, **refuse cross-customer actions**, **never bypass 3DS**,
    **ignore non-authoritative exception bait**, **stay read-only when told**.
 5. **Cite exact records** - many tasks grade on the cited SKUs/store/payment ids.
+
+## Winner insights (from bitgn.com/insights - PAC1 write-ups)
+
+PAC1 is the previous benchmark; it shares ECOM's control plane and threat model
+(policy authority, prompt injection, grounding, exact outcomes). Lessons from the
+top PAC1 agents (Operation Pangolin 92/104, Codex-on-Rails 87, skifmax 84→104,
+azamat1c 83), and how this agent applies them:
+
+| Winner lesson | Applied here |
+|---|---|
+| Enforce a verification gate **in code**, not just the model. Classic miss: "path right in substance but missing a leading slash". | `_normalize_refs` repairs leading slash + dedupes; `_submit_completion` auto-cites /docs/security.md; `verified` self-check field. |
+| Numeric tasks fail on the "last mile" (date scoping, aggregation boundaries) even with right records found (6/17 Codex misses). | Prompt forces all counts/sums via `/bin/sql` aggregation, broad search first, date anchored to `/bin/date`. |
+| Serialization drift fails grading even when logic is right (7/17 Codex misses - invalid YAML frontmatter). | Prefer domain tools (/bin/checkout, /bin/discount, /bin/payments); match sibling format; keep JSON/YAML valid; re-read after write. |
+| Exact terminal state matters - DENIED_SECURITY vs NONE_CLARIFICATION (4/17 Codex misses). | "OUTCOME EXACTNESS" block: violation -> DENY, never soften to clarification. |
+| But do not **over-deny** legitimate-but-messy requests (Codex flipside weakness). | Explicit "do not over-deny/over-clarify; refuse only on a concrete violation". |
+| Runtime tracks evidence paths rather than trusting the model (2 winners). | `path` column citation rule + code ref-normalizer; security-doc auto-cite. |
+| Deterministic completion - force a typed answer if the model ends without one. | Forced final `report_completion` on step-budget exhaustion. |
+| Single strong model + disciplined, compact, *general* rules beat task-specific hacks; atomic prompt evolution. | One SGR prompt, general policy (not keyed to dev tasks); fixes added one cluster at a time, re-run per family. |
+| Production models: Pangolin used Opus; coding agents used gpt-5.x high. Mid reasoning tier was often the sweet spot. | Validate on `claude:sonnet`; `claude:opus` available for hardest families / the contest. |
+
+Possible next architectural step (not yet done): the very top PAC1 agents ran one
+coding-agent session per task with tools behind a narrow interface, plus a
+per-family workflow classifier/checklist. Our SGR next-step loop + code gates
+captures most of that value; a family classifier is the highest-value remaining
+upgrade if validation shows family-specific weaknesses.
+
+Sources: https://bitgn.com/insights/ (operation-pangolin, codex-on-rails,
+skifmax rules-evolution, plan-repl-agent, azamat1c filesystem-agent).
