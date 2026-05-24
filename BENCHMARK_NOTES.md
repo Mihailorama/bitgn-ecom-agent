@@ -73,3 +73,53 @@ upgrade if validation shows family-specific weaknesses.
 
 Sources: https://bitgn.com/insights/ (operation-pangolin, codex-on-rails,
 skifmax rules-evolution, plan-repl-agent, azamat1c filesystem-agent).
+
+## Status & next steps (handoff 2026-05-24)
+
+Full winning plan: `~/.claude/plans/graceful-nibbling-backus.md` (local to the web
+session - the summary below is the durable copy). Score-vs-speed log: `RESULTS.md`.
+
+**Where we are.** sonnet went 50% -> ~66% via code-enforced gates, all general (no
+dev-task tuning). Latest sonnet full sweeps: v4 66.1%, v7 64.8% (within ~6pp run-to-run
+noise). Committed and live in `agent.py`:
+- EvidenceLedger + `_harvest`: tracks every confirmed `/proc` path (SQL `path` col,
+  read/stat/find/search/list).
+- Fabrication gate (`_grounding_correction`): re-prompts if an OK answer cites any
+  `/proc` path never retrieved. The single biggest win (+10pp).
+- Format enforcement (`_required_format`/`_enforce_format_inplace`): coerces
+  `<COUNT:%d>`/`[QTY:%d]`/`count : %d`; never synthesizes yes/no polarity.
+- Variant-disambiguation prompt rule (product_properties must select the variant).
+- Outcome decision-order (security-primary) + 3DS recovery requiring verified
+  ownership+eligibility (closed a v6 security miss; over-refusals t21/t24/t41/t43 fixed).
+- Cite-the-subject gate (`_subject_paths`): NEW, OK-only, nudges citing a named
+  basket/pay/return already in the ledger. **Pending sweep validation.**
+
+**Model decision: DEFERRED.** Pick once the agent is frozen. Measured today: Gemini 3.5
+Flash 73.8%@28s ($10/run, on the OLD prompt - rerun on the hardened agent before
+deciding) · opus 66.8% · sonnet ~66% (free OAuth, rate-limit-fragile at parallel 8) ·
+deepseek-v4-flash 58%@62s (cheap paid, safe-ish, over-refuses) · free open models
+unusable (gpt-oss invalid JSON; nemotron leaked PII; deepseek `:free` 402; tencent/hy3
+no JSON mode). Routing/escalation deliberately NOT built (low value for a one-shot run).
+
+**TODO (in priority order):**
+1. Validate the cite-the-subject gate: 1-2 `MODEL_ID=claude:sonnet PARALLEL=8 uv run
+   python run_parallel.py` sweeps; keep only if no regression vs v7 (targets t25/t28/t31).
+2. Track B2 - fraud recall (t38-40 stuck ~0.5): add a seed-then-expand rule to the FRAUD
+   prompt bullet (core ring on shared device+card+window, expand ONE hop only to payments
+   sharing >=2 ring signals, stop). Gate the expansion tightly - over-expansion caused
+   20+ false-positive blowups.
+3. Track B1 - multi-product variant resolution (t13-16): strengthen the resolution rule -
+   one query returning all candidates WITH properties; if >1 row matches after the stated
+   property filter, the filter is wrong, re-query, never pick arbitrarily. Most model-bound
+   sink; a stronger contest model is the larger lever.
+4. Track A - denial cite-the-subject (prompt): on a DENY/UNSUPPORTED about the actor's OWN
+   basket (t25) or a store/employee checked for authority (t28), cite that record; NEVER
+   cite another customer's record (t34 cross-customer must stay uncited).
+5. Track C - numeric self-check (optional/light): re-prompt an int answer that has no SQL
+   aggregation behind it (targets head-arithmetic count errors).
+6. Freeze, then ONE Gemini 3.5 Flash confirmation run ($10).
+
+**Validate every change** with >=2 sonnet sweeps (or a >=5pp move); watch category
+pass-rates, not just the headline; grep summaries for `expected outcome
+OUTCOME_DENIED_SECURITY, got OUTCOME_OK` (a security miss is the worst error). Offline
+gate before any sweep: `uv run python -m py_compile agent.py && uv run python smoke_test.py`.

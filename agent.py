@@ -902,8 +902,24 @@ def _enforce_format_inplace(instruction: str, fn: "ReportTaskCompletion") -> "st
     )
 
 
+_SUBJECT_DIR = {"basket": "baskets", "pay": "payments", "ret": "returns"}
+
+
+def _subject_paths(task_text: str) -> "list[str]":
+    # Record paths for entity ids the task explicitly names (basket_NNN / pay_NNN /
+    # ret_NNN). The grader wants every record the answer TOUCHED cited, and these
+    # ids map deterministically to their /proc path. Used only to nudge an OK answer
+    # to cite a subject it already confirmed - never to fabricate.
+    out: "list[str]" = []
+    for pre, ident in re.findall(r"\b(basket|pay|ret)_([A-Za-z0-9]+)\b", task_text or ""):
+        path = f"/proc/{_SUBJECT_DIR[pre]}/{pre}_{ident}.json"
+        if path not in out:
+            out.append(path)
+    return out
+
+
 def _grounding_correction(
-    ledger: EvidenceLedger, fn: "ReportTaskCompletion"
+    ledger: EvidenceLedger, task_text: str, fn: "ReportTaskCompletion"
 ) -> "str | None":
     # Cite-from-ledger. The dominant weak-model failure is FABRICATION: the model
     # rushes to completion after one query and invents /proc record paths (and the
@@ -915,6 +931,17 @@ def _grounding_correction(
     if fn.outcome != "OUTCOME_OK":
         return None
     refs = _normalize_refs(fn.grounding_refs)
+    # Cite-the-subject: a basket/payment/return the task named and the agent already
+    # CONFIRMED (in the ledger) but did not cite. Safe for OK only - a completed
+    # action implies the record is the actor's own, never a cross-customer leak.
+    missing_subjects = [p for p in _subject_paths(task_text) if p in ledger and p not in refs]
+    if missing_subjects:
+        return (
+            "GROUNDING CHECK. Your answer acted on these records but does not cite "
+            "them: " + ", ".join(missing_subjects) + ". Cite EVERY record your answer "
+            "touched (the basket/payment/return named in the task), copied verbatim. "
+            "Re-issue report_completion keeping the same message and outcome."
+        )
     unconfirmed = [r for r in refs if r.startswith("/proc") and r not in ledger]
     if unconfirmed:
         return (
@@ -948,7 +975,7 @@ def _completion_gate(
     # never starved by format; format coercion still runs in place (no re-prompt)
     # and only adds a note when the value is ambiguous. Combining both into a
     # single re-prompt lets one correction round fix both without burning budget.
-    grounding = _grounding_correction(ledger, fn)
+    grounding = _grounding_correction(ledger, task_text, fn)
     fmt = _enforce_format_inplace(task_text, fn)
     parts = [p for p in (grounding, fmt) if p]
     return "\n\n".join(parts) if parts else None

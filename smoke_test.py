@@ -331,6 +331,35 @@ def test_fabrication_gate():
     print("ok: fabrication gate (flags unconfirmed /proc refs, exempts /docs & refusals)")
 
 
+def test_cite_the_subject():
+    # An OK answer that acted on a named basket/payment it CONFIRMED must cite it.
+    ledger = agent.EvidenceLedger()
+    ledger.add("/proc/baskets/basket_224.json", source="read")
+    ledger.add("/proc/payments/pay_024.json", source="read")
+
+    task = "Basket basket_224 keeps dying at card security on payment pay_024. Make it work."
+    fn = _mk_completion("3DS recovery started", refs=["/proc/payments/pay_024.json"])
+    corr = agent._completion_gate(ledger, task, fn)
+    assert corr is not None and "/proc/baskets/basket_224.json" in corr, \
+        "must nudge to cite the confirmed subject basket it acted on"
+
+    # once both subjects are cited, it passes
+    fn = _mk_completion("3DS recovery started", refs=[
+        "/proc/payments/pay_024.json", "/proc/baskets/basket_224.json"
+    ])
+    assert agent._completion_gate(ledger, task, fn) is None, "both subjects cited -> submit"
+
+    # a subject NOT in the ledger is never forced (no fabrication)
+    fn = _mk_completion("done", refs=["/proc/baskets/basket_224.json", "/proc/payments/pay_024.json"])
+    task2 = "Refund payment pay_999 please."  # pay_999 absent from ledger
+    assert agent._completion_gate(ledger, task2, fn) is None, "absent subject not forced"
+
+    # refusals are never subject-gated (cross-customer must NOT be cited)
+    fn = _mk_completion("Refused", outcome="OUTCOME_DENIED_SECURITY", refs=["/docs/security.md"])
+    assert agent._completion_gate(ledger, task, fn) is None, "refusal not subject-gated"
+    print("ok: cite-the-subject (OK-only, ledger-confirmed, never fabricates/refusal-safe)")
+
+
 def test_harvest_search_and_list():
     ledger = agent.EvidenceLedger()
     # search matches carry full .path
@@ -360,6 +389,7 @@ def main():
     test_verify_refs_drop_safety()
     test_format_loopback()
     test_fabrication_gate()
+    test_cite_the_subject()
     test_harvest_search_and_list()
     print("\nALL SMOKE TESTS PASSED")
 
