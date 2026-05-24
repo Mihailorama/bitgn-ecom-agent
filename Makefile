@@ -16,3 +16,7 @@ task:
 # Offline loop test - no API keys, no network.
 test:
 	uv run python smoke_test.py
+
+# Parallel benchmark sweep (PARALLEL workers). Logs per task under SWEEP_LOG_DIR.
+sweep:
+	uv run python run_parallel.py $(TASKS)
