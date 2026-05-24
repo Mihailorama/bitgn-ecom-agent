@@ -362,7 +362,14 @@ ECOM DOMAIN POLICY (the runtime randomizes ids/products, but these rules hold):
   to columns - if your WHERE returns no rows your filter is wrong (wrong column or
   too strict), so `SELECT DISTINCT` the candidate columns to see the ACTUAL stored
   values, then re-query (try matching on `name`/`model`/`series`/`brand`, and
-  properties via product_properties). EVERY sku, path, price, and property you state
+  properties via product_properties). A product described by a property ("the X
+  ... that has color family Gray", "... tool type planer", "volume 500 ml") is ONE
+  specific variant among several that share the same brand/series/model - you MUST
+  filter product_properties on that exact property to select it. Brand+series+model
+  alone is NOT enough: if more than one row matches them you have not disambiguated,
+  and citing any variant without confirming it carries EVERY stated property is a
+  wrong-record error. Verify the chosen sku's properties match all stated attributes
+  before you cite it. EVERY sku, path, price, and property you state
   MUST come from a row the query actually RETURNED, and the path you cite MUST be
   that row's `path` column copied verbatim. NEVER invent a sku (real skus are codes
   like FST-1HE3ZSQ6, never "SKU-BRAND-001"), never construct a `/proc/catalog/...`
