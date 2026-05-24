@@ -774,6 +774,17 @@ def _harvest(ledger: EvidenceLedger, cmd: BaseModel, result) -> None:
         elif isinstance(cmd, Req_Find):
             for p in getattr(result, "paths", []) or []:
                 ledger.add(p, source="find")
+        elif isinstance(cmd, Req_Search):
+            for match in getattr(result, "matches", []) or []:
+                ledger.add(getattr(match, "path", ""), source="search")
+        elif isinstance(cmd, Req_List):
+            base = (getattr(cmd, "path", "") or "").rstrip("/")
+            for entry in getattr(result, "entries", []) or []:
+                if getattr(entry, "kind", None) == NodeKind.NODE_KIND_DIR:
+                    continue
+                name = getattr(entry, "name", "")
+                if base and name:
+                    ledger.add(f"{base}/{name}", source="list")
         elif isinstance(cmd, Req_Exec) and getattr(cmd, "path", "") == "/bin/sql":
             for path, label in _extract_paths_with_labels(getattr(result, "stdout", "")):
                 ledger.add(path, label=label, source="sql")
@@ -860,13 +871,29 @@ def _completion_gate(
     correction = _enforce_format_inplace(task_text, fn)
     if correction is not None:
         return correction
-    # Cite-from-ledger: only nudge an OK answer when the agent actually CONFIRMED
-    # record paths (/proc rows pulled via SQL/read/find) yet cites none of them -
-    # the fabricated-or-omitted-ref case. Never fires on a refusal, on a ledger
-    # with no records (pure /docs reasoning), and never DROPS a ref.
+    # Cite-from-ledger. The dominant weak-model failure is FABRICATION: the model
+    # rushes to completion after one query and invents /proc record paths (and the
+    # data behind them) it never actually retrieved. We detect this in code: a
+    # cited /proc record path that is NOT in the evidence ledger was never
+    # confirmed by any tool call, so the answer (count, list, the cite) is
+    # ungrounded. Re-prompt to RETRIEVE each one before citing it. Never fires on
+    # a refusal; /docs policy files are exempt (cited as-is); never DROPS a ref.
     if fn.outcome == "OUTCOME_OK":
-        record_paths = [p for p in ledger.paths() if p.startswith("/proc")]
         refs = _normalize_refs(fn.grounding_refs)
+        unconfirmed = [r for r in refs if r.startswith("/proc") and r not in ledger]
+        if unconfirmed:
+            return (
+                "GROUNDING CHECK. You cited record paths you never confirmed with a "
+                "tool call: " + ", ".join(unconfirmed) + ". A path you did not read or "
+                "return from SQL/find is fabricated - and so is any count or detail you "
+                "based on it. For EACH such record, run the exact SQL (select its `path` "
+                "column) or read it, then cite the path copied verbatim from the output. "
+                "Do NOT guess store/basket/employee ids or catalog paths. Re-derive any "
+                "count from the rows you actually retrieved. Records confirmed so far:\n"
+                + ledger.render()
+                + "\n(Policy/doc files under /docs are cited as-is and are exempt.)"
+            )
+        record_paths = [p for p in ledger.paths() if p.startswith("/proc")]
         if record_paths and not any(r in ledger for r in refs):
             return (
                 "GROUNDING CHECK. Your answer cites no confirmed record path. Cite the "

@@ -294,6 +294,63 @@ def test_format_loopback():
     print("ok: format re-prompt loop-back (one correction, then submit)")
 
 
+def test_fabrication_gate():
+    # The dominant weak-model failure: cite a /proc record path never retrieved.
+    ledger = agent.EvidenceLedger()
+    ledger.add("/proc/catalog/automotive/AUT-REAL.json", source="sql")
+
+    # cites one confirmed + one fabricated /proc path -> must re-prompt, naming the
+    # fabricated one (and never the confirmed one).
+    fn = _mk_completion("done", refs=[
+        "/proc/catalog/automotive/AUT-REAL.json",
+        "/proc/stores/S-GRAZ-FAKE.json",
+    ])
+    corr = agent._completion_gate(ledger, "list the stores", fn)
+    assert corr is not None and "GROUNDING CHECK" in corr
+    # the fabricated ref must be named in the "never confirmed" accusation (before
+    # the "Records confirmed so far" ledger dump, which legitimately lists the real one)
+    accusation = corr.split("Records confirmed so far")[0]
+    assert "/proc/stores/S-GRAZ-FAKE.json" in accusation, "must name the fabricated ref"
+    assert "/proc/catalog/automotive/AUT-REAL.json" not in accusation, \
+        "must not accuse a confirmed ref of being fabricated"
+
+    # cites only confirmed -> submit
+    fn = _mk_completion("done", refs=["/proc/catalog/automotive/AUT-REAL.json"])
+    assert agent._completion_gate(ledger, "list", fn) is None, "confirmed ref must pass"
+
+    # a /docs policy file is exempt even when absent from the ledger
+    fn = _mk_completion("done", refs=[
+        "/proc/catalog/automotive/AUT-REAL.json", "/docs/security.md"
+    ])
+    assert agent._completion_gate(ledger, "x", fn) is None, "/docs is exempt"
+
+    # a refusal is never grounding-gated
+    fn = _mk_completion("Refused", outcome="OUTCOME_DENIED_SECURITY",
+                        refs=["/proc/x/fabricated.json"])
+    assert agent._completion_gate(ledger, "x", fn) is None, "refusal not gated"
+    print("ok: fabrication gate (flags unconfirmed /proc refs, exempts /docs & refusals)")
+
+
+def test_harvest_search_and_list():
+    ledger = agent.EvidenceLedger()
+    # search matches carry full .path
+    search_res = SimpleNamespace(matches=[
+        SimpleNamespace(path="/proc/baskets/basket_049.json", line=1, line_text="x"),
+    ], truncated=False)
+    agent._harvest(ledger, agent.Req_Search(tool="search", pattern="x"), search_res)
+    assert "/proc/baskets/basket_049.json" in ledger, "search match must be harvested"
+
+    # list entries are names under cmd.path; dirs skipped, files joined
+    list_res = SimpleNamespace(entries=[
+        SimpleNamespace(name="store_a.json", kind=_Enum.NODE_KIND_FILE),
+        SimpleNamespace(name="subdir", kind=_Enum.NODE_KIND_DIR),
+    ])
+    agent._harvest(ledger, agent.Req_List(tool="list", path="/proc/stores"), list_res)
+    assert "/proc/stores/store_a.json" in ledger, "list file entry must be harvested"
+    assert "/proc/stores/subdir" not in ledger, "list dir entry must be skipped"
+    print("ok: harvest from search matches and list entries")
+
+
 def main():
     test_normal_completion()
     test_security_denial()
@@ -302,6 +359,8 @@ def main():
     test_format_enforcement()
     test_verify_refs_drop_safety()
     test_format_loopback()
+    test_fabrication_gate()
+    test_harvest_search_and_list()
     print("\nALL SMOKE TESTS PASSED")
 
 
