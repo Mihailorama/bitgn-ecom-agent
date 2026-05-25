@@ -129,6 +129,9 @@ cheap regression canary.
 4. If score regresses, inspect `/tmp/sweep_logs/t16.log`, `/tmp/sweep_logs/t38.log`,
    `/tmp/sweep_logs/t39.log`, `/tmp/sweep_logs/t40.log` first (historically unstable clusters).
 5. Keep prompt/gate edits atomic: one rule per commit and one validating sweep per commit.
+6. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
+   during aggressive parallel probes (`PARALLEL>=7`, and occasionally startup bursts).
+   Treat `PARALLEL=6` as the practical stability cap for leaderboard attempts.
 
 **Validate every change** with >=2 sonnet sweeps (or a >=5pp move); watch category
 pass-rates, not just the headline; grep summaries for `expected outcome

@@ -1984,11 +1984,14 @@ def _try_refund(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskComplet
     if "refund" not in task_text.lower():
         return None
     pay_ids = _task_ids(task_text, "pay")
+    ret_ids = _task_ids(task_text, "ret")
     amount = None
     m_amt = re.search(r"EUR\s*([0-9]+(?:\.[0-9]{2})?)", task_text, re.I)
     if m_amt:
         amount = int(round(float(m_amt.group(1)) * 100))
     where = []
+    if ret_ids:
+        where.append("r.id IN (" + ",".join(_sql_quote(x) for x in ret_ids) + ")")
     if pay_ids:
         where.append("p.id IN (" + ",".join(_sql_quote(x) for x in pay_ids) + ")")
     if amount is not None:
@@ -2008,7 +2011,7 @@ ORDER BY r.created_at DESC;
     row = rows[0]
     refs = ["/docs/security.md", "/docs/returns.md", row["return_path"], row["payment_path"], row["basket_path"]]
     user, roles = _id_context(vm)
-    wants_approval = re.search(r"\bapprove\b", task_text or "", re.I) is not None
+    wants_approval = re.search(r"\bapprov(?:e|al|ing)?\b", task_text or "", re.I) is not None
     wants_finalization = (
         re.search(r"\b(finali[sz]e|refunded|complete refund)\b", task_text or "", re.I) is not None
         or ("refund" in (task_text or "").lower() and not wants_approval)
