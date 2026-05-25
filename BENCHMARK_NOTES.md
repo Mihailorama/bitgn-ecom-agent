@@ -79,6 +79,12 @@ skifmax rules-evolution, plan-repl-agent, azamat1c filesystem-agent).
 Full winning plan: `~/.claude/plans/graceful-nibbling-backus.md` (local to the web
 session - the summary below is the durable copy). Score-vs-speed log: `RESULTS.md`.
 
+**Benchmark snapshot (saved baseline).**
+- Snapshot commit: `ae75479` (`main`)
+- Snapshot tag: `bench-ecom1-dev-codex53-44of44-20260525`
+- Full-sweep result: `codex:gpt-5.3-codex` -> `100.0% (44/44)` in `270s`
+- Reproduce command: `PARALLEL=6 MODEL_ID=codex:gpt-5.3-codex make sweep`
+
 **Where we are.** `codex:gpt-5.3-codex` reached **100.0% (44/44)** on a full
 `bitgn/ecom1-dev` sweep (`PARALLEL=6`) at 2026-05-25 13:40 UTC. On the public
 leaderboard this run is visible as **rank #10** with **23:13** run time
