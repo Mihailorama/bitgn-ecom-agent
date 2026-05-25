@@ -1263,6 +1263,8 @@ def _submit_completion(
     if re.search(r"\b(check\s*it\s*out|checkout|ready to buy)\b", task_text or "", re.I):
         if "/docs/security.md" not in fn.grounding_refs:
             fn.grounding_refs.append("/docs/security.md")
+        if "/docs/checkout.md" not in fn.grounding_refs:
+            fn.grounding_refs.append("/docs/checkout.md")
 
     # The Answer RPC is the single most important call, and the connectrpc client
     # funnels every transport failure (timeout, 5xx, TLS blip) into ConnectError.
@@ -1794,8 +1796,6 @@ def _try_inventory_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTa
     products = []
     for spec in specs:
         product = _select_product(vm, spec, strict_props=True)
-        if product is None:
-            product = _select_product(vm, spec, strict_props=False)
         if product is None:
             return None
         products.append(product)

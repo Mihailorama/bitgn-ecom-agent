@@ -74,7 +74,7 @@ upgrade if validation shows family-specific weaknesses.
 Sources: https://bitgn.com/insights/ (operation-pangolin, codex-on-rails,
 skifmax rules-evolution, plan-repl-agent, azamat1c filesystem-agent).
 
-## Status & next steps (updated 2026-05-25)
+## Status & next steps (updated 2026-05-25, evening state)
 
 Full winning plan: `~/.claude/plans/graceful-nibbling-backus.md` (local to the web
 session - the summary below is the durable copy). Score-vs-speed log: `RESULTS.md`.
@@ -84,12 +84,16 @@ session - the summary below is the durable copy). Score-vs-speed log: `RESULTS.m
 - Snapshot tag: `bench-ecom1-dev-codex53-44of44-20260525`
 - Full-sweep result: `codex:gpt-5.3-codex` -> `100.0% (44/44)` in `270s`
 - Reproduce command: `PARALLEL=6 MODEL_ID=codex:gpt-5.3-codex make sweep`
+- Latest preserved sweep logs snapshot: `artifacts/sweeps/2026-05-25-parallel6-state/`
 
-**Where we are.** `codex:gpt-5.3-codex` reached **100.0% (44/44)** on a full
-`bitgn/ecom1-dev` sweep (`PARALLEL=6`) at 2026-05-25 13:40 UTC. On the public
-leaderboard this run is visible as **rank #10** with **23:13** run time
-(snapshot from 2026-05-25). The score log is in `RESULTS.md`. Current state in
-`agent.py` includes:
+**Where we are.** We still have a stable historical `44/44` baseline, but the
+latest stability runs are mostly `43/44`:
+- `2026-05-25 18:45`: `97.7%` (`43/44`) at `174s` wall (`avg/task 21s`) —
+  miss on `t36` missing `/docs/checkout.md` reference.
+- `2026-05-25 18:51`: `97.7%` (`43/44`) at `224s` wall (`avg/task 26s`) —
+  miss on `t16` required product reference.
+
+Current state in `agent.py` includes:
 - EvidenceLedger + `_harvest`: tracks every confirmed `/proc` path (SQL `path` col,
   read/stat/find/search/list).
 - Fabrication gate (`_grounding_correction`): re-prompts if an OK answer cites any
@@ -99,15 +103,18 @@ leaderboard this run is visible as **rank #10** with **23:13** run time
 - Format enforcement (`_required_format`/`_enforce_format_inplace`): coerces
   `<COUNT:%d>`/`[QTY:%d]`/`count : %d`; never synthesizes yes/no polarity.
 - Variant-disambiguation + deterministic inventory resolution for multi-item
-  counts (strict-then-relaxed selection + property-weighted fallback ranking).
+  counts (currently strict product selection; relaxed fallback removed to reduce
+  wrong-SKU grounding on `t13-t16`).
 - Outcome decision-order (security-primary) + 3DS recovery requiring verified
   ownership+eligibility (closed a v6 security miss; over-refusals t21/t24/t41/t43 fixed).
 - Cite-the-subject gate (`_subject_paths`): OK-only, nudges citing a named
   basket/pay/return already in the ledger.
+- Checkout-task auto-cite: `_submit_completion` now auto-adds `/docs/checkout.md`
+  alongside `/docs/security.md` for checkout-style instructions.
 
-**Model decision.** For this benchmark state, keep `codex:gpt-5.3-codex` as the
-primary run model (fast and currently perfect). Keep `claude:sonnet` as the
-cheap regression canary.
+**Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
+`claude:sonnet` as the cheap regression canary. 10-minute platform-time target
+is still unmet at 100% quality.
 
 **Parallel envelope (2026-05-25).**
 - `PARALLEL=6`: best quality envelope; observed `100.0% (44/44)` at `202s` wall.
@@ -118,17 +125,18 @@ cheap regression canary.
   cheap stress/smoke runs.
 
 **TODO (in priority order):**
-1. Before submission batches, run two stability sweeps with the submission
-   profile (`PARALLEL=6`, `MODEL_ID=codex:gpt-5.3-codex`):
-   `PARALLEL=6 MODEL_ID=codex:gpt-5.3-codex make sweep` twice and confirm no
-   security misses.
-2. Keep one sonnet regression canary per rule change:
-   `PARALLEL=8 MODEL_ID=claude:sonnet uv run python run_parallel.py`.
-3. Add targeted tests for deterministic inventory resolver edge-cases
-   (multi-property + unit variants) in `smoke_test.py` to protect `t13-t16`.
-4. If score regresses, inspect `/tmp/sweep_logs/t16.log`, `/tmp/sweep_logs/t38.log`,
-   `/tmp/sweep_logs/t39.log`, `/tmp/sweep_logs/t40.log` first (historically unstable clusters).
-5. Keep prompt/gate edits atomic: one rule per commit and one validating sweep per commit.
+1. Refactor step 1 (no behavior expansion): isolate helper layer for
+   `resolve_product_variant()` and `build_grounding_refs()` so variant logic and
+   refs logic are testable independently.
+2. Add focused regression tests for `t13-t16` deterministic inventory grounding:
+   - required product ref present even when answer is numeric
+   - no invalid refs survive `_verify_refs`.
+3. Re-run two full sweeps on submission profile after every inventory resolver
+   change: `PARALLEL=6 MODEL_ID=codex:gpt-5.3-codex make sweep` x2.
+4. Continue mandatory security check:
+   `rg "expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK" /tmp/sweep_logs/*.log`.
+5. Evaluate alternative backend only after `44/44` stability is restored on
+   codex baseline (then compare `avg/task` and implied platform `TIME`).
 6. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
    during aggressive parallel probes (`PARALLEL>=7`, and occasionally startup bursts).
    Treat `PARALLEL=6` as the practical stability cap for leaderboard attempts.
