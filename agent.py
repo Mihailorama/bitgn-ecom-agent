@@ -1100,21 +1100,6 @@ def _discount_denial_correction(
     )
 
 
-def _inventory_clarification_correction(task_text: str, fn: "ReportTaskCompletion") -> "str | None":
-    if fn.outcome not in {"OUTCOME_NONE_CLARIFICATION", "OUTCOME_NONE_UNSUPPORTED"}:
-        return None
-    if not _looks_inventory_count_task(task_text):
-        return None
-    return (
-        "COMPLETION CHECK. This is an inventory/count task with enough record data "
-        "to resolve directly. Do not ask a clarifying question. Resolve the target "
-        "store deterministically from the phrase in the instruction (prefer exact "
-        "city+name token overlap), then re-run the count SQL and return "
-        "report_completion with OUTCOME_OK, exact required answer format, and "
-        "grounding refs for the resolved store plus matched product records."
-    )
-
-
 _SUBJECT_DIR = {"basket": "baskets", "pay": "payments", "ret": "returns"}
 
 
@@ -1219,9 +1204,8 @@ def _completion_gate(
     grounding = _grounding_correction(ledger, task_text, fn)
     fmt = _enforce_format_inplace(task_text, fn)
     discount_denial = None if grounding else _discount_denial_correction(ledger, task_text, fn)
-    inventory_clarify = None if grounding or discount_denial else _inventory_clarification_correction(task_text, fn)
-    claim = None if grounding or discount_denial or inventory_clarify else _claim_check_correction(vm, ledger, task_text, fn)
-    parts = [p for p in (grounding, fmt, discount_denial, inventory_clarify, claim) if p]
+    claim = None if grounding or discount_denial else _claim_check_correction(vm, ledger, task_text, fn)
+    parts = [p for p in (grounding, fmt, discount_denial, claim) if p]
     return "\n\n".join(parts) if parts else None
 
 
@@ -1250,128 +1234,19 @@ def _verify_refs(vm: EcomRuntimeClientSync, refs: List[str]) -> List[str]:
         if not ref.startswith("/"):
             out.append(ref)
             continue
-        if ref.startswith("/proc/catalog/"):
-            try:
-                # Grader is stricter for catalog refs; require an actual read.
-                vm.read(ReadRequest(path=ref))
-                out.append(ref)
-            except ConnectError as exc:
-                print(f"{CLI_YELLOW}dropping invalid catalog ref {ref} ({exc.code}){CLI_CLR}")
-            continue
         try:
             vm.stat(StatRequest(path=ref))
             out.append(ref)
         except ConnectError as exc:
-            err = f"{getattr(exc, 'code', '')} {getattr(exc, 'message', '')}".lower()
-            if ("not_found" in err) or ("not found" in err) or ("no such file" in err):
+            if "not_found" in str(exc.code).lower():
                 print(f"{CLI_YELLOW}dropping invalid grounding ref {ref} ({exc.code}){CLI_CLR}")
             else:
                 out.append(ref)
     return out
 
 
-def _canonicalize_catalog_ref(vm: EcomRuntimeClientSync, ref: str) -> str:
-    m = re.match(r"^/proc/catalog/.*/([A-Z0-9-]+)\.json$", ref or "")
-    if not m:
-        return ref
-    sku = m.group(1)
-    try:
-        found = dispatch(vm, Req_Find(tool="find", root="/", name=f"{sku}.json", kind="files", limit=50))
-    except Exception:
-        found = None
-    paths = [
-        p
-        for p in (getattr(found, "paths", []) or [])
-        if p.startswith("/proc/catalog/") and p.endswith(f"/{sku}.json")
-    ]
-    if paths:
-        fam_paths = [p for p in paths if "/fam_" in p]
-        return sorted(fam_paths or paths, key=lambda p: (-p.count("/"), p))[0]
-    rows = _csv_dicts(_exec_sql_stdout(vm, f"SELECT path FROM products WHERE sku={_sql_quote(sku)} LIMIT 1;"))
-    if rows and rows[0].get("path"):
-        return rows[0]["path"]
-    return ref
-
-
-def _sku_from_catalog_ref(ref: str) -> "str | None":
-    m = re.match(r"^/proc/catalog/.*/([A-Z0-9-]+)\.json$", ref or "")
-    return m.group(1) if m else None
-
-
-def _ledger_catalog_path_for_sku(ledger: "EvidenceLedger | None", sku: str) -> "str | None":
-    if ledger is None or not sku:
-        return None
-    suffix = f"/{sku}.json"
-    for path in ledger.paths():
-        if path.startswith("/proc/catalog/") and path.endswith(suffix):
-            return path
-    return None
-
-
-def _inventory_allowed_skus(vm: EcomRuntimeClientSync, task_text: str) -> "set[str] | None":
-    m = re.search(
-        r"How many of these products have at least (\d+) items available in (.+?) today:\s*(.+?)\? Answer",
-        task_text or "",
-        re.I | re.S,
-    )
-    if not m:
-        return None
-    specs = _extract_product_specs(m.group(3))
-    if not specs:
-        return None
-    allowed: "set[str]" = set()
-    for spec in specs:
-        full = _strict_full_matches(vm, spec)
-        if len(full) != 1:
-            return None
-        sku = full[0].get("sku", "")
-        if not sku:
-            return None
-        allowed.add(sku)
-    return allowed if allowed else None
-
-
-def _inventory_resolved_refs(vm: EcomRuntimeClientSync, task_text: str) -> "list[str] | None":
-    m = re.search(
-        r"How many of these products have at least (\d+) items available in (.+?) today:\s*(.+?)\? Answer",
-        task_text or "",
-        re.I | re.S,
-    )
-    if not m:
-        return None
-    store = _find_store(vm, m.group(2))
-    specs = _extract_product_specs(m.group(3))
-    if not store or not specs:
-        return None
-    products = []
-    for spec in specs:
-        full = _strict_full_matches(vm, spec)
-        if len(full) != 1:
-            return None
-        products.append(full[0])
-    uniq = []
-    seen = set()
-    for p in products:
-        sku = p.get("sku", "")
-        if not sku or sku in seen:
-            continue
-        seen.add(sku)
-        uniq.append(p)
-    if not uniq:
-        return None
-    return [store["path"]] + [p["path"] for p in uniq if p.get("path")]
-
-
-def _count_token_task(task_text: str) -> bool:
-    return re.search(
-        r'Answer in exactly format\s*"(?:<COUNT:%d>|count\s*:\s*%d|%d)"',
-        task_text or "",
-        re.I,
-    ) is not None
-
-
 def _submit_completion(
-    vm: EcomRuntimeClientSync, fn: "ReportTaskCompletion", task_text: str = "", ledger: "EvidenceLedger | None" = None
+    vm: EcomRuntimeClientSync, fn: "ReportTaskCompletion", task_text: str = ""
 ) -> None:
     # Final coercion-only format pass (no re-prompt): on the budget-exhausted and
     # fallback paths the gate did not run, so apply a safe in-place format fix
@@ -1382,45 +1257,12 @@ def _submit_completion(
     # runtime says do not exist, THEN ensure a security refusal cites the security
     # policy - so a model ref like "docs/security.md" is recognised after
     # normalization and not double-added.
-    refs = _normalize_refs(fn.grounding_refs)
-    if fn.outcome == "OUTCOME_OK":
-        refs = [_canonicalize_catalog_ref(vm, r) for r in refs]
-        rebound_refs = []
-        for r in refs:
-            sku = _sku_from_catalog_ref(r) if r.startswith("/proc/catalog/") else None
-            rebound_refs.append(_ledger_catalog_path_for_sku(ledger, sku) or r)
-        refs = rebound_refs
-        if _looks_inventory_count_task(task_text):
-            if re.search(r"\[qty:\s*%d\s*\]", task_text or "", re.I):
-                resolved_refs = _inventory_resolved_refs(vm, task_text)
-                if resolved_refs:
-                    refs = [
-                        r
-                        for r in refs
-                        if not r.startswith("/proc/catalog/") and not r.startswith("/proc/stores/")
-                    ] + resolved_refs
-            allowed_skus = _inventory_allowed_skus(vm, task_text)
-            if allowed_skus is not None:
-                refs = [
-                    r
-                    for r in refs
-                    if not r.startswith("/proc/catalog/")
-                    or (_sku_from_catalog_ref(r) in allowed_skus)
-                ]
-            if _count_token_task(task_text) and not re.search(r"\[qty:\s*%d\s*\]", task_text or "", re.I):
-                refs = [r for r in refs if not r.startswith("/proc/catalog/")]
-    fn.grounding_refs[:] = _verify_refs(vm, refs)
-    if fn.outcome == "OUTCOME_OK":
-        addendum = _catalogue_count_addendum_ref(vm, task_text)
-        if addendum and addendum not in fn.grounding_refs:
-            fn.grounding_refs.append(addendum)
+    fn.grounding_refs[:] = _verify_refs(vm, _normalize_refs(fn.grounding_refs))
     if fn.outcome == "OUTCOME_DENIED_SECURITY" and "/docs/security.md" not in fn.grounding_refs:
         fn.grounding_refs.append("/docs/security.md")
     if re.search(r"\b(check\s*it\s*out|checkout|ready to buy)\b", task_text or "", re.I):
         if "/docs/security.md" not in fn.grounding_refs:
             fn.grounding_refs.append("/docs/security.md")
-        if "/docs/checkout.md" not in fn.grounding_refs:
-            fn.grounding_refs.append("/docs/checkout.md")
 
     # The Answer RPC is the single most important call, and the connectrpc client
     # funnels every transport failure (timeout, 5xx, TLS blip) into ConnectError.
@@ -1737,34 +1579,6 @@ def _select_product(vm: EcomRuntimeClientSync, spec: dict, strict_props: bool = 
     )
 
 
-def _strict_full_matches(vm: EcomRuntimeClientSync, spec: dict) -> "list[dict]":
-    candidates = _load_product_candidates(vm, spec)
-    if not candidates:
-        return []
-    hints = _line_model_hints(spec)
-    if hints:
-        hinted = []
-        for p in candidates:
-            hay = " ".join([p.get("series", ""), p.get("model", ""), p.get("name", "")]).lower()
-            if all(h in hay for h in hints):
-                hinted.append(p)
-        if hinted:
-            candidates = hinted
-    line_filtered = [p for p in candidates if _line_score(p, spec) >= max(1, len(_norm_word(spec.get("line", "")).split()) - 2)]
-    pool = line_filtered or candidates
-    full = [
-        _canonical_product_path(vm, p)
-        for p in pool
-        if all(_prop_matches(p, keys, value) for keys, value in spec.get("props", []))
-    ]
-    uniq = {}
-    for p in full:
-        sku = p.get("sku", "")
-        if sku and sku not in uniq:
-            uniq[sku] = p
-    return list(uniq.values())
-
-
 def _all_stores(vm: EcomRuntimeClientSync) -> "list[dict[str, str]]":
     return _csv_dicts(_exec_sql_stdout(vm, "SELECT id,path,name,city,is_open FROM stores ORDER BY id;"))
 
@@ -1868,37 +1682,6 @@ def _doc_text(vm: EcomRuntimeClientSync, path: str) -> str:
         return ""
 
 
-def _catalogue_count_addendum_ref(vm: EcomRuntimeClientSync, task_text: str) -> "str | None":
-    m = re.search(
-        r"(?:For the catalogue count report,\s*)?how many (?:catalogue )?products are (.+?)\? Answer",
-        task_text or "",
-        re.I,
-    )
-    if not m:
-        return None
-    kind = _norm_word(m.group(1))
-    if not kind:
-        return None
-    best = None
-    best_score = -1
-    best_date = ""
-    for path in _candidate_doc_paths(vm):
-        if "catalogue" not in path and "reporting" not in path:
-            continue
-        body = _doc_text(vm, path)
-        hay = _norm_word(path + " " + body)
-        if kind not in hay:
-            continue
-        score = len(set(kind.split()) & set(hay.split()))
-        date_match = re.search(r"(\d{4}-\d{2}-\d{2})", path)
-        doc_date = date_match.group(1) if date_match else ""
-        if score > best_score or (score == best_score and doc_date > best_date):
-            best_score = score
-            best_date = doc_date
-            best = path
-    return best
-
-
 def _discount_delegation_doc(
     vm: EcomRuntimeClientSync, user: str, basket_id: str, store_id: str
 ) -> "str | None":
@@ -1923,8 +1706,6 @@ def _discount_delegation_doc(
 
 
 def _try_catalog_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
-    if re.search(r"\[qty:\s*%d\s*\]", task_text or "", re.I):
-        return None
     m = re.search(
         r"(?:For the catalogue count report,\s*)?how many (?:catalogue )?products are (.+?)\? Answer",
         task_text,
@@ -1986,10 +1767,9 @@ def _try_product_check(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTask
     specs = _extract_product_specs(task_text)
     if len(specs) != 1:
         return None
-    full = _strict_full_matches(vm, specs[0])
-    if len(full) != 1:
+    product = _select_product(vm, specs[0])
+    if not product:
         return None
-    product = full[0]
     all_match = all(_prop_matches(product, keys, value) for keys, value in specs[0].get("props", []))
     msg = "<YES>" if all_match else f"<NO> SKU checked: {product['sku']}"
     return ReportTaskCompletion(
@@ -2003,8 +1783,6 @@ def _try_product_check(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTask
 
 
 def _try_inventory_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
-    if re.search(r"\[qty:\s*%d\s*\]", task_text or "", re.I):
-        return None
     m = re.search(r"How many of these products have at least (\d+) items available in (.+?) today:\s*(.+?)\? Answer", task_text, re.I | re.S)
     if not m:
         return None
@@ -2015,10 +1793,12 @@ def _try_inventory_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTa
         return None
     products = []
     for spec in specs:
-        full = _strict_full_matches(vm, spec)
-        if len(full) != 1:
+        product = _select_product(vm, spec, strict_props=True)
+        if product is None:
+            product = _select_product(vm, spec, strict_props=False)
+        if product is None:
             return None
-        products.append(full[0])
+        products.append(product)
     uniq_products = []
     seen_skus = set()
     for p in products:
@@ -2040,7 +1820,7 @@ WHERE store_id={_sql_quote(store['id'])}
     avail_by_sku = {r.get("sku", ""): int(r.get("available_today") or 0) for r in rows}
     available = [p for p in uniq_products if avail_by_sku.get(p["sku"], 0) >= threshold]
     n = len(available)
-    refs = [store["path"]] + [p["path"] for p in uniq_products]
+    refs = [store["path"]] + [p["path"] for p in available]
     return ReportTaskCompletion(
         tool="report_completion",
         completed_steps_laconic=["deterministic store inventory count via SQL"],
@@ -2555,7 +2335,7 @@ GROUP BY b.id,b.path,b.store_id,b.status,b.discount_percent,s.path;
 def _try_deterministic_completion(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
     for solver in (
         _try_catalog_count,
-        _try_product_check,
+        _try_inventory_count,
         _try_3ds,
         _try_refund,
         _try_discount,
@@ -2605,7 +2385,7 @@ def _drive(vm: EcomRuntimeClientSync, model: str, task_text: str) -> None:
 
     deterministic = _try_deterministic_completion(vm, task_text)
     if deterministic is not None:
-        _submit_completion(vm, deterministic, task_text, ledger)
+        _submit_completion(vm, deterministic, task_text)
         return
 
     log.append({"role": "user", "content": task_text})
@@ -2644,7 +2424,7 @@ def _drive(vm: EcomRuntimeClientSync, model: str, task_text: str) -> None:
                 print(f"{CLI_YELLOW}correction {corrections_used}/{MAX_CORRECTIONS}: re-prompting{CLI_CLR}")
                 log.append({"role": "user", "content": correction})
                 continue
-            _submit_completion(vm, job.function, task_text, ledger)
+            _submit_completion(vm, job.function, task_text)
             return
 
         try:
@@ -2688,7 +2468,7 @@ def _drive(vm: EcomRuntimeClientSync, model: str, task_text: str) -> None:
     fn = final.function
     if not isinstance(fn, ReportTaskCompletion):
         fn = _fallback_completion("step budget exhausted; no completion produced")
-    _submit_completion(vm, fn, task_text, ledger)
+    _submit_completion(vm, fn, task_text)
 
 
 def run_agent(model: str, harness_url: str, task_text: str) -> None:
@@ -2703,4 +2483,4 @@ def run_agent(model: str, harness_url: str, task_text: str) -> None:
         _drive(vm, model, task_text)
     except Exception as exc:
         print(f"{CLI_RED}agent crashed before answering: {exc!r} - submitting fallback{CLI_CLR}")
-        _submit_completion(vm, _fallback_completion(f"agent error: {type(exc).__name__}"), "", ledger)
+        _submit_completion(vm, _fallback_completion(f"agent error: {type(exc).__name__}"))

@@ -93,7 +93,22 @@ latest stability runs are mostly `43/44`:
 - `2026-05-25 18:51`: `97.7%` (`43/44`) at `224s` wall (`avg/task 26s`) —
   miss on `t16` required product reference.
 
-**Latest class-split checkpoint (2026-05-25, late cycle).**
+**Rollback/stability checkpoint (2026-05-25, late cycle).**
+- Algorithm code was restored to the last known 44/44 code point, commit
+  `66a7ccb` (`Handle ret_* refund approvals...`). This preserves the refund
+  fix that produced the later `44/44` run and removes the broad class-split
+  experiments that regressed inventory tasks.
+- Restored-baseline validation sweeps:
+  - `2026-05-25 21:06`: `97.7%` (`43/44`) at `194s`, miss `t16`.
+  - `2026-05-25 21:17`: `97.7%` (`43/44`) at `218s`, miss `t16`.
+- Security grep was clean: no `expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK`.
+- Preserved evidence:
+  - `artifacts/sweeps/2026-05-25-classsplit-state/`
+  - `artifacts/sweeps/2026-05-25-rejected-canonical-allrefs-targeted/`
+  - `artifacts/sweeps/2026-05-25-baseline-plus-rejected-inventory-allrefs/`
+  - `artifacts/sweeps/2026-05-25-baseline-66a7ccb-validation/`
+
+**Class-split checkpoint (2026-05-25, late cycle).**
 - Full sweep reached `95.45%` (`42/44`) at `319s` wall, with only:
   - `t09`: wrong numeric count in a `<COUNT:%d>` catalogue-count task.
   - `t14`: inventory grounding ref instability (invalid/missing product ref).
@@ -135,22 +150,26 @@ is still unmet at 100% quality.
   cheap stress/smoke runs.
 
 **TODO (in priority order):**
-1. Close `t14` inventory ref instability by hardening store resolution +
-   per-spec variant resolution for `[QTY]/count/%d` inventory prompts; keep this
-   logic isolated from other families.
-2. Refactor step 1 (no behavior expansion): isolate helper layer for
+1. Do not continue broad class-split refactors from `167c1f3` directly. They
+   captured useful evidence but reduced the headline score. Start from restored
+   `66a7ccb` algorithm state.
+2. Close the restored-baseline `t16` inventory grounding miss with a narrow
+   resolver: keep deterministic inventory count behavior, but derive the exact
+   required product refs from the matched SKU set without blindly citing every
+   product (the all-refs experiment regressed `t13-t16`).
+3. Refactor step 1 (no behavior expansion): isolate helper layer for
    `resolve_product_variant()` and `build_grounding_refs()` so variant logic and
    refs logic are testable independently.
-3. Add focused regression tests for `t13-t16` deterministic inventory grounding:
+4. Add focused regression tests for `t13-t16` deterministic inventory grounding:
    - required product ref present even when answer is numeric
    - no invalid refs survive `_verify_refs`.
-4. Re-run two full sweeps on submission profile after every inventory resolver
+5. Re-run two full sweeps on submission profile after every inventory resolver
    change: `PARALLEL=6 MODEL_ID=codex:gpt-5.3-codex make sweep` x2.
-5. Continue mandatory security check:
+6. Continue mandatory security check:
    `rg "expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK" /tmp/sweep_logs/*.log`.
-6. Evaluate alternative backend only after `44/44` stability is restored on
+7. Evaluate alternative backend only after `44/44` stability is restored on
    codex baseline (then compare `avg/task` and implied platform `TIME`).
-7. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
+8. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
    during aggressive parallel probes (`PARALLEL>=7`, and occasionally startup bursts).
    Treat `PARALLEL=6` as the practical stability cap for leaderboard attempts.
 

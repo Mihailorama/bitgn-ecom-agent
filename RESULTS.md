@@ -88,3 +88,7 @@ lookups, strong model for security/fraud/mutation.
 | 2026-05-25 19:51 | codex:gpt-5.3-codex | 90.9% | 40/44 | 282s | 31s | 6 |
 | 2026-05-25 20:17 | codex:gpt-5.3-codex | 88.6% | 39/44 | 401s | 36s | 6 |
 | 2026-05-25 20:41 | codex:gpt-5.3-codex | 95.5% | 42/44 | 319s | 41s | 6 |
+| 2026-05-25 21:06 | codex:gpt-5.3-codex | 97.7% | 43/44 | 194s | 23s | 6 |
+| 2026-05-25 21:12 | codex:gpt-5.3-codex | 88.6% | 39/44 | 285s | 28s | 6 |
+| 2026-05-25 21:16 | codex:gpt-5.3-codex | 97.7% | 43/44 | 232s | 25s | 6 |
+| 2026-05-25 21:17 | codex:gpt-5.3-codex | 97.7% | 43/44 | 218s | 23s | 6 |

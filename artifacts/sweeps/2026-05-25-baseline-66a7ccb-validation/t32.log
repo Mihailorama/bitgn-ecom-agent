@@ -1,0 +1,356 @@
+TASK t32 (model codex:gpt-5.3-codex)
+INSTRUCTION: A support note claims we stock the Nut Bolt and Washer from Simpson Strong-Tie in the Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer line that has fastener type bolt, diameter 4 mm, and length 12 mm and has built-in GPS tracking. Check the actual catalogue item, cite the exact product record, and if the base product exists but that extra capability is absent, answer with <NO> and include the checked SKU.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query products + product_properties for brand/series/model/kind and stated properties (fastener type, diameter, length, GPS capability). (15052 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind,\n       pp.key, COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) AS value\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'Simpson Strong-Tie'\n  AND (p.series = 'Outdoor CSA 2V6-S2J' OR p.model = 'Outdoor CSA 2V6-S2J' OR p.name LIKE '%Outdoor CSA 2V6-S2J%')\n  AND pk.name = 'Nut Bolt and Washer'\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind,
+       pp.key, COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) AS value
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'Simpson Strong-Tie'
+  AND (p.series = 'Outdoor CSA 2V6-S2J' OR p.model = 'Outdoor CSA 2V6-S2J' OR p.name LIKE '%Outdoor CSA 2V6-S2J%')
+  AND pk.name = 'Nut Bolt and Washer'
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,kind,key,value
+FST-14S9JHQ4,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-14S9JHQ4.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 4mm 20mm 25pc,Nut Bolt and Washer,diameter_mm,4
+FST-14S9JHQ4,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-14S9JHQ4.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 4mm 20mm 25pc,Nut Bolt and Washer,fastener_type,bolt
+FST-14S9JHQ4,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-14S9JHQ4.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 4mm 20mm 25pc,Nut Bolt and Washer,length_mm,20
+FST-14S9JHQ4,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-14S9JHQ4.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 4mm 20mm 25pc,Nut Bolt and Washer,material,steel
+FST-14S9JHQ4,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-14S9JHQ4.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 4mm 20mm 25pc,Nut Bolt and Washer,pack_count,25
+FST-15GWCZ04,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-15GWCZ04.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 6mm 50mm 500pc,Nut Bolt and Washer,diameter_mm,6
+FST-15GWCZ04,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-15GWCZ04.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 6mm 50mm 500pc,Nut Bolt and Washer,fastener_type,bolt
+FST-15GWCZ04,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-15GWCZ04.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 6mm 50mm 500pc,Nut Bolt and Washer,length_mm,50
+FST-15GWCZ04,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-15GWCZ04.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 6mm 50mm 500pc,Nut Bolt and Washer,material,steel
+FST-15GWCZ04,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-15GWCZ04.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 6mm 50mm 500pc,Nut Bolt and Washer,pack_count,500
+FST-1G0QFS23,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1G0QFS23.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 5mm 50mm 200pc,Nut Bolt and Washer,diameter_mm,5
+FST-1G0QFS23,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1G0QFS23.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 5mm 50mm 200pc,Nut Bolt and Washer,fastener_type,bolt
+FST-1G0QFS23,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1G0QFS23.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 5mm 50mm 200pc,Nut Bolt and Washer,length_mm,50
+FST-1G0QFS23,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1G0QFS23.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 5mm 50mm 200pc,Nut Bolt and Washer,material,steel
+FST-1G0QFS23,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1G0QFS23.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 5mm 50mm 200pc,Nut Bolt and Washer,pack_count,200
+FST-1H3NNLOD,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1H3NNLOD.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 6mm 40mm 50pc,Nut Bolt and Washer,diameter_mm,6
+FST-1H3NNLOD,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1H3NNLOD.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 6mm 40mm 50pc,Nut Bolt and Washer,fastener_type,bolt
+FST-1H3NNLOD,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1H3NNLOD.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 6mm 40mm 50pc,Nut Bolt and Washer,length_mm,40
+FST-1H3NNLOD,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1H3NNLOD.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 6mm 40mm 50pc,Nut Bolt and Washer,material,steel
+FST-1H3NNLOD,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1H3NNLOD.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 6mm 40mm 50pc,Nut Bolt and Washer,pack_count,50
+FST-1JN8M38K,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1JN8M38K.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer threaded rod 8mm 50mm 100pc,Nut Bolt and Washer,diameter_mm,8
+FST-1JN8M38K,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1JN8M38K.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer threaded rod 8mm 50mm 100pc,Nut Bolt and Washer,fastener_type,threaded rod
+FST-1JN8M38K,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1JN8M38K.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer threaded rod 8mm 50mm 100pc,Nut Bolt and Washer,length_mm,50
+FST-1JN8M38K,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1JN8M38K.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer threaded rod 8mm 50mm 100pc,Nut Bolt and Washer,material,steel
+FST-1JN8M38K,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1JN8M38K.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer threaded rod 8mm 50mm 100pc,Nut Bolt and Washer,pack_count,100
+FST-1P9LD442,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1P9LD442.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 8mm 20mm 10pc,Nut Bolt and Washer,diameter_mm,8
+FST-1P9LD442,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1P9LD442.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 8mm 20mm 10pc,Nut Bolt and Washer,fastener_type,bolt
+FST-1P9LD442,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1P9LD442.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 8mm 20mm 10pc,Nut Bolt and Washer,length_mm,20
+FST-1P9LD442,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1P9LD442.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 8mm 20mm 10pc,Nut Bolt and Washer,material,steel
+FST-1P9LD442,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-1P9LD442.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 8mm 20mm 10pc,Nut Bolt and Washer,pack_count,10
+FST-2FN5G1PM,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-2FN5G1PM.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer washer 8mm 12mm 25pc,Nut Bolt and Washer,diameter_mm,8
+FST-2FN5G1PM,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-2FN5G1PM.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer washer 8mm 12mm 25pc,Nut Bolt and Washer,fastener_type,washer
+FST-2FN5G1PM,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-2FN5G1PM.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer washer 8mm 12mm 25pc,Nut Bolt and Washer,length_mm,12
+FST-2FN5G1PM,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-2FN5G1PM.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer washer 8mm 12mm 25pc,Nut Bolt and Washer,material,steel
+FST-2FN5G1PM,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-2FN5G1PM.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer washer 8mm 12mm 25pc,Nut Bolt and Washer,pack_count,25
+FST-2VC9UGA7,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-2VC9UGA7.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 40mm 25pc,Nut Bolt and Washer,diameter_mm,12
+FST-2VC9UGA7,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-2VC9UGA7.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 40mm 25pc,Nut Bolt and Washer,fastener_type,bolt
+FST-2VC9UGA7,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-2VC9UGA7.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 40mm 25pc,Nut Bolt and Washer,length_mm,40
+FST-2VC9UGA7,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-2VC9UGA7.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 40mm 25pc,Nut Bolt and Washer,material,steel
+FST-2VC9UGA7,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-2VC9UGA7.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 40mm 25pc,Nut Bolt and Washer,pack_count,25
+FST-33L56DKC,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-33L56DKC.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer threaded rod 6mm 30mm 25pc,Nut Bolt and Washer,diameter_mm,6
+FST-33L56DKC,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-33L56DKC.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer threaded rod 6mm 30mm 25pc,Nut Bolt and Washer,fastener_type,threaded rod
+FST-33L56DKC,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-33L56DKC.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer threaded rod 6mm 30mm 25pc,Nut Bolt and Washer,length_mm,30
+FST-33L56DKC,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-33L56DKC.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer threaded rod 6mm 30mm 25pc,Nut Bolt and Washer,material,steel
+FST-33L56DKC,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-33L56DKC.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer threaded rod 6mm 30mm 25pc,Nut Bolt and Washer,pack_count,25
+FST-35YC4Z8D,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-35YC4Z8D.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 6mm 30mm 100pc,Nut Bolt and Washer,diameter_mm,6
+FST-35YC4Z8D,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-35YC4Z8D.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 6mm 30mm 100pc,Nut Bolt and Washer,fastener_type,bolt
+FST-35YC4Z8D,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-35YC4Z8D.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 6mm 30mm 100pc,Nut Bolt and Washer,length_mm,30
+FST-35YC4Z8D,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-35YC4Z8D.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 6mm 30mm 100pc,Nut Bolt and Washer,material,steel
+FST-35YC4Z8D,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-35YC4Z8D.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 6mm 30mm 100pc,Nut Bolt and Washer,pack_count,100
+FST-3LMQYXGE,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-3LMQYXGE.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 40mm 200pc,Nut Bolt and Washer,diameter_mm,12
+FST-3LMQYXGE,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-3LMQYXGE.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 40mm 200pc,Nut Bolt and Washer,fastener_type,bolt
+FST-3LMQYXGE,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-3LMQYXGE.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 40mm 200pc,Nut Bolt and Washer,length_mm,40
+FST-3LMQYXGE,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-3LMQYXGE.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 40mm 200pc,Nut Bolt and Washer,material,steel
+FST-3LMQYXGE,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-3LMQYXGE.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 40mm 200pc,Nut Bolt and Washer,pack_count,200
+FST-3QI6GDDT,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-3QI6GDDT.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 50mm 200pc,Nut Bolt and Washer,diameter_mm,12
+FST-3QI6GDDT,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-3QI6GDDT.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 50mm 200pc,Nut Bolt and Washer,fastener_type,bolt
+FST-3QI6GDDT,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-3QI6GDDT.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 50mm 200pc,Nut Bolt and Washer,length_mm,50
+FST-3QI6GDDT,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-3QI6GDDT.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 50mm 200pc,Nut Bolt and Washer,material,steel
+FST-3QI6GDDT,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-3QI6GDDT.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 50mm 200pc,Nut Bolt and Washer,pack_count,200
+FST-AMJQNF5N,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-AMJQNF5N.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 5mm 12mm 100pc,Nut Bolt and Washer,diameter_mm,5
+FST-AMJQNF5N,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-AMJQNF5N.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 5mm 12mm 100pc,Nut Bolt and Washer,fastener_type,bolt
+FST-AMJQNF5N,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-AMJQNF5N.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 5mm 12mm 100pc,Nut Bolt and Washer,length_mm,12
+FST-AMJQNF5N,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-AMJQNF5N.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 5mm 12mm 100pc,Nut Bolt and Washer,material,steel
+FST-AMJQNF5N,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-AMJQNF5N.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 5mm 12mm 100pc,Nut Bolt and Washer,pack_count,100
+FST-GOAS9R2S,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-GOAS9R2S.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer machine screw 8mm 30mm 500pc,Nut Bolt and Washer,diameter_mm,8
+FST-GOAS9R2S,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-GOAS9R2S.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer machine screw 8mm 30mm 500pc,Nut Bolt and Washer,fastener_type,machine screw
+FST-GOAS9R2S,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-GOAS9R2S.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer machine screw 8mm 30mm 500pc,Nut Bolt and Washer,length_mm,30
+FST-GOAS9R2S,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-GOAS9R2S.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer machine screw 8mm 30mm 500pc,Nut Bolt and Washer,material,steel
+FST-GOAS9R2S,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-GOAS9R2S.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer machine screw 8mm 30mm 500pc,Nut Bolt and Washer,pack_count,500
+FST-JO8U3J5Y,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-JO8U3J5Y.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer threaded rod 4mm 100mm 10pc,Nut Bolt and Washer,diameter_mm,4
+FST-JO8U3J5Y,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-JO8U3J5Y.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer threaded rod 4mm 100mm 10pc,Nut Bolt and Washer,fastener_type,threaded rod
+FST-JO8U3J5Y,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-JO8U3J5Y.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer threaded rod 4mm 100mm 10pc,Nut Bolt and Washer,length_mm,100
+FST-JO8U3J5Y,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-JO8U3J5Y.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer threaded rod 4mm 100mm 10pc,Nut Bolt and Washer,material,steel
+FST-JO8U3J5Y,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-JO8U3J5Y.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer threaded rod 4mm 100mm 10pc,Nut Bolt and Washer,pack_count,10
+FST-PDDBY2SJ,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-PDDBY2SJ.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 4mm 12mm 50pc,Nut Bolt and Washer,diameter_mm,4
+FST-PDDBY2SJ,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-PDDBY2SJ.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 4mm 12mm 50pc,Nut Bolt and Washer,fastener_type,bolt
+FST-PDDBY2SJ,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-PDDBY2SJ.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 4mm 12mm 50pc,Nut Bolt and Washer,length_mm,12
+FST-PDDBY2SJ,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-PDDBY2SJ.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 4mm 12mm 50pc,Nut Bolt and Washer,material,steel
+FST-PDDBY2SJ,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-PDDBY2SJ.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 4mm 12mm 50pc,Nut Bolt and Washer,pack_count,50
+FST-TDKL7U3Z,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-TDKL7U3Z.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer machine screw 5mm 50mm 25pc,Nut Bolt and Washer,diameter_mm,5
+FST-TDKL7U3Z,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-TDKL7U3Z.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer machine screw 5mm 50mm 25pc,Nut Bolt and Washer,fastener_type,machine screw
+FST-TDKL7U3Z,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-TDKL7U3Z.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer machine screw 5mm 50mm 25pc,Nut Bolt and Washer,length_mm,50
+FST-TDKL7U3Z,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-TDKL7U3Z.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer machine screw 5mm 50mm 25pc,Nut Bolt and Washer,material,steel
+FST-TDKL7U3Z,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-TDKL7U3Z.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer machine screw 5mm 50mm 25pc,Nut Bolt and Washer,pack_count,25
+FST-ZAU6VOOJ,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-ZAU6VOOJ.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 20mm 10pc,Nut Bolt and Washer,diameter_mm,12
+FST-ZAU6VOOJ,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-ZAU6VOOJ.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 20mm 10pc,Nut Bolt and Washer,fastener_type,bolt
+FST-ZAU6VOOJ,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-ZAU6VOOJ.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 20mm 10pc,Nut Bolt and Washer,length_mm,20
+FST-ZAU6VOOJ,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-ZAU6VOOJ.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 20mm 10pc,Nut Bolt and Washer,material,steel
+FST-ZAU6VOOJ,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-ZAU6VOOJ.json,Simpson Strong-Tie,Outdoor,CSA 2V6-S2J,Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer bolt 12mm 20mm 10pc,Nut Bolt and Washer,pack_count,10
+Next step_2... Report completion with <NO> and checked SKU, citing exact product record path. (13409 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved matching Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer variant by stated properties', 'Confirmed checked SKU is FST-PDDBY2SJ', 'Found no built-in GPS tracking capability on that product record'] message='<NO> SKU FST-PDDBY2SJ' grounding_refs=['/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-PDDBY2SJ.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved matching Simpson Strong-Tie Outdoor CSA 2V6-S2J Nut Bolt and Washer variant by stated properties
+- Confirmed checked SKU is FST-PDDBY2SJ
+- Found no built-in GPS tracking capability on that product record
+
+[34mAGENT SUMMARY: <NO> SKU FST-PDDBY2SJ[0m
+- [34m/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0011_1t2b1slk/FST-PDDBY2SJ.json[0m
