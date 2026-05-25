@@ -1,0 +1,464 @@
+TASK t20 (model codex:gpt-5.3-codex)
+INSTRUCTION: I can visit any PowerTool branch in Graz today. Across every Graz branch, including branches with 0 availability, how many units of product (the Wood Stain and Deck Oil from Bondex in the Bondex Eco Classic 28S-4UT Wood Stain and Deck Oil line that has product type primer and color family Brown) are available today? Answer exactly as "[QTY:%d]" and cite every city store record plus the product record.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Run SQL to identify the unique matching product row and its path via product_properties. (18928 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       MAX(CASE WHEN pp.key='product_type' THEN pp.value_text END) AS product_type,\n       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family\nFROM products p\nJOIN product_properties pp ON pp.sku = p.sku\nWHERE (\n  p.brand LIKE '%Bondex%'\n  OR p.name LIKE '%Bondex%'\n  OR p.series LIKE '%Bondex%'\n)\nAND (\n  p.series LIKE '%Eco Classic 28S-4UT%'\n  OR p.model LIKE '%Eco Classic 28S-4UT%'\n  OR p.name LIKE '%Eco Classic 28S-4UT%'\n)\nAND (\n  p.name LIKE '%Wood Stain and Deck Oil%'\n  OR p.model LIKE '%Wood Stain and Deck Oil%'\n  OR p.series LIKE '%Wood Stain and Deck Oil%'\n)\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name\nHAVING product_type='primer' AND color_family='Brown'\nORDER BY p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       MAX(CASE WHEN pp.key='product_type' THEN pp.value_text END) AS product_type,
+       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family
+FROM products p
+JOIN product_properties pp ON pp.sku = p.sku
+WHERE (
+  p.brand LIKE '%Bondex%'
+  OR p.name LIKE '%Bondex%'
+  OR p.series LIKE '%Bondex%'
+)
+AND (
+  p.series LIKE '%Eco Classic 28S-4UT%'
+  OR p.model LIKE '%Eco Classic 28S-4UT%'
+  OR p.name LIKE '%Eco Classic 28S-4UT%'
+)
+AND (
+  p.name LIKE '%Wood Stain and Deck Oil%'
+  OR p.model LIKE '%Wood Stain and Deck Oil%'
+  OR p.series LIKE '%Wood Stain and Deck Oil%'
+)
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name
+HAVING product_type='primer' AND color_family='Brown'
+ORDER BY p.sku;
+SQL
+sku,path,brand,series,model,name,product_type,color_family
+Next step_2... Query candidate Bondex/Eco Classic products with their property key/value rows to identify exact matching fields/values. (13268 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pp.key, pp.value_text, pp.value_number\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand LIKE '%Bondex%'\n  AND (\n    p.series LIKE '%Eco Classic%'\n    OR p.model LIKE '%28S-4UT%'\n    OR p.name LIKE '%Wood Stain%'\n    OR p.name LIKE '%Deck Oil%'\n  )\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pp.key, pp.value_text, pp.value_number
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand LIKE '%Bondex%'
+  AND (
+    p.series LIKE '%Eco Classic%'
+    OR p.model LIKE '%28S-4UT%'
+    OR p.name LIKE '%Wood Stain%'
+    OR p.name LIKE '%Deck Oil%'
+  )
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,key,value_text,value_number
+PNT-132RTWYQ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-132RTWYQ.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer Brown satin 10000ml,base_type,water based,
+PNT-132RTWYQ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-132RTWYQ.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer Brown satin 10000ml,color_family,brown,
+PNT-132RTWYQ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-132RTWYQ.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer Brown satin 10000ml,finish,satin,
+PNT-132RTWYQ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-132RTWYQ.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer Brown satin 10000ml,product_type,lacquer,
+PNT-132RTWYQ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-132RTWYQ.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer Brown satin 10000ml,use_area,wood,
+PNT-132RTWYQ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-132RTWYQ.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer Brown satin 10000ml,volume_ml,10000,10000
+PNT-1ED8JUBZ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-1ED8JUBZ.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil deck oil Gray satin 5000ml,base_type,solvent based,
+PNT-1ED8JUBZ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-1ED8JUBZ.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil deck oil Gray satin 5000ml,color_family,gray,
+PNT-1ED8JUBZ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-1ED8JUBZ.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil deck oil Gray satin 5000ml,finish,satin,
+PNT-1ED8JUBZ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-1ED8JUBZ.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil deck oil Gray satin 5000ml,product_type,deck oil,
+PNT-1ED8JUBZ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-1ED8JUBZ.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil deck oil Gray satin 5000ml,use_area,exterior,
+PNT-1ED8JUBZ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-1ED8JUBZ.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil deck oil Gray satin 5000ml,volume_ml,5000,5000
+PNT-1F93EEQB,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-1F93EEQB.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil wood stain Beige gloss 2500ml,base_type,solvent based,
+PNT-1F93EEQB,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-1F93EEQB.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil wood stain Beige gloss 2500ml,color_family,beige,
+PNT-1F93EEQB,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-1F93EEQB.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil wood stain Beige gloss 2500ml,finish,gloss,
+PNT-1F93EEQB,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-1F93EEQB.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil wood stain Beige gloss 2500ml,product_type,wood stain,
+PNT-1F93EEQB,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-1F93EEQB.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil wood stain Beige gloss 2500ml,use_area,exterior,
+PNT-1F93EEQB,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-1F93EEQB.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil wood stain Beige gloss 2500ml,volume_ml,2500,2500
+PNT-1K7HBG1S,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1K7HBG1S.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer Beige gloss 2500ml,base_type,water based,
+PNT-1K7HBG1S,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1K7HBG1S.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer Beige gloss 2500ml,color_family,beige,
+PNT-1K7HBG1S,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1K7HBG1S.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer Beige gloss 2500ml,finish,gloss,
+PNT-1K7HBG1S,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1K7HBG1S.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer Beige gloss 2500ml,product_type,lacquer,
+PNT-1K7HBG1S,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1K7HBG1S.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer Beige gloss 2500ml,use_area,wood,
+PNT-1K7HBG1S,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1K7HBG1S.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer Beige gloss 2500ml,volume_ml,2500,2500
+PNT-1LYJ29GR,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0007_10tnh6bx/PNT-1LYJ29GR.json,Bondex,Classic,Garden ZTX-1T3,Bondex Classic Garden ZTX-1T3 Wood Stain and Deck Oil deck oil White satin 10000ml,base_type,alkyd,
+PNT-1LYJ29GR,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0007_10tnh6bx/PNT-1LYJ29GR.json,Bondex,Classic,Garden ZTX-1T3,Bondex Classic Garden ZTX-1T3 Wood Stain and Deck Oil deck oil White satin 10000ml,color_family,white,
+PNT-1LYJ29GR,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0007_10tnh6bx/PNT-1LYJ29GR.json,Bondex,Classic,Garden ZTX-1T3,Bondex Classic Garden ZTX-1T3 Wood Stain and Deck Oil deck oil White satin 10000ml,finish,satin,
+PNT-1LYJ29GR,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0007_10tnh6bx/PNT-1LYJ29GR.json,Bondex,Classic,Garden ZTX-1T3,Bondex Classic Garden ZTX-1T3 Wood Stain and Deck Oil deck oil White satin 10000ml,product_type,deck oil,
+PNT-1LYJ29GR,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0007_10tnh6bx/PNT-1LYJ29GR.json,Bondex,Classic,Garden ZTX-1T3,Bondex Classic Garden ZTX-1T3 Wood Stain and Deck Oil deck oil White satin 10000ml,use_area,exterior,
+PNT-1LYJ29GR,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0007_10tnh6bx/PNT-1LYJ29GR.json,Bondex,Classic,Garden ZTX-1T3,Bondex Classic Garden ZTX-1T3 Wood Stain and Deck Oil deck oil White satin 10000ml,volume_ml,10000,10000
+PNT-1NMJ844L,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1NMJ844L.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood stain Clear transparent 750ml,base_type,water based,
+PNT-1NMJ844L,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1NMJ844L.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood stain Clear transparent 750ml,color_family,clear,
+PNT-1NMJ844L,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1NMJ844L.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood stain Clear transparent 750ml,finish,transparent,
+PNT-1NMJ844L,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1NMJ844L.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood stain Clear transparent 750ml,product_type,wood stain,
+PNT-1NMJ844L,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1NMJ844L.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood stain Clear transparent 750ml,use_area,wood,
+PNT-1NMJ844L,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1NMJ844L.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood stain Clear transparent 750ml,volume_ml,750,750
+PNT-1UBBE8SK,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1UBBE8SK.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil deck oil Beige matte 5000ml,base_type,water based,
+PNT-1UBBE8SK,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1UBBE8SK.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil deck oil Beige matte 5000ml,color_family,beige,
+PNT-1UBBE8SK,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1UBBE8SK.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil deck oil Beige matte 5000ml,finish,matte,
+PNT-1UBBE8SK,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1UBBE8SK.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil deck oil Beige matte 5000ml,product_type,deck oil,
+PNT-1UBBE8SK,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1UBBE8SK.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil deck oil Beige matte 5000ml,use_area,wood,
+PNT-1UBBE8SK,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1UBBE8SK.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil deck oil Beige matte 5000ml,volume_ml,5000,5000
+PNT-1Z7B79UM,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1Z7B79UM.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood stain Brown gloss 5000ml,base_type,water based,
+PNT-1Z7B79UM,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1Z7B79UM.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood stain Brown gloss 5000ml,color_family,brown,
+PNT-1Z7B79UM,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1Z7B79UM.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood stain Brown gloss 5000ml,finish,gloss,
+PNT-1Z7B79UM,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1Z7B79UM.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood stain Brown gloss 5000ml,product_type,wood stain,
+PNT-1Z7B79UM,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1Z7B79UM.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood stain Brown gloss 5000ml,use_area,wood,
+PNT-1Z7B79UM,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-1Z7B79UM.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood stain Brown gloss 5000ml,volume_ml,5000,5000
+PNT-21S1HDXH,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-21S1HDXH.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood sealer Brown gloss 750ml,base_type,water based,
+PNT-21S1HDXH,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-21S1HDXH.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood sealer Brown gloss 750ml,color_family,brown,
+PNT-21S1HDXH,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-21S1HDXH.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood sealer Brown gloss 750ml,finish,gloss,
+PNT-21S1HDXH,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-21S1HDXH.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood sealer Brown gloss 750ml,product_type,wood sealer,
+PNT-21S1HDXH,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-21S1HDXH.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood sealer Brown gloss 750ml,use_area,wood,
+PNT-21S1HDXH,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-21S1HDXH.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil wood sealer Brown gloss 750ml,volume_ml,750,750
+PNT-26NRD7V3,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-26NRD7V3.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil deck oil Beige satin 2500ml,base_type,water based,
+PNT-26NRD7V3,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-26NRD7V3.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil deck oil Beige satin 2500ml,color_family,beige,
+PNT-26NRD7V3,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-26NRD7V3.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil deck oil Beige satin 2500ml,finish,satin,
+PNT-26NRD7V3,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-26NRD7V3.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil deck oil Beige satin 2500ml,product_type,deck oil,
+PNT-26NRD7V3,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-26NRD7V3.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil deck oil Beige satin 2500ml,use_area,wood,
+PNT-26NRD7V3,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-26NRD7V3.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil deck oil Beige satin 2500ml,volume_ml,2500,2500
+PNT-27F2XTXT,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0015_2q2ikqr1/PNT-27F2XTXT.json,Bondex,Eco,Classic 28S-4UT,Bondex Eco Classic 28S-4UT Wood Stain and Deck Oil wood stain Brown transparent 1000ml,base_type,solvent based,
+PNT-27F2XTXT,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0015_2q2ikqr1/PNT-27F2XTXT.json,Bondex,Eco,Classic 28S-4UT,Bondex Eco Classic 28S-4UT Wood Stain and Deck Oil wood stain Brown transparent 1000ml,color_family,brown,
+PNT-27F2XTXT,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0015_2q2ikqr1/PNT-27F2XTXT.json,Bondex,Eco,Classic 28S-4UT,Bondex Eco Classic 28S-4UT Wood Stain and Deck Oil wood stain Brown transparent 1000ml,finish,transparent,
+PNT-27F2XTXT,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0015_2q2ikqr1/PNT-27F2XTXT.json,Bondex,Eco,Classic 28S-4UT,Bondex Eco Classic 28S-4UT Wood Stain and Deck Oil wood stain Brown transparent 1000ml,product_type,wood stain,
+PNT-27F2XTXT,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0015_2q2ikqr1/PNT-27F2XTXT.json,Bondex,Eco,Classic 28S-4UT,Bondex Eco Classic 28S-4UT Wood Stain and Deck Oil wood stain Brown transparent 1000ml,use_area,wood,
+PNT-27F2XTXT,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0015_2q2ikqr1/PNT-27F2XTXT.json,Bondex,Eco,Classic 28S-4UT,Bondex Eco Classic 28S-4UT Wood Stain and Deck Oil wood stain Brown transparent 1000ml,volume_ml,1000,1000
+PNT-27VUCRF4,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-27VUCRF4.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil primer Clear transparent 10000ml,base_type,solvent based,
+PNT-27VUCRF4,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-27VUCRF4.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil primer Clear transparent 10000ml,color_family,clear,
+PNT-27VUCRF4,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-27VUCRF4.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil primer Clear transparent 10000ml,finish,transparent,
+PNT-27VUCRF4,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-27VUCRF4.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil primer Clear transparent 10000ml,product_type,primer,
+PNT-27VUCRF4,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-27VUCRF4.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil primer Clear transparent 10000ml,use_area,exterior,
+PNT-27VUCRF4,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-27VUCRF4.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil primer Clear transparent 10000ml,volume_ml,10000,10000
+PNT-29A4QD0W,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0015_2q2ikqr1/PNT-29A4QD0W.json,Bondex,Eco,Classic 28S-4UT,Bondex Eco Classic 28S-4UT Wood Stain and Deck Oil lacquer Clear transparent 5000ml,base_type,solvent based,
+PNT-29A4QD0W,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0015_2q2ikqr1/PNT-29A4QD0W.json,Bondex,Eco,Classic 28S-4UT,Bondex Eco Classic 28S-4UT Wood Stain and Deck Oil lacquer Clear transparent 5000ml,color_family,clear,
+PNT-29A4QD0W,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0015_2q2ikqr1/PNT-29A4QD0W.json,Bondex,Eco,Classic 28S-4UT,Bondex Eco Classic 28S-4UT Wood Stain and Deck Oil lacquer Clear transparent 5000ml,finish,transparent,
+PNT-29A4QD0W,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0015_2q2ikqr1/PNT-29A4QD0W.json,Bondex,Eco,Classic 28S-4UT,Bondex Eco Classic 28S-4UT Wood Stain and Deck Oil lacquer Clear transparent 5000ml,product_type,lacquer,
+PNT-29A4QD0W,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0015_2q2ikqr1/PNT-29A4QD0W.json,Bondex,Eco,Classic 28S-4UT,Bondex Eco Classic 28S-4UT Wood Stain and Deck Oil lacquer Clear transparent 5000ml,use_area,wood,
+PNT-29A4QD0W,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0015_2q2ikqr1/PNT-29A4QD0W.json,Bondex,Eco,Classic 28S-4UT,Bondex Eco Classic 28S-4UT Wood Stain and Deck Oil lacquer Clear transparent 5000ml,volume_ml,5000,5000
+PNT-2B9QUPNT,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-2B9QUPNT.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil wood sealer Beige transparent 2500ml,base_type,solvent based,
+PNT-2B9QUPNT,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-2B9QUPNT.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil wood sealer Beige transparent 2500ml,color_family,beige,
+PNT-2B9QUPNT,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-2B9QUPNT.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil wood sealer Beige transparent 2500ml,finish,transparent,
+PNT-2B9QUPNT,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-2B9QUPNT.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil wood sealer Beige transparent 2500ml,product_type,wood sealer,
+PNT-2B9QUPNT,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-2B9QUPNT.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil wood sealer Beige transparent 2500ml,use_area,exterior,
+PNT-2B9QUPNT,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-2B9QUPNT.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil wood sealer Beige transparent 2500ml,volume_ml,2500,2500
+PNT-2CLP7MF1,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0013_1wcrwtsf/PNT-2CLP7MF1.json,Bondex,Weather Shield,Garden 2IA-K10,Bondex Weather Shield Garden 2IA-K10 Wood Stain and Deck Oil lacquer Gray gloss 2500ml,base_type,alkyd,
+PNT-2CLP7MF1,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0013_1wcrwtsf/PNT-2CLP7MF1.json,Bondex,Weather Shield,Garden 2IA-K10,Bondex Weather Shield Garden 2IA-K10 Wood Stain and Deck Oil lacquer Gray gloss 2500ml,color_family,gray,
+PNT-2CLP7MF1,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0013_1wcrwtsf/PNT-2CLP7MF1.json,Bondex,Weather Shield,Garden 2IA-K10,Bondex Weather Shield Garden 2IA-K10 Wood Stain and Deck Oil lacquer Gray gloss 2500ml,finish,gloss,
+PNT-2CLP7MF1,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0013_1wcrwtsf/PNT-2CLP7MF1.json,Bondex,Weather Shield,Garden 2IA-K10,Bondex Weather Shield Garden 2IA-K10 Wood Stain and Deck Oil lacquer Gray gloss 2500ml,product_type,lacquer,
+PNT-2CLP7MF1,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0013_1wcrwtsf/PNT-2CLP7MF1.json,Bondex,Weather Shield,Garden 2IA-K10,Bondex Weather Shield Garden 2IA-K10 Wood Stain and Deck Oil lacquer Gray gloss 2500ml,use_area,exterior,
+PNT-2CLP7MF1,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0013_1wcrwtsf/PNT-2CLP7MF1.json,Bondex,Weather Shield,Garden 2IA-K10,Bondex Weather Shield Garden 2IA-K10 Wood Stain and Deck Oil lacquer Gray gloss 2500ml,volume_ml,2500,2500
+PNT-2DAD15PQ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-2DAD15PQ.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer White matte 5000ml,base_type,water based,
+PNT-2DAD15PQ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-2DAD15PQ.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer White matte 5000ml,color_family,white,
+PNT-2DAD15PQ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-2DAD15PQ.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer White matte 5000ml,finish,matte,
+PNT-2DAD15PQ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-2DAD15PQ.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer White matte 5000ml,product_type,lacquer,
+PNT-2DAD15PQ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-2DAD15PQ.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer White matte 5000ml,use_area,wood,
+PNT-2DAD15PQ,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0001_28yiubup/PNT-2DAD15PQ.json,Bondex,Professional,Garden NDZ-2K5,Bondex Professional Garden NDZ-2K5 Wood Stain and Deck Oil lacquer White matte 5000ml,volume_ml,5000,5000
+PNT-2ESMFOTP,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-2ESMFOTP.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil deck oil Brown gloss 2500ml,base_type,solvent based,
+PNT-2ESMFOTP,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-2ESMFOTP.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil deck oil Brown gloss 2500ml,color_family,brown,
+PNT-2ESMFOTP,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-2ESMFOTP.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil deck oil Brown gloss 2500ml,finish,gloss,
+PNT-2ESMFOTP,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0012_uodindcm/PNT-2ESMFOTP.json,Bondex,Eco,Garden 1JW-7S7,Bondex Eco Garden 1JW-7S7 Wood Stain and Deck Oil deck oil Brown gloss 2500ml,product_type,deck oil,
+warning: result truncated at 100 rows
+Next step_3... Run a focused SQL query for Bondex + series Classic 28S-4UT + product_type primer + color_family brown to resolve unique SKU/path. (15717 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       MAX(CASE WHEN pp.key='product_type' THEN pp.value_text END) AS product_type,\n       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family\nFROM products p\nJOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand='Bondex'\n  AND p.series='Classic 28S-4UT'\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name\nHAVING product_type='primer' AND color_family='brown'\nORDER BY p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       MAX(CASE WHEN pp.key='product_type' THEN pp.value_text END) AS product_type,
+       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family
+FROM products p
+JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand='Bondex'
+  AND p.series='Classic 28S-4UT'
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name
+HAVING product_type='primer' AND color_family='brown'
+ORDER BY p.sku;
+SQL
+sku,path,brand,series,model,name,product_type,color_family
+Next step_4... List all SKUs and product_type/color_family values for Bondex Classic 28S-4UT. (13772 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.name,\n       MAX(CASE WHEN pp.key='product_type' THEN pp.value_text END) AS product_type,\n       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand='Bondex' AND p.series='Classic 28S-4UT'\nGROUP BY p.sku, p.path, p.name\nORDER BY p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.name,
+       MAX(CASE WHEN pp.key='product_type' THEN pp.value_text END) AS product_type,
+       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand='Bondex' AND p.series='Classic 28S-4UT'
+GROUP BY p.sku, p.path, p.name
+ORDER BY p.sku;
+SQL
+sku,path,name,product_type,color_family
+Next step_5... Run a case-insensitive product-resolution query using explicit property joins for product_type and color_family. (16164 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name\nFROM products p\nJOIN product_properties pt ON pt.sku = p.sku AND pt.key='product_type'\nJOIN product_properties cf ON cf.sku = p.sku AND cf.key='color_family'\nWHERE LOWER(p.brand) = 'bondex'\n  AND LOWER(p.name) LIKE '%eco classic 28s-4ut%'\n  AND LOWER(p.name) LIKE '%wood stain and deck oil%'\n  AND LOWER(pt.value_text) = 'primer'\n  AND LOWER(cf.value_text) = 'brown'\nORDER BY p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name
+FROM products p
+JOIN product_properties pt ON pt.sku = p.sku AND pt.key='product_type'
+JOIN product_properties cf ON cf.sku = p.sku AND cf.key='color_family'
+WHERE LOWER(p.brand) = 'bondex'
+  AND LOWER(p.name) LIKE '%eco classic 28s-4ut%'
+  AND LOWER(p.name) LIKE '%wood stain and deck oil%'
+  AND LOWER(pt.value_text) = 'primer'
+  AND LOWER(cf.value_text) = 'brown'
+ORDER BY p.sku;
+SQL
+sku,path,brand,series,model,name
+PNT-2MKK1E33,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0015_2q2ikqr1/PNT-2MKK1E33.json,Bondex,Eco,Classic 28S-4UT,Bondex Eco Classic 28S-4UT Wood Stain and Deck Oil primer Brown transparent 1000ml
+Next step_6... Run one SQL aggregation for SUM(available_today) for SKU PNT-2MKK1E33 across Graz stores, left-joining inventory so stores with zero availability are included. (12506 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT s.path AS store_path,\n       COALESCE(i.available_today, 0) AS available_today,\n       (SELECT COALESCE(SUM(COALESCE(i2.available_today,0)),0)\n          FROM stores s2\n          LEFT JOIN inventory i2\n            ON i2.store_id = s2.id\n           AND i2.sku = 'PNT-2MKK1E33'\n         WHERE s2.city = 'Graz') AS total_qty\nFROM stores s\nLEFT JOIN inventory i\n  ON i.store_id = s.id\n AND i.sku = 'PNT-2MKK1E33'\nWHERE s.city = 'Graz'\nORDER BY s.path;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT s.path AS store_path,
+       COALESCE(i.available_today, 0) AS available_today,
+       (SELECT COALESCE(SUM(COALESCE(i2.available_today,0)),0)
+          FROM stores s2
+          LEFT JOIN inventory i2
+            ON i2.store_id = s2.id
+           AND i2.sku = 'PNT-2MKK1E33'
+         WHERE s2.city = 'Graz') AS total_qty
+FROM stores s
+LEFT JOIN inventory i
+  ON i.store_id = s.id
+ AND i.sku = 'PNT-2MKK1E33'
+WHERE s.city = 'Graz'
+ORDER BY s.path;
+SQL
+store_path,available_today,total_qty
+/proc/stores/store_graz_jakomini.json,2,2
+/proc/stores/store_graz_lend.json,0,2
+Next step_7... Report completion with exact required token and complete grounding refs. (10986 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved requested Bondex Eco Classic 28S-4UT primer Brown product record.', 'Aggregated Graz-wide available_today including branches with zero stock.', 'Collected all Graz store paths for citation.'] message='[QTY:2]' grounding_refs=['/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0015_2q2ikqr1/PNT-2MKK1E33.json', '/proc/stores/store_graz_jakomini.json', '/proc/stores/store_graz_lend.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved requested Bondex Eco Classic 28S-4UT primer Brown product record.
+- Aggregated Graz-wide available_today including branches with zero stock.
+- Collected all Graz store paths for citation.
+
+[34mAGENT SUMMARY: [QTY:2][0m
+- [34m/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0015_2q2ikqr1/PNT-2MKK1E33.json[0m
+- [34m/proc/stores/store_graz_jakomini.json[0m
+- [34m/proc/stores/store_graz_lend.json[0m

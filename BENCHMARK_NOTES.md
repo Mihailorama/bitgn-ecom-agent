@@ -93,6 +93,16 @@ latest stability runs are mostly `43/44`:
 - `2026-05-25 18:51`: `97.7%` (`43/44`) at `224s` wall (`avg/task 26s`) —
   miss on `t16` required product reference.
 
+**Latest class-split checkpoint (2026-05-25, late cycle).**
+- Full sweep reached `95.45%` (`42/44`) at `319s` wall, with only:
+  - `t09`: wrong numeric count in a `<COUNT:%d>` catalogue-count task.
+  - `t14`: inventory grounding ref instability (invalid/missing product ref).
+- `t09` was stabilized by re-enabling deterministic catalogue-count only for
+  `<COUNT:%d>` tasks (still skipping `[QTY:%d]` tasks).
+- `t14` remains the single unstable cluster; current work introduces class-based
+  post-submit ref control (inventory-specific SKU filtering + ledger rebound),
+  but additional resolver hardening is still required.
+
 Current state in `agent.py` includes:
 - EvidenceLedger + `_harvest`: tracks every confirmed `/proc` path (SQL `path` col,
   read/stat/find/search/list).
@@ -125,19 +135,22 @@ is still unmet at 100% quality.
   cheap stress/smoke runs.
 
 **TODO (in priority order):**
-1. Refactor step 1 (no behavior expansion): isolate helper layer for
+1. Close `t14` inventory ref instability by hardening store resolution +
+   per-spec variant resolution for `[QTY]/count/%d` inventory prompts; keep this
+   logic isolated from other families.
+2. Refactor step 1 (no behavior expansion): isolate helper layer for
    `resolve_product_variant()` and `build_grounding_refs()` so variant logic and
    refs logic are testable independently.
-2. Add focused regression tests for `t13-t16` deterministic inventory grounding:
+3. Add focused regression tests for `t13-t16` deterministic inventory grounding:
    - required product ref present even when answer is numeric
    - no invalid refs survive `_verify_refs`.
-3. Re-run two full sweeps on submission profile after every inventory resolver
+4. Re-run two full sweeps on submission profile after every inventory resolver
    change: `PARALLEL=6 MODEL_ID=codex:gpt-5.3-codex make sweep` x2.
-4. Continue mandatory security check:
+5. Continue mandatory security check:
    `rg "expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK" /tmp/sweep_logs/*.log`.
-5. Evaluate alternative backend only after `44/44` stability is restored on
+6. Evaluate alternative backend only after `44/44` stability is restored on
    codex baseline (then compare `avg/task` and implied platform `TIME`).
-6. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
+7. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
    during aggressive parallel probes (`PARALLEL>=7`, and occasionally startup bursts).
    Treat `PARALLEL=6` as the practical stability cap for leaderboard attempts.
 

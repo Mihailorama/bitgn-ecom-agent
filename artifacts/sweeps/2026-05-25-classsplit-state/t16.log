@@ -1,0 +1,529 @@
+TASK t16 (model codex:gpt-5.3-codex)
+INSTRUCTION: How many of these products have at least 1 items available in Graz Jakomini hardware branch today: the Wiper Blade from Michelin in the Michelin Premium Stealth 1T0-N2Q Wiper Blade line that has length 550 mm and adapter type hook,the Automotive Charger and Bulb from Varta in the Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb line that has product type jump starter, voltage 24 V, current 10 A, and vehicle type van,the Wood and Drywall Screw from Dresselhaus in the Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw line that has screw type wood screw, diameter 3 mm, and length 40 mm,the Wiring Device from Legrand in the Legrand Plexo Plexo 2XT-4EJ Wiring Device line that has device type junction box and color family White,the Cleaning Liquid from Ajax in the Ajax Concentrate Classic GCE-IRA Cleaning Liquid line that has cleaner type interior cleaner and volume 1000 ml,the Pipe Fitting from Viega in the Viega Professional Sanpress 1NX-HRW Pipe Fitting line that has fitting type seal ring, diameter 12 mm, and connection type push fit? Answer in exactly format "[QTY:%d]" (no quotes)
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Resolve store id/path for Graz Jakomini hardware branch. (10599 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT id, path, name, city FROM stores WHERE city='Graz' AND name LIKE '%Jakomini%';"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT id, path, name, city FROM stores WHERE city='Graz' AND name LIKE '%Jakomini%';
+SQL
+id,path,name,city
+store_graz_jakomini,/proc/stores/store_graz_jakomini.json,PowerTool Graz Jakomini,Graz
+Next step_2... Query products joined with product_properties to resolve each requested variant by brand/series/model/kind and exact property constraints. (20930 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH req AS (\n  SELECT 'Michelin' AS brand, 'Premium Stealth' AS series, '1T0-N2Q' AS model, 'Wiper Blade' AS kind, 'length_mm' AS k1, '550' AS v1, 'adapter_type' AS k2, 'hook' AS v2, NULL AS k3, NULL AS v3\n  UNION ALL SELECT 'Varta','Workshop Silver','2KH-QZR','Automotive Charger and Bulb','product_type','jump starter','voltage_v','24','current_a','10'\n  UNION ALL SELECT 'Dresselhaus','Outdoor DRE','2A1-OSK','Wood and Drywall Screw','screw_type','wood screw','diameter_mm','3','length_mm','40'\n  UNION ALL SELECT 'Legrand','Plexo Plexo','2XT-4EJ','Wiring Device','device_type','junction box','color_family','White',NULL,NULL\n  UNION ALL SELECT 'Ajax','Concentrate Classic','GCE-IRA','Cleaning Liquid','cleaner_type','interior cleaner','volume_ml','1000',NULL,NULL\n  UNION ALL SELECT 'Viega','Professional Sanpress','1NX-HRW','Pipe Fitting','fitting_type','seal ring','diameter_mm','12','connection_type','push fit'\n)\nSELECT r.brand, r.series, r.model, r.kind, p.sku, p.path,\n       GROUP_CONCAT(pp.key || '=' || COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)), ';') AS matched_props\nFROM req r\nJOIN products p\n  ON p.brand=r.brand AND p.series=r.series AND p.model=r.model AND p.name=r.kind\nJOIN product_properties pp\n  ON pp.sku=p.sku\nWHERE (pp.key=r.k1 AND LOWER(pp.value_text)=LOWER(r.v1))\n   OR (pp.key=r.k2 AND LOWER(pp.value_text)=LOWER(r.v2))\n   OR (r.k3 IS NOT NULL AND pp.key=r.k3 AND LOWER(pp.value_text)=LOWER(r.v3))\nGROUP BY r.brand, r.series, r.model, r.kind, p.sku, p.path\nHAVING SUM(CASE WHEN pp.key=r.k1 AND LOWER(pp.value_text)=LOWER(r.v1) THEN 1 ELSE 0 END) > 0\n   AND SUM(CASE WHEN pp.key=r.k2 AND LOWER(pp.value_text)=LOWER(r.v2) THEN 1 ELSE 0 END) > 0\n   AND (r.k3 IS NULL OR SUM(CASE WHEN pp.key=r.k3 AND LOWER(pp.value_text)=LOWER(r.v3) THEN 1 ELSE 0 END) > 0)\nORDER BY r.brand, r.series, r.model, p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH req AS (
+  SELECT 'Michelin' AS brand, 'Premium Stealth' AS series, '1T0-N2Q' AS model, 'Wiper Blade' AS kind, 'length_mm' AS k1, '550' AS v1, 'adapter_type' AS k2, 'hook' AS v2, NULL AS k3, NULL AS v3
+  UNION ALL SELECT 'Varta','Workshop Silver','2KH-QZR','Automotive Charger and Bulb','product_type','jump starter','voltage_v','24','current_a','10'
+  UNION ALL SELECT 'Dresselhaus','Outdoor DRE','2A1-OSK','Wood and Drywall Screw','screw_type','wood screw','diameter_mm','3','length_mm','40'
+  UNION ALL SELECT 'Legrand','Plexo Plexo','2XT-4EJ','Wiring Device','device_type','junction box','color_family','White',NULL,NULL
+  UNION ALL SELECT 'Ajax','Concentrate Classic','GCE-IRA','Cleaning Liquid','cleaner_type','interior cleaner','volume_ml','1000',NULL,NULL
+  UNION ALL SELECT 'Viega','Professional Sanpress','1NX-HRW','Pipe Fitting','fitting_type','seal ring','diameter_mm','12','connection_type','push fit'
+)
+SELECT r.brand, r.series, r.model, r.kind, p.sku, p.path,
+       GROUP_CONCAT(pp.key || '=' || COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)), ';') AS matched_props
+FROM req r
+JOIN products p
+  ON p.brand=r.brand AND p.series=r.series AND p.model=r.model AND p.name=r.kind
+JOIN product_properties pp
+  ON pp.sku=p.sku
+WHERE (pp.key=r.k1 AND LOWER(pp.value_text)=LOWER(r.v1))
+   OR (pp.key=r.k2 AND LOWER(pp.value_text)=LOWER(r.v2))
+   OR (r.k3 IS NOT NULL AND pp.key=r.k3 AND LOWER(pp.value_text)=LOWER(r.v3))
+GROUP BY r.brand, r.series, r.model, r.kind, p.sku, p.path
+HAVING SUM(CASE WHEN pp.key=r.k1 AND LOWER(pp.value_text)=LOWER(r.v1) THEN 1 ELSE 0 END) > 0
+   AND SUM(CASE WHEN pp.key=r.k2 AND LOWER(pp.value_text)=LOWER(r.v2) THEN 1 ELSE 0 END) > 0
+   AND (r.k3 IS NULL OR SUM(CASE WHEN pp.key=r.k3 AND LOWER(pp.value_text)=LOWER(r.v3) THEN 1 ELSE 0 END) > 0)
+ORDER BY r.brand, r.series, r.model, p.sku;
+SQL
+brand,series,model,kind,sku,path,matched_props
+Next step_3... List candidate products for the six brand/series/model combinations with their actual kind/name and properties. (14102 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH req(brand,series,model) AS (\n  VALUES\n    ('Michelin','Premium Stealth','1T0-N2Q'),\n    ('Varta','Workshop Silver','2KH-QZR'),\n    ('Dresselhaus','Outdoor DRE','2A1-OSK'),\n    ('Legrand','Plexo Plexo','2XT-4EJ'),\n    ('Ajax','Concentrate Classic','GCE-IRA'),\n    ('Viega','Professional Sanpress','1NX-HRW')\n)\nSELECT p.brand, p.series, p.model, p.sku, p.path, p.name AS product_name, pk.name AS kind_name,\n       pp.key, COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) AS value\nFROM products p\nLEFT JOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nJOIN req r ON r.brand=p.brand AND r.series=p.series AND r.model=p.model\nORDER BY p.brand, p.series, p.model, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH req(brand,series,model) AS (
+  VALUES
+    ('Michelin','Premium Stealth','1T0-N2Q'),
+    ('Varta','Workshop Silver','2KH-QZR'),
+    ('Dresselhaus','Outdoor DRE','2A1-OSK'),
+    ('Legrand','Plexo Plexo','2XT-4EJ'),
+    ('Ajax','Concentrate Classic','GCE-IRA'),
+    ('Viega','Professional Sanpress','1NX-HRW')
+)
+SELECT p.brand, p.series, p.model, p.sku, p.path, p.name AS product_name, pk.name AS kind_name,
+       pp.key, COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) AS value
+FROM products p
+LEFT JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+JOIN req r ON r.brand=p.brand AND r.series=p.series AND r.model=p.model
+ORDER BY p.brand, p.series, p.model, p.sku, pp.key;
+SQL
+brand,series,model,sku,path,product_name,kind_name,key,value
+Next step_4... Search products by partial model tokens/brand to find actual stored brand/series/model/name combinations. (11500 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT brand, series, model, name, sku, path FROM products WHERE (brand='Michelin' AND (model LIKE '%1T0%' OR series LIKE '%Premium%')) OR (brand='Varta' AND (model LIKE '%2KH%' OR series LIKE '%Workshop%')) OR (brand='Dresselhaus' AND (model LIKE '%2A1%' OR series LIKE '%Outdoor%')) OR (brand='Legrand' AND (model LIKE '%2XT%' OR series LIKE '%Plexo%')) OR (brand='Ajax' AND (model LIKE '%GCE%' OR series LIKE '%Concentrate%')) OR (brand='Viega' AND (model LIKE '%1NX%' OR series LIKE '%Sanpress%')) ORDER BY brand, series, model, sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT brand, series, model, name, sku, path FROM products WHERE (brand='Michelin' AND (model LIKE '%1T0%' OR series LIKE '%Premium%')) OR (brand='Varta' AND (model LIKE '%2KH%' OR series LIKE '%Workshop%')) OR (brand='Dresselhaus' AND (model LIKE '%2A1%' OR series LIKE '%Outdoor%')) OR (brand='Legrand' AND (model LIKE '%2XT%' OR series LIKE '%Plexo%')) OR (brand='Ajax' AND (model LIKE '%GCE%' OR series LIKE '%Concentrate%')) OR (brand='Viega' AND (model LIKE '%1NX%' OR series LIKE '%Sanpress%')) ORDER BY brand, series, model, sku;
+SQL
+brand,series,model,name,sku,path
+Ajax,Concentrate,Classic GCE-IRA,Ajax Concentrate Classic GCE-IRA Cleaning Liquid multi surface cleaner 750ml lavender,CLN-1OR64ZSE,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0018_1ow7lcl7/CLN-1OR64ZSE.json
+Ajax,Concentrate,Classic GCE-IRA,Ajax Concentrate Classic GCE-IRA Cleaning Liquid floor cleaner 5000ml citrus,CLN-1VJTMM54,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0018_1ow7lcl7/CLN-1VJTMM54.json
+Ajax,Concentrate,Classic GCE-IRA,Ajax Concentrate Classic GCE-IRA Cleaning Liquid glass cleaner 5000ml lavender,CLN-2C5ZVLSI,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0018_1ow7lcl7/CLN-2C5ZVLSI.json
+Ajax,Concentrate,Classic GCE-IRA,Ajax Concentrate Classic GCE-IRA Cleaning Liquid degreaser 250ml lavender,CLN-2U6C6KAD,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0018_1ow7lcl7/CLN-2U6C6KAD.json
+Ajax,Concentrate,Classic GCE-IRA,Ajax Concentrate Classic GCE-IRA Cleaning Liquid interior cleaner 1000ml none,CLN-32NV2TC2,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0018_1ow7lcl7/CLN-32NV2TC2.json
+Ajax,Concentrate,Classic GCE-IRA,Ajax Concentrate Classic GCE-IRA Cleaning Liquid multi surface cleaner 250ml none,CLN-3CKT8AL6,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0018_1ow7lcl7/CLN-3CKT8AL6.json
+Ajax,Concentrate,Classic GCE-IRA,Ajax Concentrate Classic GCE-IRA Cleaning Liquid glass cleaner 5000ml none,CLN-3SEH6XEM,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0018_1ow7lcl7/CLN-3SEH6XEM.json
+Ajax,Concentrate,Classic GCE-IRA,Ajax Concentrate Classic GCE-IRA Cleaning Liquid drain cleaner 1000ml fresh,CLN-HEIY0W71,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0018_1ow7lcl7/CLN-HEIY0W71.json
+Ajax,Concentrate,Classic GCE-IRA,Ajax Concentrate Classic GCE-IRA Cleaning Liquid multi surface cleaner 2500ml none,CLN-LP9WVITT,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0018_1ow7lcl7/CLN-LP9WVITT.json
+Ajax,Concentrate,Classic GCE-IRA,Ajax Concentrate Classic GCE-IRA Cleaning Liquid floor cleaner 2500ml pine,CLN-NPN9UPMF,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0018_1ow7lcl7/CLN-NPN9UPMF.json
+Ajax,Concentrate,Classic GCE-IRA,Ajax Concentrate Classic GCE-IRA Cleaning Liquid floor cleaner 500ml pine,CLN-W0YQ7WOT,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0018_1ow7lcl7/CLN-W0YQ7WOT.json
+Ajax,Concentrate,Classic GCE-IRA,Ajax Concentrate Classic GCE-IRA Cleaning Liquid interior cleaner 2500ml none,CLN-XHMASAYG,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0018_1ow7lcl7/CLN-XHMASAYG.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw drywall screw 5mm 50mm torx 25pc,FST-12TRE1RI,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-12TRE1RI.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw deck screw 4mm 40mm torx 25pc,FST-16WEKRMV,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-16WEKRMV.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw wood screw 5mm 80mm phillips 25pc,FST-1EK0KK0N,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-1EK0KK0N.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw wood screw 3mm 40mm hex 25pc,FST-1KOY1JOJ,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-1KOY1JOJ.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw wood screw 6mm 30mm hex 50pc,FST-1NDRNUH3,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-1NDRNUH3.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw drywall screw 5mm 30mm torx 50pc,FST-22SL20JR,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-22SL20JR.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw machine screw 4mm 60mm phillips 50pc,FST-22VBFPH5,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-22VBFPH5.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw wood screw 6mm 50mm hex 100pc,FST-2BG9UMPU,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-2BG9UMPU.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw drywall screw 4mm 60mm slot 25pc,FST-2COP25FP,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-2COP25FP.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw wood screw 3mm 60mm slot 100pc,FST-2MRNC175,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-2MRNC175.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw deck screw 6mm 100mm phillips 25pc,FST-308K99OT,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-308K99OT.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw drywall screw 3mm 80mm pozidriv 100pc,FST-326LPG5W,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-326LPG5W.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw deck screw 4mm 60mm hex 50pc,FST-3CPBIJ3B,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-3CPBIJ3B.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw machine screw 5mm 60mm hex 100pc,FST-5CP1JN3E,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-5CP1JN3E.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw wood screw 4mm 30mm torx 100pc,FST-A6ZMFHEP,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-A6ZMFHEP.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw deck screw 5mm 60mm phillips 25pc,FST-FWIHCSKQ,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-FWIHCSKQ.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw deck screw 10mm 20mm torx 50pc,FST-LS05PTRP,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-LS05PTRP.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw wood screw 8mm 30mm torx 200pc,FST-OCZ9CFCC,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-OCZ9CFCC.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw machine screw 5mm 20mm pozidriv 50pc,FST-Q9RM5S8O,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-Q9RM5S8O.json
+Dresselhaus,Outdoor,DRE 2A1-OSK,Dresselhaus Outdoor DRE 2A1-OSK Wood and Drywall Screw drywall screw 3mm 30mm torx 50pc,FST-Z95W6C1Y,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-Z95W6C1Y.json
+Dresselhaus,Outdoor,Pro 3O6-R0C,Dresselhaus Outdoor Pro 3O6-R0C Wood and Drywall Screw machine screw 3mm 80mm torx 500pc,FST-1C2KV18N,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0016_1tqb61vr/FST-1C2KV18N.json
+Dresselhaus,Outdoor,Pro 3O6-R0C,Dresselhaus Outdoor Pro 3O6-R0C Wood and Drywall Screw machine screw 6mm 60mm slot 100pc,FST-1ERAI6D7,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0016_1tqb61vr/FST-1ERAI6D7.json
+Dresselhaus,Outdoor,Pro 3O6-R0C,Dresselhaus Outdoor Pro 3O6-R0C Wood and Drywall Screw deck screw 3mm 80mm phillips 50pc,FST-1OLCKC88,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0016_1tqb61vr/FST-1OLCKC88.json
+Dresselhaus,Outdoor,Pro 3O6-R0C,Dresselhaus Outdoor Pro 3O6-R0C Wood and Drywall Screw deck screw 4mm 80mm phillips 25pc,FST-1V9FRH9T,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0016_1tqb61vr/FST-1V9FRH9T.json
+Dresselhaus,Outdoor,Pro 3O6-R0C,Dresselhaus Outdoor Pro 3O6-R0C Wood and Drywall Screw wood screw 4mm 60mm pozidriv 100pc,FST-206B1VN7,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0016_1tqb61vr/FST-206B1VN7.json
+Dresselhaus,Outdoor,Pro 3O6-R0C,Dresselhaus Outdoor Pro 3O6-R0C Wood and Drywall Screw wood screw 5mm 60mm pozidriv 100pc,FST-21FV0CXD,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0016_1tqb61vr/FST-21FV0CXD.json
+Dresselhaus,Outdoor,Pro 3O6-R0C,Dresselhaus Outdoor Pro 3O6-R0C Wood and Drywall Screw machine screw 3mm 100mm pozidriv 50pc,FST-25YHYNEP,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0016_1tqb61vr/FST-25YHYNEP.json
+Dresselhaus,Outdoor,Pro 3O6-R0C,Dresselhaus Outdoor Pro 3O6-R0C Wood and Drywall Screw wood screw 8mm 80mm phillips 50pc,FST-2N98LJJ9,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0016_1tqb61vr/FST-2N98LJJ9.json
+Dresselhaus,Outdoor,Pro 3O6-R0C,Dresselhaus Outdoor Pro 3O6-R0C Wood and Drywall Screw drywall screw 4mm 50mm pozidriv 25pc,FST-2XYBJDYZ,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0016_1tqb61vr/FST-2XYBJDYZ.json
+Dresselhaus,Outdoor,Pro 3O6-R0C,Dresselhaus Outdoor Pro 3O6-R0C Wood and Drywall Screw deck screw 3mm 50mm torx 25pc,FST-3VTJ39CD,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0016_1tqb61vr/FST-3VTJ39CD.json
+Dresselhaus,Outdoor,Pro 3O6-R0C,Dresselhaus Outdoor Pro 3O6-R0C Wood and Drywall Screw drywall screw 4mm 30mm pozidriv 500pc,FST-7PXXIQR6,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0016_1tqb61vr/FST-7PXXIQR6.json
+Dresselhaus,Outdoor,Pro 3O6-R0C,Dresselhaus Outdoor Pro 3O6-R0C Wood and Drywall Screw machine screw 3mm 30mm pozidriv 200pc,FST-BSF2XWW8,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0016_1tqb61vr/FST-BSF2XWW8.json
+Dresselhaus,Outdoor,Pro 3O6-R0C,Dresselhaus Outdoor Pro 3O6-R0C Wood and Drywall Screw wood screw 6mm 40mm torx 100pc,FST-M88K1IQL,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0016_1tqb61vr/FST-M88K1IQL.json
+Dresselhaus,Outdoor,Pro 3O6-R0C,Dresselhaus Outdoor Pro 3O6-R0C Wood and Drywall Screw deck screw 4mm 30mm torx 200pc,FST-N68EFUEM,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0016_1tqb61vr/FST-N68EFUEM.json
+Dresselhaus,Outdoor,Pro 3O6-R0C,Dresselhaus Outdoor Pro 3O6-R0C Wood and Drywall Screw wood screw 4mm 20mm hex 50pc,FST-OLJJEGCL,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0016_1tqb61vr/FST-OLJJEGCL.json
+Dresselhaus,Outdoor,Pro 3O6-R0C,Dresselhaus Outdoor Pro 3O6-R0C Wood and Drywall Screw drywall screw 5mm 100mm phillips 100pc,FST-TNP5HXMK,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0016_1tqb61vr/FST-TNP5HXMK.json
+Legrand,Plexo,Plexo 2AP-F5O,Legrand Plexo Plexo 2AP-F5O Extension Cable 5m IP20 Black,ELC-10789PIZ,/proc/catalog/electrical/extension_cables/fam_electrical_extension_cables_0009_3alyhz6s/ELC-10789PIZ.json
+Legrand,Plexo,Plexo 2AP-F5O,Legrand Plexo Plexo 2AP-F5O Extension Cable 15m IP54 Yellow,ELC-1KIVL58P,/proc/catalog/electrical/extension_cables/fam_electrical_extension_cables_0009_3alyhz6s/ELC-1KIVL58P.json
+Legrand,Plexo,Plexo 2AP-F5O,Legrand Plexo Plexo 2AP-F5O Extension Cable 3m IP44 Black,ELC-1SKNFGHD,/proc/catalog/electrical/extension_cables/fam_electrical_extension_cables_0009_3alyhz6s/ELC-1SKNFGHD.json
+Legrand,Plexo,Plexo 2AP-F5O,Legrand Plexo Plexo 2AP-F5O Extension Cable 10m IP44 Orange,ELC-2N2UOEO0,/proc/catalog/electrical/extension_cables/fam_electrical_extension_cables_0009_3alyhz6s/ELC-2N2UOEO0.json
+Legrand,Plexo,Plexo 2AP-F5O,Legrand Plexo Plexo 2AP-F5O Extension Cable 2m IP54 Black,ELC-2PZN4HUJ,/proc/catalog/electrical/extension_cables/fam_electrical_extension_cables_0009_3alyhz6s/ELC-2PZN4HUJ.json
+Legrand,Plexo,Plexo 2AP-F5O,Legrand Plexo Plexo 2AP-F5O Extension Cable 5m IP54 Orange,ELC-2WSSVHF6,/proc/catalog/electrical/extension_cables/fam_electrical_extension_cables_0009_3alyhz6s/ELC-2WSSVHF6.json
+Legrand,Plexo,Plexo 2AP-F5O,Legrand Plexo Plexo 2AP-F5O Extension Cable 50m IP44 Black,ELC-34UWIR54,/proc/catalog/electrical/extension_cables/fam_electrical_extension_cables_0009_3alyhz6s/ELC-34UWIR54.json
+Legrand,Plexo,Plexo 2AP-F5O,Legrand Plexo Plexo 2AP-F5O Extension Cable 5m IP65 Orange,ELC-37H0CMU5,/proc/catalog/electrical/extension_cables/fam_electrical_extension_cables_0009_3alyhz6s/ELC-37H0CMU5.json
+Legrand,Plexo,Plexo 2AP-F5O,Legrand Plexo Plexo 2AP-F5O Extension Cable 10m IP44 Gray,ELC-3U6L89IY,/proc/catalog/electrical/extension_cables/fam_electrical_extension_cables_0009_3alyhz6s/ELC-3U6L89IY.json
+Legrand,Plexo,Plexo 2AP-F5O,Legrand Plexo Plexo 2AP-F5O Extension Cable 10m IP20 Gray,ELC-3V1RGL2U,/proc/catalog/electrical/extension_cables/fam_electrical_extension_cables_0009_3alyhz6s/ELC-3V1RGL2U.json
+Legrand,Plexo,Plexo 2AP-F5O,Legrand Plexo Plexo 2AP-F5O Extension Cable 1m IP20 Blue,ELC-EIPF5Z1H,/proc/catalog/electrical/extension_cables/fam_electrical_extension_cables_0009_3alyhz6s/ELC-EIPF5Z1H.json
+Legrand,Plexo,Plexo 2AP-F5O,Legrand Plexo Plexo 2AP-F5O Extension Cable 3m IP44 Gray,ELC-LXR7T2NH,/proc/catalog/electrical/extension_cables/fam_electrical_extension_cables_0009_3alyhz6s/ELC-LXR7T2NH.json
+Legrand,Plexo,Plexo 2XT-4EJ,Legrand Plexo Plexo 2XT-4EJ Wiring Device terminal clamp White IP20,ELC-1UMXPL88,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0013_15e41y2b/ELC-1UMXPL88.json
+Legrand,Plexo,Plexo 2XT-4EJ,Legrand Plexo Plexo 2XT-4EJ Wiring Device cable tie White IP20,ELC-1ZT84YGR,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0013_15e41y2b/ELC-1ZT84YGR.json
+Legrand,Plexo,Plexo 2XT-4EJ,Legrand Plexo Plexo 2XT-4EJ Wiring Device switch Black IP54,ELC-24HWSMT4,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0013_15e41y2b/ELC-24HWSMT4.json
+Legrand,Plexo,Plexo 2XT-4EJ,Legrand Plexo Plexo 2XT-4EJ Wiring Device switch White IP65,ELC-24SPD71L,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0013_15e41y2b/ELC-24SPD71L.json
+Legrand,Plexo,Plexo 2XT-4EJ,Legrand Plexo Plexo 2XT-4EJ Wiring Device terminal clamp Black IP65,ELC-27SQFM9D,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0013_15e41y2b/ELC-27SQFM9D.json
+Legrand,Plexo,Plexo 2XT-4EJ,Legrand Plexo Plexo 2XT-4EJ Wiring Device socket outlet Blue IP65,ELC-2C3BCMRK,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0013_15e41y2b/ELC-2C3BCMRK.json
+Legrand,Plexo,Plexo 2XT-4EJ,Legrand Plexo Plexo 2XT-4EJ Wiring Device junction box Gray IP20,ELC-2F3HZ3AR,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0013_15e41y2b/ELC-2F3HZ3AR.json
+Legrand,Plexo,Plexo 2XT-4EJ,Legrand Plexo Plexo 2XT-4EJ Wiring Device junction box Black IP20,ELC-3KVDWTGN,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0013_15e41y2b/ELC-3KVDWTGN.json
+Legrand,Plexo,Plexo 2XT-4EJ,Legrand Plexo Plexo 2XT-4EJ Wiring Device cable tie White IP44,ELC-F32U0SZ7,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0013_15e41y2b/ELC-F32U0SZ7.json
+Legrand,Plexo,Plexo 2XT-4EJ,Legrand Plexo Plexo 2XT-4EJ Wiring Device socket outlet Gray IP20,ELC-TZKDMBYF,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0013_15e41y2b/ELC-TZKDMBYF.json
+Legrand,Plexo,Plexo 2XT-4EJ,Legrand Plexo Plexo 2XT-4EJ Wiring Device cable tie Gray IP20,ELC-WSX8DMJG,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0013_15e41y2b/ELC-WSX8DMJG.json
+Legrand,Plexo,Plexo 2XT-4EJ,Legrand Plexo Plexo 2XT-4EJ Wiring Device junction box White IP20,ELC-X49DOT1C,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0013_15e41y2b/ELC-X49DOT1C.json
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 350mm hook all season,AUT-14HF0OOG,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0003_2idoecwu/AUT-14HF0OOG.json
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 350mm side lock all season,AUT-1LE1R1FI,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0003_2idoecwu/AUT-1LE1R1FI.json
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 450mm multi adapter all season,AUT-24Q8XVD4,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0003_2idoecwu/AUT-24Q8XVD4.json
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 600mm side lock all season,AUT-2A65SZOK,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0003_2idoecwu/AUT-2A65SZOK.json
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 650mm hook all season,AUT-2JQDL436,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0003_2idoecwu/AUT-2JQDL436.json
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 500mm multi adapter all season,AUT-2OVBKUUG,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0003_2idoecwu/AUT-2OVBKUUG.json
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 350mm bayonet all season,AUT-2YO97CYF,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0003_2idoecwu/AUT-2YO97CYF.json
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 700mm hook all season,AUT-3HRLM99Q,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0003_2idoecwu/AUT-3HRLM99Q.json
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 600mm multi adapter all season,AUT-3N85JDSW,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0003_2idoecwu/AUT-3N85JDSW.json
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 400mm multi adapter all season,AUT-7L7CNE8O,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0003_2idoecwu/AUT-7L7CNE8O.json
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 600mm side lock all season,AUT-ASNVQYOA,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0003_2idoecwu/AUT-ASNVQYOA.json
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 350mm bayonet all season,AUT-KBS1XLD2,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0003_2idoecwu/AUT-KBS1XLD2.json
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 450mm side lock all season,AUT-16WRS8QE,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0015_3fz7fct4/AUT-16WRS8QE.json
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 550mm side lock all season,AUT-1W10B7FH,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0015_3fz7fct4/AUT-1W10B7FH.json
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 400mm hook all season,AUT-2D4DTN90,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0015_3fz7fct4/AUT-2D4DTN90.json
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 600mm pinch tab all season,AUT-2H7FRD1W,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0015_3fz7fct4/AUT-2H7FRD1W.json
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 550mm multi adapter all season,AUT-2WD0Z19L,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0015_3fz7fct4/AUT-2WD0Z19L.json
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 500mm multi adapter all season,AUT-32PJK2NI,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0015_3fz7fct4/AUT-32PJK2NI.json
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 500mm multi adapter all season,AUT-358476D9,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0015_3fz7fct4/AUT-358476D9.json
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 550mm hook all season,AUT-374ON3IZ,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0015_3fz7fct4/AUT-374ON3IZ.json
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 600mm pinch tab all season,AUT-M899F2E4,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0015_3fz7fct4/AUT-M899F2E4.json
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 450mm hook all season,AUT-P4ZOAS4H,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0015_3fz7fct4/AUT-P4ZOAS4H.json
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 400mm multi adapter all season,AUT-PKCJKAWK,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0015_3fz7fct4/AUT-PKCJKAWK.json
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 550mm multi adapter all season,AUT-UP0MO948,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0015_3fz7fct4/AUT-UP0MO948.json
+Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb jump starter 24V 4A,AUT-1DNW8Q6J,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1DNW8Q6J.json
+Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery pack 12V 4A,AUT-1E9N8QME,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1E9N8QME.json
+Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 12V 6A,AUT-1Y2PV8L9,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1Y2PV8L9.json
+Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 12V 4A,AUT-1Z2UVIHW,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1Z2UVIHW.json
+warning: result truncated at 100 rows
+Next step_5... Run one SQL query that resolves each requested item to exact SKU via brand + concatenated line token + required product_properties. (32798 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH req AS (\n  SELECT 'Michelin' AS brand, 'Premium Stealth 1T0-N2Q' AS line_token, 'Wiper Blade' AS kind,\n         'length_mm' AS k1, '550' AS v1, 'adapter_type' AS k2, 'hook' AS v2, NULL AS k3, NULL AS v3, NULL AS k4, NULL AS v4\n  UNION ALL\n  SELECT 'Varta','Workshop Silver 2KH-QZR','Automotive Charger and Bulb',\n         'product_type','jump starter','voltage_v','24','current_a','10','vehicle_type','van'\n  UNION ALL\n  SELECT 'Dresselhaus','Outdoor DRE 2A1-OSK','Wood and Drywall Screw',\n         'screw_type','wood screw','diameter_mm','3','length_mm','40',NULL,NULL\n  UNION ALL\n  SELECT 'Legrand','Plexo Plexo 2XT-4EJ','Wiring Device',\n         'device_type','junction box','color_family','White',NULL,NULL,NULL,NULL\n  UNION ALL\n  SELECT 'Ajax','Concentrate Classic GCE-IRA','Cleaning Liquid',\n         'cleaner_type','interior cleaner','volume_ml','1000',NULL,NULL,NULL,NULL\n  UNION ALL\n  SELECT 'Viega','Professional Sanpress 1NX-HRW','Pipe Fitting',\n         'fitting_type','seal ring','diameter_mm','12','connection_type','push fit',NULL,NULL\n)\nSELECT r.brand, r.line_token, r.kind, p.sku, p.path, i.available_today\nFROM req r\nJOIN products p\n  ON p.brand = r.brand\n AND (p.series || ' ' || p.model) = r.line_token\n AND p.name = r.kind\nJOIN inventory i\n  ON i.sku = p.sku AND i.store_id = 'store_graz_jakomini'\nWHERE EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key=r.k1 AND LOWER(pp.value_text)=LOWER(r.v1))\n  AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key=r.k2 AND LOWER(pp.value_text)=LOWER(r.v2))\n  AND (r.k3 IS NULL OR EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key=r.k3 AND LOWER(pp.value_text)=LOWER(r.v3)))\n  AND (r.k4 IS NULL OR EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key=r.k4 AND LOWER(pp.value_text)=LOWER(r.v4)))\nORDER BY r.brand, p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH req AS (
+  SELECT 'Michelin' AS brand, 'Premium Stealth 1T0-N2Q' AS line_token, 'Wiper Blade' AS kind,
+         'length_mm' AS k1, '550' AS v1, 'adapter_type' AS k2, 'hook' AS v2, NULL AS k3, NULL AS v3, NULL AS k4, NULL AS v4
+  UNION ALL
+  SELECT 'Varta','Workshop Silver 2KH-QZR','Automotive Charger and Bulb',
+         'product_type','jump starter','voltage_v','24','current_a','10','vehicle_type','van'
+  UNION ALL
+  SELECT 'Dresselhaus','Outdoor DRE 2A1-OSK','Wood and Drywall Screw',
+         'screw_type','wood screw','diameter_mm','3','length_mm','40',NULL,NULL
+  UNION ALL
+  SELECT 'Legrand','Plexo Plexo 2XT-4EJ','Wiring Device',
+         'device_type','junction box','color_family','White',NULL,NULL,NULL,NULL
+  UNION ALL
+  SELECT 'Ajax','Concentrate Classic GCE-IRA','Cleaning Liquid',
+         'cleaner_type','interior cleaner','volume_ml','1000',NULL,NULL,NULL,NULL
+  UNION ALL
+  SELECT 'Viega','Professional Sanpress 1NX-HRW','Pipe Fitting',
+         'fitting_type','seal ring','diameter_mm','12','connection_type','push fit',NULL,NULL
+)
+SELECT r.brand, r.line_token, r.kind, p.sku, p.path, i.available_today
+FROM req r
+JOIN products p
+  ON p.brand = r.brand
+ AND (p.series || ' ' || p.model) = r.line_token
+ AND p.name = r.kind
+JOIN inventory i
+  ON i.sku = p.sku AND i.store_id = 'store_graz_jakomini'
+WHERE EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key=r.k1 AND LOWER(pp.value_text)=LOWER(r.v1))
+  AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key=r.k2 AND LOWER(pp.value_text)=LOWER(r.v2))
+  AND (r.k3 IS NULL OR EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key=r.k3 AND LOWER(pp.value_text)=LOWER(r.v3)))
+  AND (r.k4 IS NULL OR EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key=r.k4 AND LOWER(pp.value_text)=LOWER(r.v4)))
+ORDER BY r.brand, p.sku;
+SQL
+brand,line_token,kind,sku,path,available_today
+Next step_6... Resolve candidate SKUs using products joined to product_kinds and product_properties with numeric-safe comparisons. (24190 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH req AS (\n  SELECT 'Michelin' brand, 'Premium' series, 'Stealth 1T0-N2Q' model, 'Wiper Blade' kind,\n         'length_mm' k1, '550' v1, 'adapter_type' k2, 'hook' v2, NULL k3, NULL v3, NULL k4, NULL v4\n  UNION ALL SELECT 'Varta','Workshop','Silver 2KH-QZR','Automotive Charger and Bulb',\n         'product_type','jump starter','voltage_v','24','current_a','10','vehicle_type','van'\n  UNION ALL SELECT 'Dresselhaus','Outdoor','DRE 2A1-OSK','Wood and Drywall Screw',\n         'screw_type','wood screw','diameter_mm','3','length_mm','40',NULL,NULL\n  UNION ALL SELECT 'Legrand','Plexo','Plexo 2XT-4EJ','Wiring Device',\n         'device_type','junction box','color_family','White',NULL,NULL,NULL,NULL\n  UNION ALL SELECT 'Ajax','Concentrate','Classic GCE-IRA','Cleaning Liquid',\n         'cleaner_type','interior cleaner','volume_ml','1000',NULL,NULL,NULL,NULL\n  UNION ALL SELECT 'Viega','Professional','Sanpress 1NX-HRW','Pipe Fitting',\n         'fitting_type','seal ring','diameter_mm','12','connection_type','push fit',NULL,NULL\n), matched AS (\n  SELECT r.brand, r.series, r.model, r.kind, p.sku, p.path\n  FROM req r\n  JOIN products p ON p.brand=r.brand AND p.series=r.series AND p.model=r.model\n  JOIN product_kinds pk ON pk.id=p.kind_id AND pk.name=r.kind\n  WHERE EXISTS (\n    SELECT 1 FROM product_properties pp\n    WHERE pp.sku=p.sku AND pp.key=r.k1\n      AND LOWER(COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)))=LOWER(r.v1)\n  )\n    AND EXISTS (\n    SELECT 1 FROM product_properties pp\n    WHERE pp.sku=p.sku AND pp.key=r.k2\n      AND LOWER(COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)))=LOWER(r.v2)\n  )\n    AND (r.k3 IS NULL OR EXISTS (\n      SELECT 1 FROM product_properties pp\n      WHERE pp.sku=p.sku AND pp.key=r.k3\n        AND LOWER(COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)))=LOWER(r.v3)\n    ))\n    AND (r.k4 IS NULL OR EXISTS (\n      SELECT 1 FROM product_properties pp\n      WHERE pp.sku=p.sku AND pp.key=r.k4\n        AND LOWER(COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)))=LOWER(r.v4)\n    ))\n)\nSELECT m.brand, m.series, m.model, m.kind, m.sku, m.path, i.available_today\nFROM matched m\nLEFT JOIN inventory i ON i.sku=m.sku AND i.store_id='store_graz_jakomini'\nORDER BY m.brand, m.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH req AS (
+  SELECT 'Michelin' brand, 'Premium' series, 'Stealth 1T0-N2Q' model, 'Wiper Blade' kind,
+         'length_mm' k1, '550' v1, 'adapter_type' k2, 'hook' v2, NULL k3, NULL v3, NULL k4, NULL v4
+  UNION ALL SELECT 'Varta','Workshop','Silver 2KH-QZR','Automotive Charger and Bulb',
+         'product_type','jump starter','voltage_v','24','current_a','10','vehicle_type','van'
+  UNION ALL SELECT 'Dresselhaus','Outdoor','DRE 2A1-OSK','Wood and Drywall Screw',
+         'screw_type','wood screw','diameter_mm','3','length_mm','40',NULL,NULL
+  UNION ALL SELECT 'Legrand','Plexo','Plexo 2XT-4EJ','Wiring Device',
+         'device_type','junction box','color_family','White',NULL,NULL,NULL,NULL
+  UNION ALL SELECT 'Ajax','Concentrate','Classic GCE-IRA','Cleaning Liquid',
+         'cleaner_type','interior cleaner','volume_ml','1000',NULL,NULL,NULL,NULL
+  UNION ALL SELECT 'Viega','Professional','Sanpress 1NX-HRW','Pipe Fitting',
+         'fitting_type','seal ring','diameter_mm','12','connection_type','push fit',NULL,NULL
+), matched AS (
+  SELECT r.brand, r.series, r.model, r.kind, p.sku, p.path
+  FROM req r
+  JOIN products p ON p.brand=r.brand AND p.series=r.series AND p.model=r.model
+  JOIN product_kinds pk ON pk.id=p.kind_id AND pk.name=r.kind
+  WHERE EXISTS (
+    SELECT 1 FROM product_properties pp
+    WHERE pp.sku=p.sku AND pp.key=r.k1
+      AND LOWER(COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)))=LOWER(r.v1)
+  )
+    AND EXISTS (
+    SELECT 1 FROM product_properties pp
+    WHERE pp.sku=p.sku AND pp.key=r.k2
+      AND LOWER(COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)))=LOWER(r.v2)
+  )
+    AND (r.k3 IS NULL OR EXISTS (
+      SELECT 1 FROM product_properties pp
+      WHERE pp.sku=p.sku AND pp.key=r.k3
+        AND LOWER(COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)))=LOWER(r.v3)
+    ))
+    AND (r.k4 IS NULL OR EXISTS (
+      SELECT 1 FROM product_properties pp
+      WHERE pp.sku=p.sku AND pp.key=r.k4
+        AND LOWER(COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)))=LOWER(r.v4)
+    ))
+)
+SELECT m.brand, m.series, m.model, m.kind, m.sku, m.path, i.available_today
+FROM matched m
+LEFT JOIN inventory i ON i.sku=m.sku AND i.store_id='store_graz_jakomini'
+ORDER BY m.brand, m.sku;
+SQL
+brand,series,model,kind,sku,path,available_today
+Ajax,Concentrate,Classic GCE-IRA,Cleaning Liquid,CLN-32NV2TC2,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0018_1ow7lcl7/CLN-32NV2TC2.json,5
+Dresselhaus,Outdoor,DRE 2A1-OSK,Wood and Drywall Screw,FST-1KOY1JOJ,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0002_22jtolf8/FST-1KOY1JOJ.json,
+Legrand,Plexo,Plexo 2XT-4EJ,Wiring Device,ELC-X49DOT1C,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0013_15e41y2b/ELC-X49DOT1C.json,6
+Michelin,Premium,Stealth 1T0-N2Q,Wiper Blade,AUT-374ON3IZ,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0015_3fz7fct4/AUT-374ON3IZ.json,
+Varta,Workshop,Silver 2KH-QZR,Automotive Charger and Bulb,AUT-2EAK0IZ5,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-2EAK0IZ5.json,
+Viega,Professional,Sanpress 1NX-HRW,Pipe Fitting,PLB-VUCSA7E4,/proc/catalog/plumbing/pipe_fittings/fam_plumbing_pipe_fittings_0015_3hefe1wx/PLB-VUCSA7E4.json,4
+Next step_7... Run one SQL COUNT aggregation over the six resolved SKUs at store_graz_jakomini for available_today >= 1. (16227 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH resolved AS (\n  SELECT 'CLN-32NV2TC2' AS sku\n  UNION ALL SELECT 'FST-1KOY1JOJ'\n  UNION ALL SELECT 'ELC-X49DOT1C'\n  UNION ALL SELECT 'AUT-374ON3IZ'\n  UNION ALL SELECT 'AUT-2EAK0IZ5'\n  UNION ALL SELECT 'PLB-VUCSA7E4'\n)\nSELECT COUNT(*) AS qty\nFROM resolved r\nJOIN inventory i\n  ON i.sku = r.sku\n AND i.store_id = 'store_graz_jakomini'\nWHERE i.available_today >= 1;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH resolved AS (
+  SELECT 'CLN-32NV2TC2' AS sku
+  UNION ALL SELECT 'FST-1KOY1JOJ'
+  UNION ALL SELECT 'ELC-X49DOT1C'
+  UNION ALL SELECT 'AUT-374ON3IZ'
+  UNION ALL SELECT 'AUT-2EAK0IZ5'
+  UNION ALL SELECT 'PLB-VUCSA7E4'
+)
+SELECT COUNT(*) AS qty
+FROM resolved r
+JOIN inventory i
+  ON i.sku = r.sku
+ AND i.store_id = 'store_graz_jakomini'
+WHERE i.available_today >= 1;
+SQL
+qty
+3
+Next step_8... Report completion with exact token [QTY:3]. (13592 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved Graz Jakomini store.', 'Resolved exact requested product variants.', 'Counted variants with available_today >= 1 at the store.'] message='[QTY:3]' grounding_refs=['/proc/stores/store_graz_jakomini.json', '/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0018_1ow7lcl7/CLN-32NV2TC2.json', '/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0013_15e41y2b/ELC-X49DOT1C.json', '/proc/catalog/plumbing/pipe_fittings/fam_plumbing_pipe_fittings_0015_3hefe1wx/PLB-VUCSA7E4.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved Graz Jakomini store.
+- Resolved exact requested product variants.
+- Counted variants with available_today >= 1 at the store.
+
+[34mAGENT SUMMARY: [QTY:3][0m
+- [34m/proc/stores/store_graz_jakomini.json[0m
+- [34m/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0018_1ow7lcl7/CLN-32NV2TC2.json[0m
+- [34m/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0013_15e41y2b/ELC-X49DOT1C.json[0m
+- [34m/proc/catalog/plumbing/pipe_fittings/fam_plumbing_pipe_fittings_0015_3hefe1wx/PLB-VUCSA7E4.json[0m
