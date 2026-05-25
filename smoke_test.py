@@ -77,6 +77,7 @@ class FakeVM:
         self.deletes = []
         self.raise_on_read_path = None
         self.stat_not_found = set()
+        self.sql_outputs = {}
 
     def tree(self, req):
         return SimpleNamespace(root=SimpleNamespace(name="", children=[]), truncated=False)
@@ -96,6 +97,10 @@ class FakeVM:
         return SimpleNamespace(paths=[], truncated=False)
 
     def exec(self, req):
+        if req.path == "/bin/sql":
+            for needle, stdout in self.sql_outputs.items():
+                if needle in req.stdin:
+                    return SimpleNamespace(stdout=stdout, stderr="", exit_code=0)
         return SimpleNamespace(stdout="ok", stderr="", exit_code=0)
 
     def write(self, req):
@@ -239,6 +244,15 @@ def test_sql_path_extraction():
     # path column resolved by header name, not position
     one = agent._extract_paths_with_labels("a,b,path\n1,2,/proc/stores/s1.json\n")
     assert one == [("/proc/stores/s1.json", "")], one
+    # path aliases are harvested when the cell itself is a real /proc path
+    alias = agent._extract_paths_with_labels(
+        "sku,product_path,store_path\n"
+        "SKU1,/proc/catalog/SKU1.json,/proc/stores/store_1.json\n"
+    )
+    assert alias == [
+        ("/proc/catalog/SKU1.json", "sku=SKU1"),
+        ("/proc/stores/store_1.json", "sku=SKU1"),
+    ], alias
     print("ok: SQL path extraction (header-index, spaces, scalars, ragged)")
 
 
@@ -380,6 +394,96 @@ def test_harvest_search_and_list():
     print("ok: harvest from search matches and list entries")
 
 
+def test_numeric_claim_check_reruns_last_aggregation():
+    ledger = agent.EvidenceLedger()
+    query = "SELECT COUNT(*) AS n FROM inventory WHERE available > 0;"
+    agent._harvest(
+        ledger,
+        agent.Req_Exec(tool="exec", path="/bin/sql", stdin=query),
+        SimpleNamespace(stdout="n\n5\n", stderr="", exit_code=0),
+    )
+    vm = FakeVM()
+    vm.sql_outputs["COUNT(*) AS n"] = "n\n7\n"
+
+    fn = _mk_completion("<COUNT:5>", refs=["/proc/stores/store_1.json"])
+    corr = agent._claim_check_correction(
+        vm,
+        ledger,
+        "How many matching products are available? Answer exactly as <COUNT:%d>",
+        fn,
+    )
+    assert corr is not None and "CLAIM CHECK" in corr
+    assert "you answered 5" in corr and "re-derived 7" in corr
+    print("ok: numeric claim check re-runs last aggregation and catches mismatch")
+
+
+def test_inventory_count_requires_product_and_store_refs():
+    ledger = agent.EvidenceLedger()
+    ledger.add("/proc/catalog/FST-1HE3ZSQ6.json", source="sql")
+    ledger.add("/proc/stores/store_graz_lend.json", source="sql")
+
+    task = (
+        "How many of these products have at least 2 items available in Graz Lend "
+        "hardware shop today? Answer in exactly format \"count : %d\""
+    )
+
+    fn = _mk_completion("count : 1", refs=["/proc/stores/store_graz_lend.json"])
+    corr = agent._completion_gate(ledger, task, fn)
+    assert corr is not None and "/proc/catalog" in corr, \
+        "inventory count must cite at least one confirmed product path"
+
+    fn = _mk_completion("count : 1", refs=["/proc/catalog/FST-1HE3ZSQ6.json"])
+    corr = agent._completion_gate(ledger, task, fn)
+    assert corr is not None and "/proc/stores" in corr, \
+        "store-scoped inventory count must cite the confirmed store path"
+
+    fn = _mk_completion("count : 1", refs=[
+        "/proc/catalog/FST-1HE3ZSQ6.json",
+        "/proc/stores/store_graz_lend.json",
+    ])
+    assert agent._completion_gate(ledger, task, fn) is None, \
+        "confirmed product and store refs satisfy the inventory grounding gate"
+
+    plain_count = "For the catalogue count report, how many products are Valve and Connector?"
+    fn = _mk_completion("57", refs=[])
+    assert agent._completion_gate(agent.EvidenceLedger(), plain_count, fn) is None, \
+        "plain catalogue count reports must not require product/store refs"
+    print("ok: inventory count gate requires confirmed product and store refs")
+
+
+def test_discount_denial_requires_subject_and_update_doc():
+    ledger = agent.EvidenceLedger()
+    fn = _mk_completion(
+        "Denied",
+        outcome="OUTCOME_DENIED_SECURITY",
+        refs=["/docs/discounts.md", "/docs/security.md"],
+    )
+    corr = agent._completion_gate(
+        ledger,
+        "For basket basket_007, add the largest allowed service_recovery discount.",
+        fn,
+    )
+    assert corr is not None and "/proc/baskets/basket_007.json" in corr
+    assert "/docs/current-updates" in corr
+
+    fn = _mk_completion(
+        "Denied",
+        outcome="OUTCOME_DENIED_SECURITY",
+        refs=[
+            "/docs/discounts.md",
+            "/docs/security.md",
+            "/docs/current-updates/2021-08-09-service-recovery.md",
+            "/proc/baskets/basket_007.json",
+        ],
+    )
+    assert agent._completion_gate(
+        ledger,
+        "For basket basket_007, add the largest allowed service_recovery discount.",
+        fn,
+    ) is None
+    print("ok: discount denial gate requires basket subject and current update doc")
+
+
 def main():
     test_normal_completion()
     test_security_denial()
@@ -391,6 +495,9 @@ def main():
     test_fabrication_gate()
     test_cite_the_subject()
     test_harvest_search_and_list()
+    test_numeric_claim_check_reruns_last_aggregation()
+    test_inventory_count_requires_product_and_store_refs()
+    test_discount_denial_requires_subject_and_update_doc()
     print("\nALL SMOKE TESTS PASSED")
 
 
