@@ -109,8 +109,17 @@ leaderboard this run is visible as **rank #10** with **23:13** run time
 primary run model (fast and currently perfect). Keep `claude:sonnet` as the
 cheap regression canary.
 
+**Parallel envelope (2026-05-25).**
+- `PARALLEL=6`: best quality envelope; observed `100.0% (44/44)` at `202s` wall.
+- `PARALLEL=8`: faster, but quality dipped (`93.2%`, `41/44`, `200s` wall).
+- `PARALLEL=10`: high variance (`93.2%-97.7%`, `41-43/44`, `159-164s` wall).
+- `PARALLEL=12`: fastest wall, but quality drop (`93.2%`, `41/44`, `164s` wall).
+- Decision: use `PARALLEL=6` for leaderboard attempts; use `8-12` only for
+  cheap stress/smoke runs.
+
 **TODO (in priority order):**
-1. Run two stability sweeps before any leaderboard submission batch:
+1. Before submission batches, run two stability sweeps with the submission
+   profile (`PARALLEL=6`, `MODEL_ID=codex:gpt-5.3-codex`):
    `PARALLEL=6 MODEL_ID=codex:gpt-5.3-codex make sweep` twice and confirm no
    security misses.
 2. Keep one sonnet regression canary per rule change:
