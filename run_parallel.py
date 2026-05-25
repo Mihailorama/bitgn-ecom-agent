@@ -123,7 +123,7 @@ def main() -> None:
 
     run = client.start_run(
         StartRunRequest(
-            name=f"ECOM SGR parallel ({MODEL_ID})",
+            name="@ai_nuts_and_bolts",
             benchmark_id=BENCH_ID,
             api_key=BITGN_API_KEY,
         )

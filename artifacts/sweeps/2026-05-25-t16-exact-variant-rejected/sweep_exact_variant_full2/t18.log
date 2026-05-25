@@ -1,0 +1,351 @@
+TASK t18 (model codex:gpt-5.3-codex)
+INSTRUCTION: I can visit any PowerTool branch in Graz today. Across every Graz branch, including branches with 0 availability, how many units of product (the Pipe Fitting from Viega in the Viega Professional Sanpress 2OG-ENN Pipe Fitting line that has fitting type pipe fitting, diameter 15 mm, and connection type threaded) are available today? Answer exactly as "%d" and cite every city store record plus the product record.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2025-10-08T16:53:18Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Run a single SQL query that identifies the exact SKU by brand/series/model/kind and required product_properties, then sums inventory.available_today across all Graz stores (including stores with no inventory rows). (16547 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH graz_stores AS (\n  SELECT id, path\n  FROM stores\n  WHERE city = 'Graz'\n), target_product AS (\n  SELECT p.sku, p.path\n  FROM products p\n  JOIN product_kinds k ON k.id = p.kind_id\n  JOIN product_properties pp1 ON pp1.sku = p.sku AND pp1.key = 'fitting_type' AND lower(pp1.value_text) = 'pipe fitting'\n  JOIN product_properties pp2 ON pp2.sku = p.sku AND pp2.key = 'diameter_mm' AND (\n    pp2.value_number = 15 OR pp2.value_text = '15'\n  )\n  JOIN product_properties pp3 ON pp3.sku = p.sku AND pp3.key = 'connection_type' AND lower(pp3.value_text) = 'threaded'\n  WHERE p.brand = 'Viega'\n    AND p.series = 'Viega Professional Sanpress 2OG-ENN'\n    AND k.name = 'Pipe Fitting'\n)\nSELECT\n  tp.sku,\n  tp.path AS product_path,\n  gs.id AS store_id,\n  gs.path AS store_path,\n  COALESCE(i.available_today, 0) AS store_available_today,\n  SUM(COALESCE(i.available_today, 0)) OVER () AS total_available_today\nFROM graz_stores gs\nCROSS JOIN target_product tp\nLEFT JOIN inventory i\n  ON i.store_id = gs.id\n AND i.sku = tp.sku\nORDER BY gs.id;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH graz_stores AS (
+  SELECT id, path
+  FROM stores
+  WHERE city = 'Graz'
+), target_product AS (
+  SELECT p.sku, p.path
+  FROM products p
+  JOIN product_kinds k ON k.id = p.kind_id
+  JOIN product_properties pp1 ON pp1.sku = p.sku AND pp1.key = 'fitting_type' AND lower(pp1.value_text) = 'pipe fitting'
+  JOIN product_properties pp2 ON pp2.sku = p.sku AND pp2.key = 'diameter_mm' AND (
+    pp2.value_number = 15 OR pp2.value_text = '15'
+  )
+  JOIN product_properties pp3 ON pp3.sku = p.sku AND pp3.key = 'connection_type' AND lower(pp3.value_text) = 'threaded'
+  WHERE p.brand = 'Viega'
+    AND p.series = 'Viega Professional Sanpress 2OG-ENN'
+    AND k.name = 'Pipe Fitting'
+)
+SELECT
+  tp.sku,
+  tp.path AS product_path,
+  gs.id AS store_id,
+  gs.path AS store_path,
+  COALESCE(i.available_today, 0) AS store_available_today,
+  SUM(COALESCE(i.available_today, 0)) OVER () AS total_available_today
+FROM graz_stores gs
+CROSS JOIN target_product tp
+LEFT JOIN inventory i
+  ON i.store_id = gs.id
+ AND i.sku = tp.sku
+ORDER BY gs.id;
+SQL
+sku,product_path,store_id,store_path,store_available_today,total_available_today
+Next step_2... List Graz stores (id/path) and candidate Viega product variants with property key/value pairs for fitting_type, diameter, and connection_type. (15377 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH graz_stores AS (\n  SELECT id, path, name\n  FROM stores\n  WHERE city = 'Graz'\n), viega_candidates AS (\n  SELECT p.sku, p.path, p.brand, p.series, p.model, k.name AS kind_name\n  FROM products p\n  JOIN product_kinds k ON k.id = p.kind_id\n  WHERE lower(p.brand) = 'viega'\n    AND (\n      lower(p.series) LIKE '%professional sanpress 2og-enn%'\n      OR lower(p.model) LIKE '%2og-enn%'\n      OR lower(p.name) LIKE '%2og-enn%'\n    )\n    AND lower(k.name) LIKE '%pipe fitting%'\n)\nSELECT 'STORE' AS row_type, gs.id, gs.path, gs.name, NULL AS sku, NULL AS product_path, NULL AS prop_key, NULL AS value_text, NULL AS value_number\nFROM graz_stores gs\nUNION ALL\nSELECT 'PRODUCT_PROP' AS row_type, NULL, NULL, NULL, vc.sku, vc.path, pp.key, pp.value_text, pp.value_number\nFROM viega_candidates vc\nJOIN product_properties pp ON pp.sku = vc.sku\nWHERE pp.key IN ('fitting_type','diameter_mm','diameter','connection_type')\nORDER BY row_type, id, sku, prop_key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH graz_stores AS (
+  SELECT id, path, name
+  FROM stores
+  WHERE city = 'Graz'
+), viega_candidates AS (
+  SELECT p.sku, p.path, p.brand, p.series, p.model, k.name AS kind_name
+  FROM products p
+  JOIN product_kinds k ON k.id = p.kind_id
+  WHERE lower(p.brand) = 'viega'
+    AND (
+      lower(p.series) LIKE '%professional sanpress 2og-enn%'
+      OR lower(p.model) LIKE '%2og-enn%'
+      OR lower(p.name) LIKE '%2og-enn%'
+    )
+    AND lower(k.name) LIKE '%pipe fitting%'
+)
+SELECT 'STORE' AS row_type, gs.id, gs.path, gs.name, NULL AS sku, NULL AS product_path, NULL AS prop_key, NULL AS value_text, NULL AS value_number
+FROM graz_stores gs
+UNION ALL
+SELECT 'PRODUCT_PROP' AS row_type, NULL, NULL, NULL, vc.sku, vc.path, pp.key, pp.value_text, pp.value_number
+FROM viega_candidates vc
+JOIN product_properties pp ON pp.sku = vc.sku
+WHERE pp.key IN ('fitting_type','diameter_mm','diameter','connection_type')
+ORDER BY row_type, id, sku, prop_key;
+SQL
+row_type,id,path,name,sku,product_path,prop_key,value_text,value_number
+PRODUCT_PROP,,,,PLB-1B0AEUWP,/proc/catalog/Viega/PLB-1B0AEUWP.json,connection_type,push fit,
+PRODUCT_PROP,,,,PLB-1B0AEUWP,/proc/catalog/Viega/PLB-1B0AEUWP.json,diameter_mm,15,15
+PRODUCT_PROP,,,,PLB-1B0AEUWP,/proc/catalog/Viega/PLB-1B0AEUWP.json,fitting_type,pipe fitting,
+PRODUCT_PROP,,,,PLB-1IQS623P,/proc/catalog/Viega/PLB-1IQS623P.json,connection_type,compression,
+PRODUCT_PROP,,,,PLB-1IQS623P,/proc/catalog/Viega/PLB-1IQS623P.json,diameter_mm,12,12
+PRODUCT_PROP,,,,PLB-1IQS623P,/proc/catalog/Viega/PLB-1IQS623P.json,fitting_type,compression coupler,
+PRODUCT_PROP,,,,PLB-22902X96,/proc/catalog/Viega/PLB-22902X96.json,connection_type,press,
+PRODUCT_PROP,,,,PLB-22902X96,/proc/catalog/Viega/PLB-22902X96.json,diameter_mm,32,32
+PRODUCT_PROP,,,,PLB-22902X96,/proc/catalog/Viega/PLB-22902X96.json,fitting_type,compression coupler,
+PRODUCT_PROP,,,,PLB-37HTTAOT,/proc/catalog/Viega/PLB-37HTTAOT.json,connection_type,threaded,
+PRODUCT_PROP,,,,PLB-37HTTAOT,/proc/catalog/Viega/PLB-37HTTAOT.json,diameter_mm,15,15
+PRODUCT_PROP,,,,PLB-37HTTAOT,/proc/catalog/Viega/PLB-37HTTAOT.json,fitting_type,pipe fitting,
+STORE,store_graz_jakomini,/proc/stores/store_graz_jakomini.json,PowerTool Graz Jakomini,,,,,
+STORE,store_graz_lend,/proc/stores/store_graz_lend.json,PowerTool Graz Lend,,,,,
+Next step_3... Run focused SQL aggregation over Graz stores with LEFT JOIN on inventory for sku PLB-37HTTAOT. (11669 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH graz_stores AS (\n  SELECT id, path\n  FROM stores\n  WHERE city = 'Graz'\n)\nSELECT\n  'PLB-37HTTAOT' AS sku,\n  '/proc/catalog/Viega/PLB-37HTTAOT.json' AS product_path,\n  SUM(COALESCE(i.available_today, 0)) AS total_available_today\nFROM graz_stores gs\nLEFT JOIN inventory i\n  ON i.store_id = gs.id\n AND i.sku = 'PLB-37HTTAOT';"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH graz_stores AS (
+  SELECT id, path
+  FROM stores
+  WHERE city = 'Graz'
+)
+SELECT
+  'PLB-37HTTAOT' AS sku,
+  '/proc/catalog/Viega/PLB-37HTTAOT.json' AS product_path,
+  SUM(COALESCE(i.available_today, 0)) AS total_available_today
+FROM graz_stores gs
+LEFT JOIN inventory i
+  ON i.store_id = gs.id
+ AND i.sku = 'PLB-37HTTAOT';
+SQL
+sku,product_path,total_available_today
+PLB-37HTTAOT,/proc/catalog/Viega/PLB-37HTTAOT.json,1
+Next step_4... Report completion with exact integer message and grounding refs. (9189 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved exact product variant by required properties.', 'Enumerated all Graz store records.', 'Aggregated available_today across Graz stores including zero-availability branches.'] message='1' grounding_refs=['/proc/catalog/Viega/PLB-37HTTAOT.json', '/proc/stores/store_graz_jakomini.json', '/proc/stores/store_graz_lend.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved exact product variant by required properties.
+- Enumerated all Graz store records.
+- Aggregated available_today across Graz stores including zero-availability branches.
+
+[34mAGENT SUMMARY: 1[0m
+- [34m/proc/catalog/Viega/PLB-37HTTAOT.json[0m
+- [34m/proc/stores/store_graz_jakomini.json[0m
+- [34m/proc/stores/store_graz_lend.json[0m

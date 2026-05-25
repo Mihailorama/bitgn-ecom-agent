@@ -1,0 +1,316 @@
+TASK t32 (model codex:gpt-5.3-codex)
+INSTRUCTION: A support note claims we stock the Workshop Saw and Cutter from Bosch in the Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter line that has machine type mitre saw and voltage 400 V and has built-in GPS tracking. Check the actual catalogue item, cite the exact product record, and if the base product exists but that extra capability is absent, answer with <NO> and include the checked SKU.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query products + product_properties for Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter candidates and return sku/path/properties. (15108 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind, pp.key, pp.value_text, pp.value_number\nFROM products p\nLEFT JOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'Bosch'\n  AND p.series = 'Industrial'\n  AND p.model = 'GSR 2Q4-T05'\n  AND (p.name = 'Workshop Saw and Cutter' OR pk.name = 'Workshop Saw and Cutter')\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind, pp.key, pp.value_text, pp.value_number
+FROM products p
+LEFT JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'Bosch'
+  AND p.series = 'Industrial'
+  AND p.model = 'GSR 2Q4-T05'
+  AND (p.name = 'Workshop Saw and Cutter' OR pk.name = 'Workshop Saw and Cutter')
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,kind,key,value_text,value_number
+MAC-1S9FUIX3,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-1S9FUIX3.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter table saw 1500W 150mm,Workshop Saw and Cutter,machine_type,table saw,
+MAC-1S9FUIX3,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-1S9FUIX3.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter table saw 1500W 150mm,Workshop Saw and Cutter,mount_type,floor standing,
+MAC-1S9FUIX3,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-1S9FUIX3.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter table saw 1500W 150mm,Workshop Saw and Cutter,power_w,1500,1500
+MAC-1S9FUIX3,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-1S9FUIX3.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter table saw 1500W 150mm,Workshop Saw and Cutter,voltage_v,400,400
+MAC-1S9FUIX3,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-1S9FUIX3.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter table saw 1500W 150mm,Workshop Saw and Cutter,working_width_mm,150,150
+MAC-1V6BQZJ0,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-1V6BQZJ0.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 3000W 300mm,Workshop Saw and Cutter,machine_type,mitre saw,
+MAC-1V6BQZJ0,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-1V6BQZJ0.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 3000W 300mm,Workshop Saw and Cutter,mount_type,floor standing,
+MAC-1V6BQZJ0,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-1V6BQZJ0.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 3000W 300mm,Workshop Saw and Cutter,power_w,3000,3000
+MAC-1V6BQZJ0,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-1V6BQZJ0.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 3000W 300mm,Workshop Saw and Cutter,voltage_v,110,110
+MAC-1V6BQZJ0,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-1V6BQZJ0.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 3000W 300mm,Workshop Saw and Cutter,working_width_mm,300,300
+MAC-27BYJPKH,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-27BYJPKH.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 2200W 200mm,Workshop Saw and Cutter,machine_type,mitre saw,
+MAC-27BYJPKH,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-27BYJPKH.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 2200W 200mm,Workshop Saw and Cutter,mount_type,floor standing,
+MAC-27BYJPKH,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-27BYJPKH.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 2200W 200mm,Workshop Saw and Cutter,power_w,2200,2200
+MAC-27BYJPKH,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-27BYJPKH.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 2200W 200mm,Workshop Saw and Cutter,voltage_v,400,400
+MAC-27BYJPKH,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-27BYJPKH.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 2200W 200mm,Workshop Saw and Cutter,working_width_mm,200,200
+MAC-3EVH1YID,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-3EVH1YID.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 1100W 600mm,Workshop Saw and Cutter,machine_type,mitre saw,
+MAC-3EVH1YID,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-3EVH1YID.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 1100W 600mm,Workshop Saw and Cutter,mount_type,floor standing,
+MAC-3EVH1YID,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-3EVH1YID.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 1100W 600mm,Workshop Saw and Cutter,power_w,1100,1100
+MAC-3EVH1YID,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-3EVH1YID.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 1100W 600mm,Workshop Saw and Cutter,voltage_v,230,230
+MAC-3EVH1YID,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-3EVH1YID.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 1100W 600mm,Workshop Saw and Cutter,working_width_mm,600,600
+MAC-3N3MYN1E,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-3N3MYN1E.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 3000W 250mm,Workshop Saw and Cutter,machine_type,scroll saw,
+MAC-3N3MYN1E,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-3N3MYN1E.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 3000W 250mm,Workshop Saw and Cutter,mount_type,floor standing,
+MAC-3N3MYN1E,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-3N3MYN1E.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 3000W 250mm,Workshop Saw and Cutter,power_w,3000,3000
+MAC-3N3MYN1E,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-3N3MYN1E.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 3000W 250mm,Workshop Saw and Cutter,voltage_v,230,230
+MAC-3N3MYN1E,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-3N3MYN1E.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 3000W 250mm,Workshop Saw and Cutter,working_width_mm,250,250
+MAC-5VE0YUB9,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-5VE0YUB9.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 500W 400mm,Workshop Saw and Cutter,machine_type,mitre saw,
+MAC-5VE0YUB9,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-5VE0YUB9.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 500W 400mm,Workshop Saw and Cutter,mount_type,floor standing,
+MAC-5VE0YUB9,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-5VE0YUB9.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 500W 400mm,Workshop Saw and Cutter,power_w,500,500
+MAC-5VE0YUB9,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-5VE0YUB9.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 500W 400mm,Workshop Saw and Cutter,voltage_v,230,230
+MAC-5VE0YUB9,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-5VE0YUB9.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter mitre saw 500W 400mm,Workshop Saw and Cutter,working_width_mm,400,400
+MAC-MUGHL9LI,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-MUGHL9LI.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 3000W 200mm,Workshop Saw and Cutter,machine_type,scroll saw,
+MAC-MUGHL9LI,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-MUGHL9LI.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 3000W 200mm,Workshop Saw and Cutter,mount_type,floor standing,
+MAC-MUGHL9LI,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-MUGHL9LI.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 3000W 200mm,Workshop Saw and Cutter,power_w,3000,3000
+MAC-MUGHL9LI,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-MUGHL9LI.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 3000W 200mm,Workshop Saw and Cutter,voltage_v,400,400
+MAC-MUGHL9LI,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-MUGHL9LI.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 3000W 200mm,Workshop Saw and Cutter,working_width_mm,200,200
+MAC-RR2RF0VV,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-RR2RF0VV.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 1100W 200mm,Workshop Saw and Cutter,machine_type,scroll saw,
+MAC-RR2RF0VV,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-RR2RF0VV.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 1100W 200mm,Workshop Saw and Cutter,mount_type,floor standing,
+MAC-RR2RF0VV,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-RR2RF0VV.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 1100W 200mm,Workshop Saw and Cutter,power_w,1100,1100
+MAC-RR2RF0VV,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-RR2RF0VV.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 1100W 200mm,Workshop Saw and Cutter,voltage_v,230,230
+MAC-RR2RF0VV,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-RR2RF0VV.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 1100W 200mm,Workshop Saw and Cutter,working_width_mm,200,200
+MAC-WMUIEPED,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-WMUIEPED.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 500W 600mm,Workshop Saw and Cutter,machine_type,scroll saw,
+MAC-WMUIEPED,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-WMUIEPED.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 500W 600mm,Workshop Saw and Cutter,mount_type,floor standing,
+MAC-WMUIEPED,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-WMUIEPED.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 500W 600mm,Workshop Saw and Cutter,power_w,500,500
+MAC-WMUIEPED,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-WMUIEPED.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 500W 600mm,Workshop Saw and Cutter,voltage_v,230,230
+MAC-WMUIEPED,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-WMUIEPED.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter scroll saw 500W 600mm,Workshop Saw and Cutter,working_width_mm,600,600
+MAC-YQN1XHXP,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-YQN1XHXP.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter band saw 1500W 250mm,Workshop Saw and Cutter,machine_type,band saw,
+MAC-YQN1XHXP,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-YQN1XHXP.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter band saw 1500W 250mm,Workshop Saw and Cutter,mount_type,floor standing,
+MAC-YQN1XHXP,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-YQN1XHXP.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter band saw 1500W 250mm,Workshop Saw and Cutter,power_w,1500,1500
+MAC-YQN1XHXP,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-YQN1XHXP.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter band saw 1500W 250mm,Workshop Saw and Cutter,voltage_v,230,230
+MAC-YQN1XHXP,/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-YQN1XHXP.json,Bosch,Industrial,GSR 2Q4-T05,Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter band saw 1500W 250mm,Workshop Saw and Cutter,working_width_mm,250,250
+Next step_2... Report final result with required token and checked SKU. (14875 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter variants from SQL.', 'Identified SKU MAC-27BYJPKH as the mitre saw with 400V.', 'Confirmed GPS-tracking capability is absent in returned properties.'] message='<NO> MAC-27BYJPKH' grounding_refs=['/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-27BYJPKH.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved Bosch Industrial GSR 2Q4-T05 Workshop Saw and Cutter variants from SQL.
+- Identified SKU MAC-27BYJPKH as the mitre saw with 400V.
+- Confirmed GPS-tracking capability is absent in returned properties.
+
+[34mAGENT SUMMARY: <NO> MAC-27BYJPKH[0m
+- [34m/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0024_yknbqamp/MAC-27BYJPKH.json[0m

@@ -120,6 +120,25 @@ latest stability runs are mostly `43/44`:
   post-submit ref control (inventory-specific SKU filtering + ledger rebound),
   but additional resolver hardening is still required.
 
+**Rejected t16 exact-variant branch (2026-05-25, late cycle).**
+- A semantic, non-task-id exact-variant branch was tested for dense single-store
+  inventory prompts (the `t16` failure class). The root cause is real: the
+  legacy resolver falls back from exact variant match to a similar SKU, which
+  creates wrong-SKU grounding and missing required refs.
+- The WIP also exposed parser gaps for high-density variant labels
+  (`tank volume`, `grip type`, `fit`) and a deeper ref-policy tension: `t16`
+  sometimes wants the exact available product ref, while citing all exact
+  products creates invalid refs on neighboring inventory seeds.
+- Validation rejected the WIP:
+  - Targeted `t13-t16` runs could pass, but not consistently.
+  - Full sweeps saved under
+    `artifacts/sweeps/2026-05-25-t16-exact-variant-rejected/` scored `42/44`
+    and `41/44`; misses remained in `t16`, with unrelated model variance in
+    `t05/t06` on the second run.
+  - Security grep stayed clean.
+- Runtime code was reverted; the WIP diff is preserved as
+  `artifacts/sweeps/2026-05-25-t16-exact-variant-rejected/wip.diff`.
+
 Current state in `agent.py` includes:
 - EvidenceLedger + `_harvest`: tracks every confirmed `/proc` path (SQL `path` col,
   read/stat/find/search/list).
@@ -156,9 +175,11 @@ is still unmet at 100% quality.
    captured useful evidence but reduced the headline score. Start from restored
    `66a7ccb` algorithm state.
 2. Close the restored-baseline `t16` inventory grounding miss with a narrow
-   resolver: keep deterministic inventory count behavior, but derive the exact
-   required product refs from the matched SKU set without blindly citing every
-   product (the all-refs experiment regressed `t13-t16`).
+   resolver, but do not revive the rejected exact-variant branch verbatim.
+   Required shape: structured `resolve_product_variant()` returning exact
+   candidate groups plus reason codes (`exact`, `ambiguous`, `unresolved`), then
+   a separate `build_inventory_refs()` policy that can be unit-tested against
+   saved `t16` logs.
 3. Refactor step 1 (no behavior expansion): isolate helper layer for
    `resolve_product_variant()` and `build_grounding_refs()` so variant logic and
    refs logic are testable independently.

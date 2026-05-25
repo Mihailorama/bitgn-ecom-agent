@@ -1,0 +1,329 @@
+TASK t19 (model codex:gpt-5.3-codex)
+INSTRUCTION: I can visit any PowerTool branch in Vienna today. Across every Vienna branch, including branches with 0 availability, how many units of product (the Sealant from Pattex in the Pattex Universal Repair 56O-393 Sealant line that has sealant type acrylic sealant and color family Gray) are available today? Answer exactly as "[QTY:%d]" and cite every city store record plus the product record.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2024-07-17T20:49:48Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query SQL to resolve the exact matching product SKU/path and verify variant properties. (19470 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       pk.name AS kind,\n       MAX(CASE WHEN pp.key='sealant_type' THEN pp.value_text END) AS sealant_type,\n       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'Pattex'\n  AND p.series = 'Universal Repair'\n  AND p.model = '56O-393'\n  AND pk.name = 'Sealant'\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name\nHAVING sealant_type = 'acrylic sealant'\n   AND color_family = 'Gray';"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       pk.name AS kind,
+       MAX(CASE WHEN pp.key='sealant_type' THEN pp.value_text END) AS sealant_type,
+       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'Pattex'
+  AND p.series = 'Universal Repair'
+  AND p.model = '56O-393'
+  AND pk.name = 'Sealant'
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name
+HAVING sealant_type = 'acrylic sealant'
+   AND color_family = 'Gray';
+SQL
+sku,path,brand,series,model,name,kind,sealant_type,color_family
+Next step_2... Run a broader SQL discovery query over Pattex Universal Repair sealant products and their property key/values. (10365 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind, pp.key, pp.value_text\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'Pattex'\n  AND p.series = 'Universal Repair'\n  AND pk.name = 'Sealant'\nORDER BY p.model, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind, pp.key, pp.value_text
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'Pattex'
+  AND p.series = 'Universal Repair'
+  AND pk.name = 'Sealant'
+ORDER BY p.model, p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,kind,key,value_text
+Next step_3... Query distinct Pattex product rows with kind/category to find the correct family naming. (16140 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT DISTINCT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind, c.name AS category\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nJOIN categories c ON c.id = p.category_id\nWHERE p.brand = 'Pattex'\nORDER BY p.series, p.model, p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT DISTINCT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind, c.name AS category
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+JOIN categories c ON c.id = p.category_id
+WHERE p.brand = 'Pattex'
+ORDER BY p.series, p.model, p.sku;
+SQL
+sku,path,brand,series,model,name,kind,category
+ADH-11YZ25SX,/proc/catalog/adhesives_sealants/tapes_foams/ADH-11YZ25SX.json,Pattex,Repair Extreme,Repair 1LS-G5B,Pattex Repair Extreme Repair 1LS-G5B Tape and Foam construction foam Brown 50m,Tape and Foam,Adhesives and Sealants
+ADH-1MPML0D5,/proc/catalog/adhesives_sealants/tapes_foams/ADH-1MPML0D5.json,Pattex,Repair Extreme,Repair 1LS-G5B,Pattex Repair Extreme Repair 1LS-G5B Tape and Foam construction foam Black 10m,Tape and Foam,Adhesives and Sealants
+ADH-1OE6WVG3,/proc/catalog/adhesives_sealants/tapes_foams/ADH-1OE6WVG3.json,Pattex,Repair Extreme,Repair 1LS-G5B,Pattex Repair Extreme Repair 1LS-G5B Tape and Foam construction foam Clear 50m,Tape and Foam,Adhesives and Sealants
+ADH-2XI880ZX,/proc/catalog/adhesives_sealants/tapes_foams/ADH-2XI880ZX.json,Pattex,Repair Extreme,Repair 1LS-G5B,Pattex Repair Extreme Repair 1LS-G5B Tape and Foam mounting tape Clear 1m,Tape and Foam,Adhesives and Sealants
+ADH-3GFEZHBN,/proc/catalog/adhesives_sealants/tapes_foams/ADH-3GFEZHBN.json,Pattex,Repair Extreme,Repair 1LS-G5B,Pattex Repair Extreme Repair 1LS-G5B Tape and Foam repair tape Brown 1m,Tape and Foam,Adhesives and Sealants
+ADH-3TV6KQCA,/proc/catalog/adhesives_sealants/tapes_foams/ADH-3TV6KQCA.json,Pattex,Repair Extreme,Repair 1LS-G5B,Pattex Repair Extreme Repair 1LS-G5B Tape and Foam masking tape Clear 25m,Tape and Foam,Adhesives and Sealants
+ADH-6HL5YI5B,/proc/catalog/adhesives_sealants/tapes_foams/ADH-6HL5YI5B.json,Pattex,Repair Extreme,Repair 1LS-G5B,Pattex Repair Extreme Repair 1LS-G5B Tape and Foam repair tape Clear 10m,Tape and Foam,Adhesives and Sealants
+ADH-UHSC5WT1,/proc/catalog/adhesives_sealants/tapes_foams/ADH-UHSC5WT1.json,Pattex,Repair Extreme,Repair 1LS-G5B,Pattex Repair Extreme Repair 1LS-G5B Tape and Foam repair tape Black 10m,Tape and Foam,Adhesives and Sealants
+ADH-11CYA4AC,/proc/catalog/adhesives_sealants/sealants/ADH-11CYA4AC.json,Pattex,Universal,Repair 56O-393,Pattex Universal Repair 56O-393 Sealant silicone sealant Clear 300ml,Sealant,Adhesives and Sealants
+ADH-12X3I5A1,/proc/catalog/adhesives_sealants/sealants/ADH-12X3I5A1.json,Pattex,Universal,Repair 56O-393,Pattex Universal Repair 56O-393 Sealant sanitary sealant White 300ml,Sealant,Adhesives and Sealants
+ADH-1DAOL3FS,/proc/catalog/adhesives_sealants/sealants/ADH-1DAOL3FS.json,Pattex,Universal,Repair 56O-393,Pattex Universal Repair 56O-393 Sealant silicone sealant Clear 280ml,Sealant,Adhesives and Sealants
+ADH-1P03YBGX,/proc/catalog/adhesives_sealants/sealants/ADH-1P03YBGX.json,Pattex,Universal,Repair 56O-393,Pattex Universal Repair 56O-393 Sealant acrylic sealant White 100ml,Sealant,Adhesives and Sealants
+ADH-1SO5FE6F,/proc/catalog/adhesives_sealants/sealants/ADH-1SO5FE6F.json,Pattex,Universal,Repair 56O-393,Pattex Universal Repair 56O-393 Sealant silicone sealant Clear 310ml,Sealant,Adhesives and Sealants
+ADH-2LEIGW7O,/proc/catalog/adhesives_sealants/sealants/ADH-2LEIGW7O.json,Pattex,Universal,Repair 56O-393,Pattex Universal Repair 56O-393 Sealant sanitary sealant Clear 280ml,Sealant,Adhesives and Sealants
+ADH-35UD9OTV,/proc/catalog/adhesives_sealants/sealants/ADH-35UD9OTV.json,Pattex,Universal,Repair 56O-393,Pattex Universal Repair 56O-393 Sealant acrylic sealant Gray 300ml,Sealant,Adhesives and Sealants
+ADH-ZRKQ7TE3,/proc/catalog/adhesives_sealants/sealants/ADH-ZRKQ7TE3.json,Pattex,Universal,Repair 56O-393,Pattex Universal Repair 56O-393 Sealant hybrid sealant Clear 500ml,Sealant,Adhesives and Sealants
+Next step_4... Aggregate SUM(available_today) for SKU ADH-35UD9OTV across all stores where city='Vienna' using LEFT JOIN to include zero-availability branches. (10873 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT s.path AS store_path,\n       COALESCE(i.available_today, 0) AS available_today,\n       SUM(COALESCE(i.available_today, 0)) OVER () AS total_qty\nFROM stores s\nLEFT JOIN inventory i\n  ON i.store_id = s.id\n AND i.sku = 'ADH-35UD9OTV'\nWHERE s.city = 'Vienna'\nORDER BY s.path;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT s.path AS store_path,
+       COALESCE(i.available_today, 0) AS available_today,
+       SUM(COALESCE(i.available_today, 0)) OVER () AS total_qty
+FROM stores s
+LEFT JOIN inventory i
+  ON i.store_id = s.id
+ AND i.sku = 'ADH-35UD9OTV'
+WHERE s.city = 'Vienna'
+ORDER BY s.path;
+SQL
+store_path,available_today,total_qty
+/proc/stores/store_vienna_meidling.json,3,3
+/proc/stores/store_vienna_praterstern.json,0,3
+Next step_5... Submit report_completion with exact token and required grounding refs. (11148 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved target SKU/path for gray acrylic Pattex Universal Repair 56O-393 sealant.', 'Summed available_today across all Vienna stores with zero-availability stores included.', 'Collected required store and product record paths for citation.'] message='[QTY:3]' grounding_refs=['/proc/catalog/adhesives_sealants/sealants/ADH-35UD9OTV.json', '/proc/stores/store_vienna_meidling.json', '/proc/stores/store_vienna_praterstern.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved target SKU/path for gray acrylic Pattex Universal Repair 56O-393 sealant.
+- Summed available_today across all Vienna stores with zero-availability stores included.
+- Collected required store and product record paths for citation.
+
+[34mAGENT SUMMARY: [QTY:3][0m
+- [34m/proc/catalog/adhesives_sealants/sealants/ADH-35UD9OTV.json[0m
+- [34m/proc/stores/store_vienna_meidling.json[0m
+- [34m/proc/stores/store_vienna_praterstern.json[0m

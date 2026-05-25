@@ -1,0 +1,434 @@
+TASK t20 (model codex:gpt-5.3-codex)
+INSTRUCTION: I can visit any PowerTool branch in Graz today. Across every Graz branch, including branches with 0 availability, how many units of product (the LED Bulb from Philips in the Philips CorePro CorePro 2Z4-WXU LED Bulb line that has wattage 10 W, luminous flux 806 lm, and fitting GU10) are available today? Answer exactly as "count : %d" and cite every city store record plus the product record.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query SQL to uniquely identify the Philips LED Bulb variant with wattage 10 W, luminous flux 806 lm, fitting GU10 and capture its product path. (24830 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku,\n       p.path,\n       p.brand,\n       p.series,\n       p.model,\n       p.name,\n       MAX(CASE WHEN pp.key='wattage_w' THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS wattage,\n       MAX(CASE WHEN pp.key='luminous_flux_lm' THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS luminous_flux,\n       MAX(CASE WHEN pp.key='fitting' THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS fitting\nFROM products p\nJOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'Philips'\n  AND (p.name LIKE '%LED Bulb%' OR p.model LIKE '%LED Bulb%' OR p.series LIKE '%CorePro%' OR p.model LIKE '%CorePro%')\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name\nHAVING SUM(CASE WHEN pp.key='wattage_w' AND (pp.value_text='10' OR pp.value_text='10 W' OR pp.value_number=10) THEN 1 ELSE 0 END) > 0\n   AND SUM(CASE WHEN pp.key='luminous_flux_lm' AND (pp.value_text='806' OR pp.value_text='806 lm' OR pp.value_number=806) THEN 1 ELSE 0 END) > 0\n   AND SUM(CASE WHEN pp.key='fitting' AND pp.value_text='GU10' THEN 1 ELSE 0 END) > 0;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku,
+       p.path,
+       p.brand,
+       p.series,
+       p.model,
+       p.name,
+       MAX(CASE WHEN pp.key='wattage_w' THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS wattage,
+       MAX(CASE WHEN pp.key='luminous_flux_lm' THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS luminous_flux,
+       MAX(CASE WHEN pp.key='fitting' THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS fitting
+FROM products p
+JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'Philips'
+  AND (p.name LIKE '%LED Bulb%' OR p.model LIKE '%LED Bulb%' OR p.series LIKE '%CorePro%' OR p.model LIKE '%CorePro%')
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name
+HAVING SUM(CASE WHEN pp.key='wattage_w' AND (pp.value_text='10' OR pp.value_text='10 W' OR pp.value_number=10) THEN 1 ELSE 0 END) > 0
+   AND SUM(CASE WHEN pp.key='luminous_flux_lm' AND (pp.value_text='806' OR pp.value_text='806 lm' OR pp.value_number=806) THEN 1 ELSE 0 END) > 0
+   AND SUM(CASE WHEN pp.key='fitting' AND pp.value_text='GU10' THEN 1 ELSE 0 END) > 0;
+SQL
+sku,path,brand,series,model,name,wattage,luminous_flux,fitting
+Next step_2... Query Philips CorePro LED Bulb candidates with all property keys/values to find the exact SKU matching 10 W, 806 lm, GU10. (11773 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku,\n       p.path,\n       p.brand,\n       p.series,\n       p.model,\n       p.name,\n       pp.key,\n       COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) AS value\nFROM products p\nJOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand='Philips'\n  AND (p.series LIKE '%CorePro%' OR p.model LIKE '%CorePro%' OR p.name LIKE '%CorePro%')\n  AND (p.name LIKE '%LED%' OR p.model LIKE '%LED%' OR p.name LIKE '%Bulb%')\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku,
+       p.path,
+       p.brand,
+       p.series,
+       p.model,
+       p.name,
+       pp.key,
+       COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) AS value
+FROM products p
+JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand='Philips'
+  AND (p.series LIKE '%CorePro%' OR p.model LIKE '%CorePro%' OR p.name LIKE '%CorePro%')
+  AND (p.name LIKE '%LED%' OR p.model LIKE '%LED%' OR p.name LIKE '%Bulb%')
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,key,value
+ELC-130YFRP0,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-130YFRP0.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 10W 3000K non-dimmable,color_temperature_k,3000
+ELC-130YFRP0,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-130YFRP0.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 10W 3000K non-dimmable,dimmable,no
+ELC-130YFRP0,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-130YFRP0.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 10W 3000K non-dimmable,energy_class,E
+ELC-130YFRP0,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-130YFRP0.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 10W 3000K non-dimmable,fitting,E14
+ELC-130YFRP0,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-130YFRP0.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 10W 3000K non-dimmable,lumen,1055
+ELC-130YFRP0,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-130YFRP0.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 10W 3000K non-dimmable,wattage_w,10
+ELC-17NLN8ER,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-17NLN8ER.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb G9 6W 4000K non-dimmable,color_temperature_k,4000
+ELC-17NLN8ER,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-17NLN8ER.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb G9 6W 4000K non-dimmable,dimmable,no
+ELC-17NLN8ER,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-17NLN8ER.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb G9 6W 4000K non-dimmable,energy_class,E
+ELC-17NLN8ER,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-17NLN8ER.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb G9 6W 4000K non-dimmable,fitting,G9
+ELC-17NLN8ER,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-17NLN8ER.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb G9 6W 4000K non-dimmable,lumen,2452
+ELC-17NLN8ER,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-17NLN8ER.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb G9 6W 4000K non-dimmable,wattage_w,6
+ELC-185L5TGY,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-185L5TGY.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb G9 10W 6500K non-dimmable,color_temperature_k,6500
+ELC-185L5TGY,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-185L5TGY.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb G9 10W 6500K non-dimmable,dimmable,no
+ELC-185L5TGY,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-185L5TGY.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb G9 10W 6500K non-dimmable,energy_class,E
+ELC-185L5TGY,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-185L5TGY.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb G9 10W 6500K non-dimmable,fitting,G9
+ELC-185L5TGY,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-185L5TGY.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb G9 10W 6500K non-dimmable,lumen,806
+ELC-185L5TGY,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-185L5TGY.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb G9 10W 6500K non-dimmable,wattage_w,10
+ELC-18UJVE1C,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-18UJVE1C.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb GU10 10W 4000K non-dimmable,color_temperature_k,4000
+ELC-18UJVE1C,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-18UJVE1C.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb GU10 10W 4000K non-dimmable,dimmable,no
+ELC-18UJVE1C,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-18UJVE1C.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb GU10 10W 4000K non-dimmable,energy_class,E
+ELC-18UJVE1C,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-18UJVE1C.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb GU10 10W 4000K non-dimmable,fitting,GU10
+ELC-18UJVE1C,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-18UJVE1C.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb GU10 10W 4000K non-dimmable,lumen,1521
+ELC-18UJVE1C,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-18UJVE1C.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb GU10 10W 4000K non-dimmable,wattage_w,10
+ELC-198VXV0L,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-198VXV0L.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E14 10W 2700K non-dimmable,color_temperature_k,2700
+ELC-198VXV0L,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-198VXV0L.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E14 10W 2700K non-dimmable,dimmable,no
+ELC-198VXV0L,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-198VXV0L.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E14 10W 2700K non-dimmable,energy_class,E
+ELC-198VXV0L,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-198VXV0L.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E14 10W 2700K non-dimmable,fitting,E14
+ELC-198VXV0L,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-198VXV0L.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E14 10W 2700K non-dimmable,lumen,470
+ELC-198VXV0L,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-198VXV0L.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E14 10W 2700K non-dimmable,wattage_w,10
+ELC-1A7JCYPL,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1A7JCYPL.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 4000K non-dimmable,color_temperature_k,4000
+ELC-1A7JCYPL,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1A7JCYPL.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 4000K non-dimmable,dimmable,no
+ELC-1A7JCYPL,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1A7JCYPL.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 4000K non-dimmable,energy_class,E
+ELC-1A7JCYPL,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1A7JCYPL.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 4000K non-dimmable,fitting,E14
+ELC-1A7JCYPL,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1A7JCYPL.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 4000K non-dimmable,lumen,1055
+ELC-1A7JCYPL,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1A7JCYPL.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 4000K non-dimmable,wattage_w,6
+ELC-1C4DOM4C,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1C4DOM4C.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb GU10 8W 2700K dimmable,color_temperature_k,2700
+ELC-1C4DOM4C,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1C4DOM4C.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb GU10 8W 2700K dimmable,dimmable,yes
+ELC-1C4DOM4C,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1C4DOM4C.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb GU10 8W 2700K dimmable,energy_class,E
+ELC-1C4DOM4C,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1C4DOM4C.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb GU10 8W 2700K dimmable,fitting,GU10
+ELC-1C4DOM4C,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1C4DOM4C.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb GU10 8W 2700K dimmable,lumen,806
+ELC-1C4DOM4C,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1C4DOM4C.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb GU10 8W 2700K dimmable,wattage_w,8
+ELC-1C5WDCBR,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1C5WDCBR.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 3000K dimmable,color_temperature_k,3000
+ELC-1C5WDCBR,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1C5WDCBR.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 3000K dimmable,dimmable,yes
+ELC-1C5WDCBR,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1C5WDCBR.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 3000K dimmable,energy_class,E
+ELC-1C5WDCBR,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1C5WDCBR.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 3000K dimmable,fitting,E14
+ELC-1C5WDCBR,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1C5WDCBR.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 3000K dimmable,lumen,1521
+ELC-1C5WDCBR,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1C5WDCBR.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 3000K dimmable,wattage_w,6
+ELC-1CAKTCYX,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1CAKTCYX.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 2700K non-dimmable,color_temperature_k,2700
+ELC-1CAKTCYX,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1CAKTCYX.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 2700K non-dimmable,dimmable,no
+ELC-1CAKTCYX,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1CAKTCYX.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 2700K non-dimmable,energy_class,E
+ELC-1CAKTCYX,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1CAKTCYX.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 2700K non-dimmable,fitting,E14
+ELC-1CAKTCYX,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1CAKTCYX.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 2700K non-dimmable,lumen,806
+ELC-1CAKTCYX,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1CAKTCYX.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E14 6W 2700K non-dimmable,wattage_w,6
+ELC-1HY6QUQ8,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1HY6QUQ8.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E27 8W 4000K dimmable,color_temperature_k,4000
+ELC-1HY6QUQ8,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1HY6QUQ8.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E27 8W 4000K dimmable,dimmable,yes
+ELC-1HY6QUQ8,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1HY6QUQ8.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E27 8W 4000K dimmable,energy_class,E
+ELC-1HY6QUQ8,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1HY6QUQ8.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E27 8W 4000K dimmable,fitting,E27
+ELC-1HY6QUQ8,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1HY6QUQ8.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E27 8W 4000K dimmable,lumen,1521
+ELC-1HY6QUQ8,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-1HY6QUQ8.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb E27 8W 4000K dimmable,wattage_w,8
+ELC-1K4P4VT8,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-1K4P4VT8.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E27 8W 6500K non-dimmable,color_temperature_k,6500
+ELC-1K4P4VT8,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-1K4P4VT8.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E27 8W 6500K non-dimmable,dimmable,no
+ELC-1K4P4VT8,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-1K4P4VT8.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E27 8W 6500K non-dimmable,energy_class,E
+ELC-1K4P4VT8,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-1K4P4VT8.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E27 8W 6500K non-dimmable,fitting,E27
+ELC-1K4P4VT8,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-1K4P4VT8.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E27 8W 6500K non-dimmable,lumen,806
+ELC-1K4P4VT8,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-1K4P4VT8.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E27 8W 6500K non-dimmable,wattage_w,8
+ELC-1UUIJXK7,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-1UUIJXK7.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb G9 6W 6500K non-dimmable,color_temperature_k,6500
+ELC-1UUIJXK7,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-1UUIJXK7.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb G9 6W 6500K non-dimmable,dimmable,no
+ELC-1UUIJXK7,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-1UUIJXK7.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb G9 6W 6500K non-dimmable,energy_class,E
+ELC-1UUIJXK7,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-1UUIJXK7.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb G9 6W 6500K non-dimmable,fitting,G9
+ELC-1UUIJXK7,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-1UUIJXK7.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb G9 6W 6500K non-dimmable,lumen,470
+ELC-1UUIJXK7,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-1UUIJXK7.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb G9 6W 6500K non-dimmable,wattage_w,6
+ELC-1YRPY94N,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-1YRPY94N.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb GU10 4W 4000K non-dimmable,color_temperature_k,4000
+ELC-1YRPY94N,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-1YRPY94N.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb GU10 4W 4000K non-dimmable,dimmable,no
+ELC-1YRPY94N,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-1YRPY94N.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb GU10 4W 4000K non-dimmable,energy_class,E
+ELC-1YRPY94N,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-1YRPY94N.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb GU10 4W 4000K non-dimmable,fitting,GU10
+ELC-1YRPY94N,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-1YRPY94N.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb GU10 4W 4000K non-dimmable,lumen,470
+ELC-1YRPY94N,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-1YRPY94N.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb GU10 4W 4000K non-dimmable,wattage_w,4
+ELC-215ZN4DM,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-215ZN4DM.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb E27 6W 6500K non-dimmable,color_temperature_k,6500
+ELC-215ZN4DM,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-215ZN4DM.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb E27 6W 6500K non-dimmable,dimmable,no
+ELC-215ZN4DM,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-215ZN4DM.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb E27 6W 6500K non-dimmable,energy_class,E
+ELC-215ZN4DM,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-215ZN4DM.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb E27 6W 6500K non-dimmable,fitting,E27
+ELC-215ZN4DM,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-215ZN4DM.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb E27 6W 6500K non-dimmable,lumen,2452
+ELC-215ZN4DM,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-215ZN4DM.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb E27 6W 6500K non-dimmable,wattage_w,6
+ELC-24L3Q34K,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-24L3Q34K.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb GU10 10W 3000K non-dimmable,color_temperature_k,3000
+ELC-24L3Q34K,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-24L3Q34K.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb GU10 10W 3000K non-dimmable,dimmable,no
+ELC-24L3Q34K,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-24L3Q34K.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb GU10 10W 3000K non-dimmable,energy_class,E
+ELC-24L3Q34K,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-24L3Q34K.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb GU10 10W 3000K non-dimmable,fitting,GU10
+ELC-24L3Q34K,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-24L3Q34K.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb GU10 10W 3000K non-dimmable,lumen,806
+ELC-24L3Q34K,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0012_1temzvru/ELC-24L3Q34K.json,Philips,Hue,CorePro 1WU-4X4,Philips Hue CorePro 1WU-4X4 LED Bulb GU10 10W 3000K non-dimmable,wattage_w,10
+ELC-28X4OCJK,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-28X4OCJK.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E27 4W 3000K dimmable,color_temperature_k,3000
+ELC-28X4OCJK,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-28X4OCJK.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E27 4W 3000K dimmable,dimmable,yes
+ELC-28X4OCJK,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-28X4OCJK.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E27 4W 3000K dimmable,energy_class,E
+ELC-28X4OCJK,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-28X4OCJK.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E27 4W 3000K dimmable,fitting,E27
+ELC-28X4OCJK,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-28X4OCJK.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E27 4W 3000K dimmable,lumen,470
+ELC-28X4OCJK,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-28X4OCJK.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb E27 4W 3000K dimmable,wattage_w,4
+ELC-2A5BYDLV,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-2A5BYDLV.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb E14 6W 6500K non-dimmable,color_temperature_k,6500
+ELC-2A5BYDLV,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-2A5BYDLV.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb E14 6W 6500K non-dimmable,dimmable,no
+ELC-2A5BYDLV,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-2A5BYDLV.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb E14 6W 6500K non-dimmable,energy_class,E
+ELC-2A5BYDLV,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0008_3dpwcfd7/ELC-2A5BYDLV.json,Philips,Hue,CorePro 174-MEP,Philips Hue CorePro 174-MEP LED Bulb E14 6W 6500K non-dimmable,fitting,E14
+warning: result truncated at 100 rows
+Next step_3... Run focused SQL to resolve exact matching product SKU/path in the specified CorePro 2Z4-WXU line. (19592 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku,\n       p.path,\n       p.brand,\n       p.series,\n       p.model,\n       p.name\nFROM products p\nJOIN product_properties w ON w.sku = p.sku AND w.key = 'wattage_w'\nJOIN product_properties l ON l.sku = p.sku AND l.key = 'lumen'\nJOIN product_properties f ON f.sku = p.sku AND f.key = 'fitting'\nWHERE p.brand = 'Philips'\n  AND p.series = 'CorePro'\n  AND p.model = 'CorePro 2Z4-WXU'\n  AND (w.value_number = 10 OR w.value_text IN ('10','10 W'))\n  AND (l.value_number = 806 OR l.value_text IN ('806','806 lm'))\n  AND f.value_text = 'GU10';"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku,
+       p.path,
+       p.brand,
+       p.series,
+       p.model,
+       p.name
+FROM products p
+JOIN product_properties w ON w.sku = p.sku AND w.key = 'wattage_w'
+JOIN product_properties l ON l.sku = p.sku AND l.key = 'lumen'
+JOIN product_properties f ON f.sku = p.sku AND f.key = 'fitting'
+WHERE p.brand = 'Philips'
+  AND p.series = 'CorePro'
+  AND p.model = 'CorePro 2Z4-WXU'
+  AND (w.value_number = 10 OR w.value_text IN ('10','10 W'))
+  AND (l.value_number = 806 OR l.value_text IN ('806','806 lm'))
+  AND f.value_text = 'GU10';
+SQL
+sku,path,brand,series,model,name
+ELC-2ZYFBLJH,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-2ZYFBLJH.json,Philips,CorePro,CorePro 2Z4-WXU,Philips CorePro CorePro 2Z4-WXU LED Bulb GU10 10W 4000K non-dimmable
+Next step_4... Run SQL aggregation over Graz stores with LEFT JOIN inventory filtered to SKU ELC-2ZYFBLJH to include zero-availability branches. (12372 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT s.path AS store_path,\n       COALESCE(i.available_today, 0) AS available_today,\n       SUM(COALESCE(i.available_today, 0)) OVER () AS total_available_today\nFROM stores s\nLEFT JOIN inventory i\n  ON i.store_id = s.id\n AND i.sku = 'ELC-2ZYFBLJH'\nWHERE s.city = 'Graz'\nORDER BY s.path;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT s.path AS store_path,
+       COALESCE(i.available_today, 0) AS available_today,
+       SUM(COALESCE(i.available_today, 0)) OVER () AS total_available_today
+FROM stores s
+LEFT JOIN inventory i
+  ON i.store_id = s.id
+ AND i.sku = 'ELC-2ZYFBLJH'
+WHERE s.city = 'Graz'
+ORDER BY s.path;
+SQL
+store_path,available_today,total_available_today
+/proc/stores/store_graz_jakomini.json,0,10
+/proc/stores/store_graz_lend.json,10,10
+Next step_5... Report completion with exact required message format and full grounding refs. (13847 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Identified exact product SKU/path matching Philips CorePro 2Z4-WXU, 10W, 806 lm, GU10.', 'Summed available_today across all Graz stores using LEFT JOIN to include zero-availability branches.', 'Collected all Graz store paths for required citations.'] message='count : 10' grounding_refs=['/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-2ZYFBLJH.json', '/proc/stores/store_graz_jakomini.json', '/proc/stores/store_graz_lend.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Identified exact product SKU/path matching Philips CorePro 2Z4-WXU, 10W, 806 lm, GU10.
+- Summed available_today across all Graz stores using LEFT JOIN to include zero-availability branches.
+- Collected all Graz store paths for required citations.
+
+[34mAGENT SUMMARY: count : 10[0m
+- [34m/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0011_7ft9sg7i/ELC-2ZYFBLJH.json[0m
+- [34m/proc/stores/store_graz_jakomini.json[0m
+- [34m/proc/stores/store_graz_lend.json[0m

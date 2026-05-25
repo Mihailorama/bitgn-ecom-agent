@@ -1,0 +1,426 @@
+TASK t32 (model codex:gpt-5.3-codex)
+INSTRUCTION: A support note claims we stock the Automotive Charger and Bulb from Varta in the Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb line that has product type battery charger and voltage 12 V and supports voice control. Check the actual catalogue item, cite the exact product record, and if the base product exists but that extra capability is absent, answer with <NO> and include the checked SKU.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query products + product_properties for Varta Workshop Silver 30Z-3D8 candidate(s) and required attributes (21636 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT\n  p.sku,\n  p.path,\n  p.brand,\n  p.series,\n  p.model,\n  p.name,\n  pk.name AS kind,\n  MAX(CASE WHEN pp.key IN ('product_type','tool_type','type') THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS product_type,\n  MAX(CASE WHEN pp.key IN ('voltage_v','voltage','voltage_volts') THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS voltage,\n  MAX(CASE WHEN pp.key IN ('voice_control','supports_voice_control') THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS voice_control\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'Varta'\n  AND p.series = 'Varta Workshop Silver'\n  AND (p.model = '30Z-3D8' OR p.name LIKE '%30Z-3D8%')\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name\nORDER BY p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT
+  p.sku,
+  p.path,
+  p.brand,
+  p.series,
+  p.model,
+  p.name,
+  pk.name AS kind,
+  MAX(CASE WHEN pp.key IN ('product_type','tool_type','type') THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS product_type,
+  MAX(CASE WHEN pp.key IN ('voltage_v','voltage','voltage_volts') THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS voltage,
+  MAX(CASE WHEN pp.key IN ('voice_control','supports_voice_control') THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS voice_control
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'Varta'
+  AND p.series = 'Varta Workshop Silver'
+  AND (p.model = '30Z-3D8' OR p.name LIKE '%30Z-3D8%')
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name
+ORDER BY p.sku;
+SQL
+sku,path,brand,series,model,name,kind,product_type,voltage,voice_control
+Next step_2... Run a broader SQL discovery query for Varta products with charger/bulb terms and 30Z-3D8-like tokens (12850 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind, pp.key, COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) AS value\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE LOWER(p.brand) LIKE '%varta%'\n  AND (\n    LOWER(p.series) LIKE '%workshop%'\n    OR LOWER(p.model) LIKE '%30z-3d8%'\n    OR LOWER(p.name) LIKE '%30z-3d8%'\n    OR LOWER(p.name) LIKE '%charger%'\n    OR LOWER(p.name) LIKE '%bulb%'\n    OR LOWER(pk.name) LIKE '%charger%'\n    OR LOWER(pk.name) LIKE '%bulb%'\n  )\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind, pp.key, COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) AS value
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE LOWER(p.brand) LIKE '%varta%'
+  AND (
+    LOWER(p.series) LIKE '%workshop%'
+    OR LOWER(p.model) LIKE '%30z-3d8%'
+    OR LOWER(p.name) LIKE '%30z-3d8%'
+    OR LOWER(p.name) LIKE '%charger%'
+    OR LOWER(p.name) LIKE '%bulb%'
+    OR LOWER(pk.name) LIKE '%charger%'
+    OR LOWER(pk.name) LIKE '%bulb%'
+  )
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,kind,key,value
+AUT-1DNW8Q6J,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1DNW8Q6J.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb jump starter 24V 4A,Automotive Charger and Bulb,current_a,4
+AUT-1DNW8Q6J,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1DNW8Q6J.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb jump starter 24V 4A,Automotive Charger and Bulb,product_type,jump starter
+AUT-1DNW8Q6J,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1DNW8Q6J.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb jump starter 24V 4A,Automotive Charger and Bulb,vehicle_type,truck
+AUT-1DNW8Q6J,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1DNW8Q6J.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb jump starter 24V 4A,Automotive Charger and Bulb,voltage_v,24
+AUT-1E9N8QME,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1E9N8QME.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery pack 12V 4A,Automotive Charger and Bulb,current_a,4
+AUT-1E9N8QME,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1E9N8QME.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery pack 12V 4A,Automotive Charger and Bulb,product_type,battery pack
+AUT-1E9N8QME,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1E9N8QME.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery pack 12V 4A,Automotive Charger and Bulb,vehicle_type,car
+AUT-1E9N8QME,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1E9N8QME.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery pack 12V 4A,Automotive Charger and Bulb,voltage_v,12
+AUT-1F7POL1L,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0010_9hx8eluf/AUT-1F7POL1L.json,Varta,Winter,Silver 1K5-1ZB,Varta Winter Silver 1K5-1ZB Automotive Charger and Bulb battery charger 24V 16A,Automotive Charger and Bulb,current_a,16
+AUT-1F7POL1L,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0010_9hx8eluf/AUT-1F7POL1L.json,Varta,Winter,Silver 1K5-1ZB,Varta Winter Silver 1K5-1ZB Automotive Charger and Bulb battery charger 24V 16A,Automotive Charger and Bulb,product_type,battery charger
+AUT-1F7POL1L,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0010_9hx8eluf/AUT-1F7POL1L.json,Varta,Winter,Silver 1K5-1ZB,Varta Winter Silver 1K5-1ZB Automotive Charger and Bulb battery charger 24V 16A,Automotive Charger and Bulb,vehicle_type,van
+AUT-1F7POL1L,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0010_9hx8eluf/AUT-1F7POL1L.json,Varta,Winter,Silver 1K5-1ZB,Varta Winter Silver 1K5-1ZB Automotive Charger and Bulb battery charger 24V 16A,Automotive Charger and Bulb,voltage_v,24
+AUT-1JIJNEHV,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-1JIJNEHV.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery pack 6V 10A,Automotive Charger and Bulb,current_a,10
+AUT-1JIJNEHV,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-1JIJNEHV.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery pack 6V 10A,Automotive Charger and Bulb,product_type,battery pack
+AUT-1JIJNEHV,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-1JIJNEHV.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery pack 6V 10A,Automotive Charger and Bulb,vehicle_type,van
+AUT-1JIJNEHV,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-1JIJNEHV.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery pack 6V 10A,Automotive Charger and Bulb,voltage_v,6
+AUT-1KD2DLLQ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-1KD2DLLQ.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery pack 12V 2A,Automotive Charger and Bulb,current_a,2
+AUT-1KD2DLLQ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-1KD2DLLQ.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery pack 12V 2A,Automotive Charger and Bulb,product_type,battery pack
+AUT-1KD2DLLQ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-1KD2DLLQ.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery pack 12V 2A,Automotive Charger and Bulb,vehicle_type,truck
+AUT-1KD2DLLQ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-1KD2DLLQ.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery pack 12V 2A,Automotive Charger and Bulb,voltage_v,12
+AUT-1QOVUO4J,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0010_9hx8eluf/AUT-1QOVUO4J.json,Varta,Winter,Silver 1K5-1ZB,Varta Winter Silver 1K5-1ZB Automotive Charger and Bulb battery pack 12V 16A,Automotive Charger and Bulb,current_a,16
+AUT-1QOVUO4J,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0010_9hx8eluf/AUT-1QOVUO4J.json,Varta,Winter,Silver 1K5-1ZB,Varta Winter Silver 1K5-1ZB Automotive Charger and Bulb battery pack 12V 16A,Automotive Charger and Bulb,product_type,battery pack
+AUT-1QOVUO4J,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0010_9hx8eluf/AUT-1QOVUO4J.json,Varta,Winter,Silver 1K5-1ZB,Varta Winter Silver 1K5-1ZB Automotive Charger and Bulb battery pack 12V 16A,Automotive Charger and Bulb,vehicle_type,car
+AUT-1QOVUO4J,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0010_9hx8eluf/AUT-1QOVUO4J.json,Varta,Winter,Silver 1K5-1ZB,Varta Winter Silver 1K5-1ZB Automotive Charger and Bulb battery pack 12V 16A,Automotive Charger and Bulb,voltage_v,12
+AUT-1Y2PV8L9,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1Y2PV8L9.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 12V 6A,Automotive Charger and Bulb,current_a,6
+AUT-1Y2PV8L9,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1Y2PV8L9.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 12V 6A,Automotive Charger and Bulb,product_type,battery charger
+AUT-1Y2PV8L9,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1Y2PV8L9.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 12V 6A,Automotive Charger and Bulb,vehicle_type,universal
+AUT-1Y2PV8L9,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1Y2PV8L9.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 12V 6A,Automotive Charger and Bulb,voltage_v,12
+AUT-1Z2UVIHW,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1Z2UVIHW.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 12V 4A,Automotive Charger and Bulb,current_a,4
+AUT-1Z2UVIHW,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1Z2UVIHW.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 12V 4A,Automotive Charger and Bulb,product_type,battery charger
+AUT-1Z2UVIHW,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1Z2UVIHW.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 12V 4A,Automotive Charger and Bulb,vehicle_type,motorcycle
+AUT-1Z2UVIHW,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-1Z2UVIHW.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 12V 4A,Automotive Charger and Bulb,voltage_v,12
+AUT-215H183P,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0015_qj65fca3/AUT-215H183P.json,Varta,Compact,Blue 33P-810,Varta Compact Blue 33P-810 Automotive Charger and Bulb jump starter 12V 10A,Automotive Charger and Bulb,current_a,10
+AUT-215H183P,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0015_qj65fca3/AUT-215H183P.json,Varta,Compact,Blue 33P-810,Varta Compact Blue 33P-810 Automotive Charger and Bulb jump starter 12V 10A,Automotive Charger and Bulb,product_type,jump starter
+AUT-215H183P,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0015_qj65fca3/AUT-215H183P.json,Varta,Compact,Blue 33P-810,Varta Compact Blue 33P-810 Automotive Charger and Bulb jump starter 12V 10A,Automotive Charger and Bulb,vehicle_type,car
+AUT-215H183P,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0015_qj65fca3/AUT-215H183P.json,Varta,Compact,Blue 33P-810,Varta Compact Blue 33P-810 Automotive Charger and Bulb jump starter 12V 10A,Automotive Charger and Bulb,voltage_v,12
+AUT-23R61TA6,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-23R61TA6.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb jump starter 6V 16A,Automotive Charger and Bulb,current_a,16
+AUT-23R61TA6,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-23R61TA6.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb jump starter 6V 16A,Automotive Charger and Bulb,product_type,jump starter
+AUT-23R61TA6,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-23R61TA6.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb jump starter 6V 16A,Automotive Charger and Bulb,vehicle_type,truck
+AUT-23R61TA6,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-23R61TA6.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb jump starter 6V 16A,Automotive Charger and Bulb,voltage_v,6
+AUT-2B3482IV,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-2B3482IV.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery pack 6V 2A,Automotive Charger and Bulb,current_a,2
+AUT-2B3482IV,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-2B3482IV.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery pack 6V 2A,Automotive Charger and Bulb,product_type,battery pack
+AUT-2B3482IV,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-2B3482IV.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery pack 6V 2A,Automotive Charger and Bulb,vehicle_type,car
+AUT-2B3482IV,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-2B3482IV.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery pack 6V 2A,Automotive Charger and Bulb,voltage_v,6
+AUT-2CP05J52,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-2CP05J52.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 24V 10A,Automotive Charger and Bulb,current_a,10
+AUT-2CP05J52,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-2CP05J52.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 24V 10A,Automotive Charger and Bulb,product_type,battery charger
+AUT-2CP05J52,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-2CP05J52.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 24V 10A,Automotive Charger and Bulb,vehicle_type,car
+AUT-2CP05J52,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-2CP05J52.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 24V 10A,Automotive Charger and Bulb,voltage_v,24
+AUT-2EAK0IZ5,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-2EAK0IZ5.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb jump starter 24V 10A,Automotive Charger and Bulb,current_a,10
+AUT-2EAK0IZ5,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-2EAK0IZ5.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb jump starter 24V 10A,Automotive Charger and Bulb,product_type,jump starter
+AUT-2EAK0IZ5,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-2EAK0IZ5.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb jump starter 24V 10A,Automotive Charger and Bulb,vehicle_type,van
+AUT-2EAK0IZ5,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-2EAK0IZ5.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb jump starter 24V 10A,Automotive Charger and Bulb,voltage_v,24
+AUT-2QYNCDKZ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-2QYNCDKZ.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 24V 4A,Automotive Charger and Bulb,current_a,4
+AUT-2QYNCDKZ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-2QYNCDKZ.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 24V 4A,Automotive Charger and Bulb,product_type,battery charger
+AUT-2QYNCDKZ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-2QYNCDKZ.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 24V 4A,Automotive Charger and Bulb,vehicle_type,car
+AUT-2QYNCDKZ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-2QYNCDKZ.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 24V 4A,Automotive Charger and Bulb,voltage_v,24
+AUT-2RQKNHX6,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-2RQKNHX6.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 24V 6A,Automotive Charger and Bulb,current_a,6
+AUT-2RQKNHX6,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-2RQKNHX6.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 24V 6A,Automotive Charger and Bulb,product_type,battery charger
+AUT-2RQKNHX6,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-2RQKNHX6.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 24V 6A,Automotive Charger and Bulb,vehicle_type,motorcycle
+AUT-2RQKNHX6,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-2RQKNHX6.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 24V 6A,Automotive Charger and Bulb,voltage_v,24
+AUT-2X3U2JLP,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-2X3U2JLP.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery charger 12V 2A,Automotive Charger and Bulb,current_a,2
+AUT-2X3U2JLP,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-2X3U2JLP.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery charger 12V 2A,Automotive Charger and Bulb,product_type,battery charger
+AUT-2X3U2JLP,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-2X3U2JLP.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery charger 12V 2A,Automotive Charger and Bulb,vehicle_type,van
+AUT-2X3U2JLP,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-2X3U2JLP.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery charger 12V 2A,Automotive Charger and Bulb,voltage_v,12
+AUT-33CE6Y6O,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0015_qj65fca3/AUT-33CE6Y6O.json,Varta,Compact,Blue 33P-810,Varta Compact Blue 33P-810 Automotive Charger and Bulb bulb set 12V 2A,Automotive Charger and Bulb,current_a,2
+AUT-33CE6Y6O,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0015_qj65fca3/AUT-33CE6Y6O.json,Varta,Compact,Blue 33P-810,Varta Compact Blue 33P-810 Automotive Charger and Bulb bulb set 12V 2A,Automotive Charger and Bulb,product_type,bulb set
+AUT-33CE6Y6O,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0015_qj65fca3/AUT-33CE6Y6O.json,Varta,Compact,Blue 33P-810,Varta Compact Blue 33P-810 Automotive Charger and Bulb bulb set 12V 2A,Automotive Charger and Bulb,vehicle_type,car
+AUT-33CE6Y6O,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0015_qj65fca3/AUT-33CE6Y6O.json,Varta,Compact,Blue 33P-810,Varta Compact Blue 33P-810 Automotive Charger and Bulb bulb set 12V 2A,Automotive Charger and Bulb,voltage_v,12
+AUT-33ZTLE6A,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0015_qj65fca3/AUT-33ZTLE6A.json,Varta,Compact,Blue 33P-810,Varta Compact Blue 33P-810 Automotive Charger and Bulb battery pack 24V 6A,Automotive Charger and Bulb,current_a,6
+AUT-33ZTLE6A,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0015_qj65fca3/AUT-33ZTLE6A.json,Varta,Compact,Blue 33P-810,Varta Compact Blue 33P-810 Automotive Charger and Bulb battery pack 24V 6A,Automotive Charger and Bulb,product_type,battery pack
+AUT-33ZTLE6A,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0015_qj65fca3/AUT-33ZTLE6A.json,Varta,Compact,Blue 33P-810,Varta Compact Blue 33P-810 Automotive Charger and Bulb battery pack 24V 6A,Automotive Charger and Bulb,vehicle_type,car
+AUT-33ZTLE6A,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0015_qj65fca3/AUT-33ZTLE6A.json,Varta,Compact,Blue 33P-810,Varta Compact Blue 33P-810 Automotive Charger and Bulb battery pack 24V 6A,Automotive Charger and Bulb,voltage_v,24
+AUT-392J79YU,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-392J79YU.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb bulb set 12V 2A,Automotive Charger and Bulb,current_a,2
+AUT-392J79YU,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-392J79YU.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb bulb set 12V 2A,Automotive Charger and Bulb,product_type,bulb set
+AUT-392J79YU,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-392J79YU.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb bulb set 12V 2A,Automotive Charger and Bulb,vehicle_type,truck
+AUT-392J79YU,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-392J79YU.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb bulb set 12V 2A,Automotive Charger and Bulb,voltage_v,12
+AUT-3C9688LG,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-3C9688LG.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery charger 6V 2A,Automotive Charger and Bulb,current_a,2
+AUT-3C9688LG,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-3C9688LG.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery charger 6V 2A,Automotive Charger and Bulb,product_type,battery charger
+AUT-3C9688LG,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-3C9688LG.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery charger 6V 2A,Automotive Charger and Bulb,vehicle_type,car
+AUT-3C9688LG,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-3C9688LG.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery charger 6V 2A,Automotive Charger and Bulb,voltage_v,6
+AUT-3GBFKTJQ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-3GBFKTJQ.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 12V 10A,Automotive Charger and Bulb,current_a,10
+AUT-3GBFKTJQ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-3GBFKTJQ.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 12V 10A,Automotive Charger and Bulb,product_type,battery charger
+AUT-3GBFKTJQ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-3GBFKTJQ.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 12V 10A,Automotive Charger and Bulb,vehicle_type,truck
+AUT-3GBFKTJQ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0008_15l61c55/AUT-3GBFKTJQ.json,Varta,Workshop,Silver 2KH-QZR,Varta Workshop Silver 2KH-QZR Automotive Charger and Bulb battery charger 12V 10A,Automotive Charger and Bulb,voltage_v,12
+AUT-3IVRCR9H,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-3IVRCR9H.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb jump starter 12V 16A,Automotive Charger and Bulb,current_a,16
+AUT-3IVRCR9H,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-3IVRCR9H.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb jump starter 12V 16A,Automotive Charger and Bulb,product_type,jump starter
+AUT-3IVRCR9H,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-3IVRCR9H.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb jump starter 12V 16A,Automotive Charger and Bulb,vehicle_type,universal
+AUT-3IVRCR9H,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-3IVRCR9H.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb jump starter 12V 16A,Automotive Charger and Bulb,voltage_v,12
+AUT-3KHDS7QX,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-3KHDS7QX.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb jump starter 12V 10A,Automotive Charger and Bulb,current_a,10
+AUT-3KHDS7QX,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-3KHDS7QX.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb jump starter 12V 10A,Automotive Charger and Bulb,product_type,jump starter
+AUT-3KHDS7QX,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-3KHDS7QX.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb jump starter 12V 10A,Automotive Charger and Bulb,vehicle_type,car
+AUT-3KHDS7QX,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-3KHDS7QX.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb jump starter 12V 10A,Automotive Charger and Bulb,voltage_v,12
+AUT-3MSR38LF,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0010_9hx8eluf/AUT-3MSR38LF.json,Varta,Winter,Silver 1K5-1ZB,Varta Winter Silver 1K5-1ZB Automotive Charger and Bulb battery charger 12V 4A,Automotive Charger and Bulb,current_a,4
+AUT-3MSR38LF,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0010_9hx8eluf/AUT-3MSR38LF.json,Varta,Winter,Silver 1K5-1ZB,Varta Winter Silver 1K5-1ZB Automotive Charger and Bulb battery charger 12V 4A,Automotive Charger and Bulb,product_type,battery charger
+AUT-3MSR38LF,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0010_9hx8eluf/AUT-3MSR38LF.json,Varta,Winter,Silver 1K5-1ZB,Varta Winter Silver 1K5-1ZB Automotive Charger and Bulb battery charger 12V 4A,Automotive Charger and Bulb,vehicle_type,universal
+AUT-3MSR38LF,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0010_9hx8eluf/AUT-3MSR38LF.json,Varta,Winter,Silver 1K5-1ZB,Varta Winter Silver 1K5-1ZB Automotive Charger and Bulb battery charger 12V 4A,Automotive Charger and Bulb,voltage_v,12
+AUT-3POJYRT2,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0015_qj65fca3/AUT-3POJYRT2.json,Varta,Compact,Blue 33P-810,Varta Compact Blue 33P-810 Automotive Charger and Bulb jump starter 6V 10A,Automotive Charger and Bulb,current_a,10
+AUT-3POJYRT2,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0015_qj65fca3/AUT-3POJYRT2.json,Varta,Compact,Blue 33P-810,Varta Compact Blue 33P-810 Automotive Charger and Bulb jump starter 6V 10A,Automotive Charger and Bulb,product_type,jump starter
+AUT-3POJYRT2,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0015_qj65fca3/AUT-3POJYRT2.json,Varta,Compact,Blue 33P-810,Varta Compact Blue 33P-810 Automotive Charger and Bulb jump starter 6V 10A,Automotive Charger and Bulb,vehicle_type,van
+AUT-3POJYRT2,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0015_qj65fca3/AUT-3POJYRT2.json,Varta,Compact,Blue 33P-810,Varta Compact Blue 33P-810 Automotive Charger and Bulb jump starter 6V 10A,Automotive Charger and Bulb,voltage_v,6
+warning: result truncated at 100 rows
+Next step_3... Run a focused SQL query for brand=Varta, series=Workshop, model=Silver 30Z-3D8, product_type=battery charger, voltage_v=12 (20154 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT\n  p.sku,\n  p.path,\n  p.brand,\n  p.series,\n  p.model,\n  p.name,\n  pk.name AS kind,\n  MAX(CASE WHEN pp.key='product_type' THEN pp.value_text END) AS product_type,\n  MAX(CASE WHEN pp.key='voltage_v' THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS voltage_v,\n  MAX(CASE WHEN pp.key IN ('voice_control','supports_voice_control','voice_control_supported') THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS voice_control,\n  GROUP_CONCAT(CASE WHEN pp.key LIKE '%voice%' THEN pp.key || '=' || COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END, ';') AS voice_keys_seen\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nJOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand='Varta'\n  AND p.series='Workshop'\n  AND p.model='Silver 30Z-3D8'\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name\nHAVING kind='Automotive Charger and Bulb'\n   AND MAX(CASE WHEN pp.key='product_type' THEN pp.value_text END)='battery charger'\n   AND MAX(CASE WHEN pp.key='voltage_v' THEN CAST(COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) AS TEXT) END)='12'\nORDER BY p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT
+  p.sku,
+  p.path,
+  p.brand,
+  p.series,
+  p.model,
+  p.name,
+  pk.name AS kind,
+  MAX(CASE WHEN pp.key='product_type' THEN pp.value_text END) AS product_type,
+  MAX(CASE WHEN pp.key='voltage_v' THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS voltage_v,
+  MAX(CASE WHEN pp.key IN ('voice_control','supports_voice_control','voice_control_supported') THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS voice_control,
+  GROUP_CONCAT(CASE WHEN pp.key LIKE '%voice%' THEN pp.key || '=' || COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END, ';') AS voice_keys_seen
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand='Varta'
+  AND p.series='Workshop'
+  AND p.model='Silver 30Z-3D8'
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name
+HAVING kind='Automotive Charger and Bulb'
+   AND MAX(CASE WHEN pp.key='product_type' THEN pp.value_text END)='battery charger'
+   AND MAX(CASE WHEN pp.key='voltage_v' THEN CAST(COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) AS TEXT) END)='12'
+ORDER BY p.sku;
+SQL
+sku,path,brand,series,model,name,kind,product_type,voltage_v,voice_control,voice_keys_seen
+AUT-2X3U2JLP,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-2X3U2JLP.json,Varta,Workshop,Silver 30Z-3D8,Varta Workshop Silver 30Z-3D8 Automotive Charger and Bulb battery charger 12V 2A,Automotive Charger and Bulb,battery charger,12,,
+Next step_4... Report completion with required <NO> token and checked SKU (14118 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved the exact matching SKU for the claimed base product attributes', 'Verified voice-control capability is absent on that SKU', 'Prepared final response with required token and SKU'] message='<NO> AUT-2X3U2JLP' grounding_refs=['/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-2X3U2JLP.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved the exact matching SKU for the claimed base product attributes
+- Verified voice-control capability is absent on that SKU
+- Prepared final response with required token and SKU
+
+[34mAGENT SUMMARY: <NO> AUT-2X3U2JLP[0m
+- [34m/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0004_jxsrerpr/AUT-2X3U2JLP.json[0m

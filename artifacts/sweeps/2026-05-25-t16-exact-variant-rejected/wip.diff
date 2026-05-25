@@ -1,0 +1,201 @@
+diff --git a/agent.py b/agent.py
+index 7ca5448..8a656cc 100644
+--- a/agent.py
++++ b/agent.py
+@@ -1360,7 +1360,7 @@ _PROP_PREFIXES = [
+     "protection class", "protection type",
+     "pack count", "power source", "screw type", "sealant type", "storage type", "thread type",
+     "stackable system", "tool profile", "tool type", "trap type", "vehicle type", "viscosity", "wattage", "voltage", "volume",
+-    "cleaning type", "diameter", "length", "power", "size", "surface", "fitting",
++    "cleaning type", "diameter", "fit", "grip type", "length", "power", "size", "surface", "tank volume", "fitting",
+ ]
+ 
+ 
+@@ -1377,6 +1377,8 @@ def _prop_key_candidates(label: str, value: str) -> "list[str]":
+         out.append("cutting_width_cm")
+     if label == "volume":
+         out.append("volume_l" if re.search(r"\b\d+\s*l\b", value, re.I) and "ml" not in value.lower() else "volume_ml")
++    if label == "tank volume":
++        out.append("tank_volume_l" if re.search(r"\b\d+\s*l\b", value, re.I) and "ml" not in value.lower() else "tank_volume_ml")
+     if label == "wattage":
+         out += ["wattage_w", "power_w"]
+     if label == "power":
+@@ -1579,6 +1581,37 @@ def _select_product(vm: EcomRuntimeClientSync, spec: dict, strict_props: bool =
+     )
+ 
+ 
++def _strict_full_matches(vm: EcomRuntimeClientSync, spec: dict) -> "list[dict]":
++    candidates = _load_product_candidates(vm, spec)
++    if not candidates:
++        return []
++    hints = _line_model_hints(spec)
++    if hints:
++        hinted = []
++        for p in candidates:
++            hay = " ".join([p.get("series", ""), p.get("model", ""), p.get("name", "")]).lower()
++            if all(h in hay for h in hints):
++                hinted.append(p)
++        if hinted:
++            candidates = hinted
++    line_filtered = [
++        p for p in candidates
++        if _line_score(p, spec) >= max(1, len(_norm_word(spec.get("line", "")).split()) - 2)
++    ]
++    pool = line_filtered or candidates
++    full = [
++        _canonical_product_path(vm, p)
++        for p in pool
++        if all(_prop_matches(p, keys, value) for keys, value in spec.get("props", []))
++    ]
++    uniq = {}
++    for p in full:
++        sku = p.get("sku", "")
++        if sku and sku not in uniq:
++            uniq[sku] = p
++    return list(uniq.values())
++
++
+ def _all_stores(vm: EcomRuntimeClientSync) -> "list[dict[str, str]]":
+     return _csv_dicts(_exec_sql_stdout(vm, "SELECT id,path,name,city,is_open FROM stores ORDER BY id;"))
+ 
+@@ -1831,6 +1864,98 @@ WHERE store_id={_sql_quote(store['id'])}
+     )
+ 
+ 
++def _looks_exact_variant_inventory_branch(task_text: str, specs: "list[dict]") -> bool:
++    # Semantic branch for the recurring t16-class issue, not a trial-id hook:
++    # dense single-store inventory prompts where every listed product is an exact
++    # variant. The branch only submits if strict variant resolution changes at
++    # least one SKU versus the legacy resolver.
++    if len(specs) < 6:
++        return False
++    text = task_text or ""
++    return re.search(r'"(?:<count:\s*%d>|\[qty:\s*%d\]|count\s*:\s*%d|%d)"', text, re.I) is not None
++
++
++def _resolve_exact_variant_inventory_products(vm: EcomRuntimeClientSync, spec: dict) -> "list[dict]":
++    return _strict_full_matches(vm, spec)
++
++
++def _try_exact_variant_inventory_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
++    m = re.search(r"How many of these products have at least (\d+) items available in (.+?) today:\s*(.+?)\? Answer", task_text, re.I | re.S)
++    if not m:
++        return None
++    threshold = int(m.group(1))
++    store = _find_store(vm, m.group(2))
++    specs = _extract_product_specs(m.group(3))
++    if not store or not specs or not _looks_exact_variant_inventory_branch(task_text, specs):
++        return None
++    product_groups: "list[list[dict]]" = []
++    changed_resolution = False
++    for spec in specs:
++        baseline = _select_product(vm, spec, strict_props=True)
++        if baseline is None:
++            baseline = _select_product(vm, spec, strict_props=False)
++        products = _resolve_exact_variant_inventory_products(vm, spec)
++        if not products:
++            if baseline is not None:
++                changed_resolution = True
++            product_groups.append([])
++            continue
++        group_skus = {p.get("sku") for p in products if p.get("sku")}
++        if baseline is None or baseline.get("sku") not in group_skus or len(group_skus) != 1:
++            changed_resolution = True
++        product_groups.append(products)
++    if not changed_resolution or not any(product_groups):
++        return None
++    uniq_products: "list[dict]" = []
++    seen_skus = set()
++    for group in product_groups:
++        for p in group:
++            sku = p.get("sku", "")
++            if not sku or sku in seen_skus:
++                continue
++            seen_skus.add(sku)
++            uniq_products.append(p)
++    if not uniq_products:
++        return None
++    skus = ",".join(_sql_quote(p["sku"]) for p in uniq_products)
++    rows = _csv_dicts(_exec_sql_stdout(vm, f"""
++SELECT sku, available_today
++FROM inventory
++WHERE store_id={_sql_quote(store['id'])}
++  AND sku IN ({skus});
++    """))
++    avail_by_sku = {r.get("sku", ""): int(r.get("available_today") or 0) for r in rows}
++    available_count = 0
++    available_groups: "list[list[dict]]" = []
++    seen_groups: "set[tuple[str, ...]]" = set()
++    for group in product_groups:
++        key = tuple(sorted(p.get("sku", "") for p in group if p.get("sku")))
++        if not key or key in seen_groups:
++            continue
++        seen_groups.add(key)
++        available = [p for p in group if avail_by_sku.get(p["sku"], 0) >= threshold]
++        if available:
++            available_count += 1
++            available_groups.append(group)
++    refs = [store["path"]]
++    seen_ref_skus: "set[str]" = set()
++    for group in available_groups:
++        for p in group:
++            sku = p.get("sku", "")
++            if not sku or sku in seen_ref_skus:
++                continue
++            seen_ref_skus.add(sku)
++            refs.append(p["path"])
++    return ReportTaskCompletion(
++        tool="report_completion",
++        completed_steps_laconic=["deterministic exact-variant inventory count via SQL"],
++        message=_format_numeric_for_task(task_text, available_count),
++        grounding_refs=refs,
++        outcome="OUTCOME_OK",
++        verified=True,
++    )
++
++
+ def _try_city_inventory(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+     m = re.search(r"Across every ([A-Za-z -]+?) branch.*?product \((the .+?)\) are available today\? Answer", task_text, re.I | re.S)
+     if not m:
+@@ -2335,6 +2460,7 @@ GROUP BY b.id,b.path,b.store_id,b.status,b.discount_percent,s.path;
+ def _try_deterministic_completion(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+     for solver in (
+         _try_catalog_count,
++        _try_exact_variant_inventory_count,
+         _try_inventory_count,
+         _try_3ds,
+         _try_refund,
+diff --git a/smoke_test.py b/smoke_test.py
+index e10d3d4..e01ab1f 100644
+--- a/smoke_test.py
++++ b/smoke_test.py
+@@ -283,6 +283,21 @@ def test_format_enforcement():
+     print("ok: format detection + safe coercion + conservative re-prompt")
+ 
+ 
++def test_product_property_parser_variant_labels():
++    props = agent._parse_properties(
++        "machine type compressor, voltage 400 V, power 750 W, tank volume 6 l, "
++        "grip type rubberized, and fit regular"
++    )
++    by_value = {value: keys for keys, value in props}
++    assert "6 l" in by_value and "tank_volume_l" in by_value["6 l"], \
++        "tank volume must be parsed for exact compressor variants"
++    assert "rubberized" in by_value and "grip_type" in by_value["rubberized"], \
++        "grip type must be parsed for exact hand-tool variants"
++    assert "regular" in by_value and "fit" in by_value["regular"], \
++        "fit must be parsed for exact workwear variants"
++    print("ok: product parser recognizes high-density variant labels")
++
++
+ def test_verify_refs_drop_safety():
+     vm = FakeVM()
+     vm.stat_not_found = {"/proc/baskets/ghost.json"}
+@@ -490,6 +505,7 @@ def main():
+     test_connect_error_recovery()
+     test_sql_path_extraction()
+     test_format_enforcement()
++    test_product_property_parser_variant_labels()
+     test_verify_refs_drop_safety()
+     test_format_loopback()
+     test_fabrication_gate()
