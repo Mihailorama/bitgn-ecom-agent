@@ -92,3 +92,4 @@ lookups, strong model for security/fraud/mutation.
 | 2026-05-25 21:12 | codex:gpt-5.3-codex | 88.6% | 39/44 | 285s | 28s | 6 |
 | 2026-05-25 21:16 | codex:gpt-5.3-codex | 97.7% | 43/44 | 232s | 25s | 6 |
 | 2026-05-25 21:17 | codex:gpt-5.3-codex | 97.7% | 43/44 | 218s | 23s | 6 |
+| 2026-05-25 21:21 | codex:gpt-5.3-codex | 97.7% | 43/44 | 197s | 23s | 6 |

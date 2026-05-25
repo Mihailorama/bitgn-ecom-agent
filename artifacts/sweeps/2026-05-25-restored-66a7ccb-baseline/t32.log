@@ -1,0 +1,383 @@
+TASK t32 (model codex:gpt-5.3-codex)
+INSTRUCTION: A support note claims we stock the Workshop Drill Grinder and Sander from Einhell in the Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander line that has machine type belt sander, voltage 230 V, and power 250 W and is wifi-enabled. Check the actual catalogue item, cite the exact product record, and if the base product exists but that extra capability is absent, answer with <NO> and include the checked SKU.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Run a focused SQL query joining products and product_properties to find candidate SKU(s) and path(s) for the stated Einhell item and required properties (machine_type, voltage, power). (17714 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH base AS (\n  SELECT p.sku, p.path, p.brand, p.series, p.model, p.name\n  FROM products p\n  WHERE p.brand='Einhell'\n    AND (p.series='Professional' OR p.name LIKE '%Professional%')\n    AND (p.model='GC 2VB-YVV' OR p.name LIKE '%GC 2VB-YVV%')\n    AND p.name LIKE '%Workshop Drill Grinder and Sander%'\n), props AS (\n  SELECT b.sku, b.path,\n         MAX(CASE WHEN pp.key IN ('machine_type','tool_type') THEN pp.value_text END) AS machine_type,\n         MAX(CASE WHEN pp.key IN ('voltage_v','voltage') THEN COALESCE(CAST(pp.value_number AS TEXT), pp.value_text) END) AS voltage,\n         MAX(CASE WHEN pp.key IN ('power_w','power') THEN COALESCE(CAST(pp.value_number AS TEXT), pp.value_text) END) AS power,\n         MAX(CASE WHEN pp.key IN ('wifi_enabled','wifi','wireless') THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS wifi_capability\n  FROM base b\n  LEFT JOIN product_properties pp ON pp.sku=b.sku\n  GROUP BY b.sku, b.path\n)\nSELECT *\nFROM props\nWHERE machine_type='belt sander' AND (voltage='230' OR voltage='230 V') AND (power='250' OR power='250 W');"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH base AS (
+  SELECT p.sku, p.path, p.brand, p.series, p.model, p.name
+  FROM products p
+  WHERE p.brand='Einhell'
+    AND (p.series='Professional' OR p.name LIKE '%Professional%')
+    AND (p.model='GC 2VB-YVV' OR p.name LIKE '%GC 2VB-YVV%')
+    AND p.name LIKE '%Workshop Drill Grinder and Sander%'
+), props AS (
+  SELECT b.sku, b.path,
+         MAX(CASE WHEN pp.key IN ('machine_type','tool_type') THEN pp.value_text END) AS machine_type,
+         MAX(CASE WHEN pp.key IN ('voltage_v','voltage') THEN COALESCE(CAST(pp.value_number AS TEXT), pp.value_text) END) AS voltage,
+         MAX(CASE WHEN pp.key IN ('power_w','power') THEN COALESCE(CAST(pp.value_number AS TEXT), pp.value_text) END) AS power,
+         MAX(CASE WHEN pp.key IN ('wifi_enabled','wifi','wireless') THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS wifi_capability
+  FROM base b
+  LEFT JOIN product_properties pp ON pp.sku=b.sku
+  GROUP BY b.sku, b.path
+)
+SELECT *
+FROM props
+WHERE machine_type='belt sander' AND (voltage='230' OR voltage='230 V') AND (power='250' OR power='250 W');
+SQL
+sku,path,machine_type,voltage,power,wifi_capability
+Next step_2... Query candidate products for the stated brand/line/model/name and return sku/path. (12529 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH candidates AS (\n  SELECT p.sku, p.path, p.brand, p.series, p.model, p.name\n  FROM products p\n  WHERE p.brand='Einhell'\n    AND (p.model='GC 2VB-YVV' OR p.series='Professional' OR p.name LIKE '%Professional%' OR p.name LIKE '%GC 2VB-YVV%')\n    AND p.name LIKE '%Workshop Drill Grinder and Sander%'\n)\nSELECT c.sku, c.path, c.brand, c.series, c.model, c.name, pp.key, pp.value_text, pp.value_number\nFROM candidates c\nLEFT JOIN product_properties pp ON pp.sku = c.sku\nORDER BY c.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH candidates AS (
+  SELECT p.sku, p.path, p.brand, p.series, p.model, p.name
+  FROM products p
+  WHERE p.brand='Einhell'
+    AND (p.model='GC 2VB-YVV' OR p.series='Professional' OR p.name LIKE '%Professional%' OR p.name LIKE '%GC 2VB-YVV%')
+    AND p.name LIKE '%Workshop Drill Grinder and Sander%'
+)
+SELECT c.sku, c.path, c.brand, c.series, c.model, c.name, pp.key, pp.value_text, pp.value_number
+FROM candidates c
+LEFT JOIN product_properties pp ON pp.sku = c.sku
+ORDER BY c.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,key,value_text,value_number
+MAC-1BH3ABA9,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1BH3ABA9.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 250W bench,machine_type,belt sander,
+MAC-1BH3ABA9,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1BH3ABA9.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 250W bench,mount_type,bench,
+MAC-1BH3ABA9,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1BH3ABA9.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 250W bench,power_w,250,250
+MAC-1BH3ABA9,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1BH3ABA9.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 250W bench,voltage_v,230,230
+MAC-1BH3ABA9,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1BH3ABA9.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 250W bench,working_width_mm,250,250
+MAC-1EWUJKOW,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1EWUJKOW.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 500W bench,machine_type,belt sander,
+MAC-1EWUJKOW,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1EWUJKOW.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 500W bench,mount_type,bench,
+MAC-1EWUJKOW,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1EWUJKOW.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 500W bench,power_w,500,500
+MAC-1EWUJKOW,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1EWUJKOW.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 500W bench,voltage_v,230,230
+MAC-1EWUJKOW,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1EWUJKOW.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 500W bench,working_width_mm,300,300
+MAC-1F7RRGD5,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1F7RRGD5.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander planer thicknesser 500W bench,machine_type,planer thicknesser,
+MAC-1F7RRGD5,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1F7RRGD5.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander planer thicknesser 500W bench,mount_type,bench,
+MAC-1F7RRGD5,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1F7RRGD5.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander planer thicknesser 500W bench,power_w,500,500
+MAC-1F7RRGD5,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1F7RRGD5.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander planer thicknesser 500W bench,voltage_v,230,230
+MAC-1F7RRGD5,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1F7RRGD5.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander planer thicknesser 500W bench,working_width_mm,150,150
+MAC-1NM0CCZ8,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1NM0CCZ8.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 1500W bench,machine_type,belt sander,
+MAC-1NM0CCZ8,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1NM0CCZ8.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 1500W bench,mount_type,bench,
+MAC-1NM0CCZ8,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1NM0CCZ8.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 1500W bench,power_w,1500,1500
+MAC-1NM0CCZ8,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1NM0CCZ8.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 1500W bench,voltage_v,230,230
+MAC-1NM0CCZ8,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1NM0CCZ8.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 1500W bench,working_width_mm,250,250
+MAC-1SBYOOCJ,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-1SBYOOCJ.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander planer thicknesser 1500W bench,machine_type,planer thicknesser,
+MAC-1SBYOOCJ,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-1SBYOOCJ.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander planer thicknesser 1500W bench,mount_type,bench,
+MAC-1SBYOOCJ,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-1SBYOOCJ.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander planer thicknesser 1500W bench,power_w,1500,1500
+MAC-1SBYOOCJ,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-1SBYOOCJ.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander planer thicknesser 1500W bench,voltage_v,110,110
+MAC-1SBYOOCJ,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-1SBYOOCJ.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander planer thicknesser 1500W bench,working_width_mm,150,150
+MAC-20MBP5AC,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-20MBP5AC.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander lathe 500W bench,machine_type,lathe,
+MAC-20MBP5AC,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-20MBP5AC.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander lathe 500W bench,mount_type,bench,
+MAC-20MBP5AC,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-20MBP5AC.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander lathe 500W bench,power_w,500,500
+MAC-20MBP5AC,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-20MBP5AC.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander lathe 500W bench,voltage_v,230,230
+MAC-20MBP5AC,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-20MBP5AC.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander lathe 500W bench,working_width_mm,250,250
+MAC-2H8Z0FIP,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-2H8Z0FIP.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander planer thicknesser 750W bench,machine_type,planer thicknesser,
+MAC-2H8Z0FIP,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-2H8Z0FIP.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander planer thicknesser 750W bench,mount_type,bench,
+MAC-2H8Z0FIP,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-2H8Z0FIP.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander planer thicknesser 750W bench,power_w,750,750
+MAC-2H8Z0FIP,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-2H8Z0FIP.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander planer thicknesser 750W bench,voltage_v,230,230
+MAC-2H8Z0FIP,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-2H8Z0FIP.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander planer thicknesser 750W bench,working_width_mm,300,300
+MAC-2KQ0EQGY,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-2KQ0EQGY.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 750W bench,machine_type,belt sander,
+MAC-2KQ0EQGY,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-2KQ0EQGY.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 750W bench,mount_type,bench,
+MAC-2KQ0EQGY,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-2KQ0EQGY.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 750W bench,power_w,750,750
+MAC-2KQ0EQGY,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-2KQ0EQGY.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 750W bench,voltage_v,230,230
+MAC-2KQ0EQGY,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-2KQ0EQGY.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 750W bench,working_width_mm,400,400
+MAC-37KPQZSS,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-37KPQZSS.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander drill press 750W bench,machine_type,drill press,
+MAC-37KPQZSS,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-37KPQZSS.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander drill press 750W bench,mount_type,bench,
+MAC-37KPQZSS,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-37KPQZSS.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander drill press 750W bench,power_w,750,750
+MAC-37KPQZSS,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-37KPQZSS.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander drill press 750W bench,voltage_v,230,230
+MAC-37KPQZSS,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-37KPQZSS.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander drill press 750W bench,working_width_mm,400,400
+MAC-3BA5WPN1,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-3BA5WPN1.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander lathe 1500W bench,machine_type,lathe,
+MAC-3BA5WPN1,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-3BA5WPN1.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander lathe 1500W bench,mount_type,bench,
+MAC-3BA5WPN1,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-3BA5WPN1.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander lathe 1500W bench,power_w,1500,1500
+MAC-3BA5WPN1,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-3BA5WPN1.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander lathe 1500W bench,voltage_v,230,230
+MAC-3BA5WPN1,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-3BA5WPN1.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander lathe 1500W bench,working_width_mm,250,250
+MAC-3P1ZO7JB,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-3P1ZO7JB.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander belt sander 1100W bench,machine_type,belt sander,
+MAC-3P1ZO7JB,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-3P1ZO7JB.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander belt sander 1100W bench,mount_type,bench,
+MAC-3P1ZO7JB,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-3P1ZO7JB.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander belt sander 1100W bench,power_w,1100,1100
+MAC-3P1ZO7JB,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-3P1ZO7JB.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander belt sander 1100W bench,voltage_v,230,230
+MAC-3P1ZO7JB,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-3P1ZO7JB.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander belt sander 1100W bench,working_width_mm,200,200
+MAC-3XI91OSV,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-3XI91OSV.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander drill press 1100W bench,machine_type,drill press,
+MAC-3XI91OSV,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-3XI91OSV.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander drill press 1100W bench,mount_type,bench,
+MAC-3XI91OSV,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-3XI91OSV.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander drill press 1100W bench,power_w,1100,1100
+MAC-3XI91OSV,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-3XI91OSV.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander drill press 1100W bench,voltage_v,110,110
+MAC-3XI91OSV,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-3XI91OSV.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander drill press 1100W bench,working_width_mm,300,300
+MAC-A4VRX1CP,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-A4VRX1CP.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander bench grinder 1100W bench,machine_type,bench grinder,
+MAC-A4VRX1CP,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-A4VRX1CP.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander bench grinder 1100W bench,mount_type,bench,
+MAC-A4VRX1CP,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-A4VRX1CP.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander bench grinder 1100W bench,power_w,1100,1100
+MAC-A4VRX1CP,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-A4VRX1CP.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander bench grinder 1100W bench,voltage_v,230,230
+MAC-A4VRX1CP,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-A4VRX1CP.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander bench grinder 1100W bench,working_width_mm,400,400
+MAC-MGWILZL9,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-MGWILZL9.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander drill press 2200W bench,machine_type,drill press,
+MAC-MGWILZL9,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-MGWILZL9.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander drill press 2200W bench,mount_type,bench,
+MAC-MGWILZL9,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-MGWILZL9.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander drill press 2200W bench,power_w,2200,2200
+MAC-MGWILZL9,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-MGWILZL9.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander drill press 2200W bench,voltage_v,400,400
+MAC-MGWILZL9,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-MGWILZL9.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander drill press 2200W bench,working_width_mm,150,150
+MAC-OYJAI33N,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-OYJAI33N.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander planer thicknesser 250W bench,machine_type,planer thicknesser,
+MAC-OYJAI33N,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-OYJAI33N.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander planer thicknesser 250W bench,mount_type,bench,
+MAC-OYJAI33N,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-OYJAI33N.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander planer thicknesser 250W bench,power_w,250,250
+MAC-OYJAI33N,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-OYJAI33N.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander planer thicknesser 250W bench,voltage_v,230,230
+MAC-OYJAI33N,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-OYJAI33N.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander planer thicknesser 250W bench,working_width_mm,250,250
+MAC-TAT5D7JR,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-TAT5D7JR.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander bench grinder 500W bench,machine_type,bench grinder,
+MAC-TAT5D7JR,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-TAT5D7JR.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander bench grinder 500W bench,mount_type,bench,
+MAC-TAT5D7JR,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-TAT5D7JR.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander bench grinder 500W bench,power_w,500,500
+MAC-TAT5D7JR,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-TAT5D7JR.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander bench grinder 500W bench,voltage_v,230,230
+MAC-TAT5D7JR,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0013_2avblrjf/MAC-TAT5D7JR.json,Einhell,Professional,GE 2FB-6Q2,Einhell Professional GE 2FB-6Q2 Workshop Drill Grinder and Sander bench grinder 500W bench,working_width_mm,100,100
+MAC-VB06DR1A,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-VB06DR1A.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander lathe 1100W bench,machine_type,lathe,
+MAC-VB06DR1A,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-VB06DR1A.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander lathe 1100W bench,mount_type,bench,
+MAC-VB06DR1A,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-VB06DR1A.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander lathe 1100W bench,power_w,1100,1100
+MAC-VB06DR1A,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-VB06DR1A.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander lathe 1100W bench,voltage_v,230,230
+MAC-VB06DR1A,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-VB06DR1A.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander lathe 1100W bench,working_width_mm,200,200
+MAC-YBO3GL54,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-YBO3GL54.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 1100W bench,machine_type,belt sander,
+MAC-YBO3GL54,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-YBO3GL54.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 1100W bench,mount_type,bench,
+MAC-YBO3GL54,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-YBO3GL54.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 1100W bench,power_w,1100,1100
+MAC-YBO3GL54,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-YBO3GL54.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 1100W bench,voltage_v,230,230
+MAC-YBO3GL54,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-YBO3GL54.json,Einhell,Professional,GC 2VB-YVV,Einhell Professional GC 2VB-YVV Workshop Drill Grinder and Sander belt sander 1100W bench,working_width_mm,100,100
+Next step_3... Report completion with required token and checked SKU, citing the exact product record path. (15289 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved the exact Einhell GC 2VB-YVV 230V/250W belt-sander SKU.', 'Verified wifi capability is absent on that SKU.', 'Prepared final response in required format with exact product path grounding.'] message='<NO> MAC-1BH3ABA9' grounding_refs=['/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1BH3ABA9.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved the exact Einhell GC 2VB-YVV 230V/250W belt-sander SKU.
+- Verified wifi capability is absent on that SKU.
+- Prepared final response in required format with exact product path grounding.
+
+[34mAGENT SUMMARY: <NO> MAC-1BH3ABA9[0m
+- [34m/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0012_33wwncal/MAC-1BH3ABA9.json[0m

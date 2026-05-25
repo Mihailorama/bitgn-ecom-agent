@@ -101,12 +101,14 @@ latest stability runs are mostly `43/44`:
 - Restored-baseline validation sweeps:
   - `2026-05-25 21:06`: `97.7%` (`43/44`) at `194s`, miss `t16`.
   - `2026-05-25 21:17`: `97.7%` (`43/44`) at `218s`, miss `t16`.
+  - `2026-05-25 21:21`: `97.7%` (`43/44`) at `197s`, miss `t16`.
 - Security grep was clean: no `expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK`.
 - Preserved evidence:
   - `artifacts/sweeps/2026-05-25-classsplit-state/`
   - `artifacts/sweeps/2026-05-25-rejected-canonical-allrefs-targeted/`
   - `artifacts/sweeps/2026-05-25-baseline-plus-rejected-inventory-allrefs/`
   - `artifacts/sweeps/2026-05-25-baseline-66a7ccb-validation/`
+  - `artifacts/sweeps/2026-05-25-restored-66a7ccb-baseline/`
 
 **Class-split checkpoint (2026-05-25, late cycle).**
 - Full sweep reached `95.45%` (`42/44`) at `319s` wall, with only:
