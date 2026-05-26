@@ -524,6 +524,26 @@ Current state in `agent.py` includes:
   from family JSON siblings, with RED tests for at least one numeric
   false-positive and one wrong-sibling-ref saved `t16` seed.
 
+**2026-05-26 inventory diagnostic emission.**
+- Added structured `INVENTORY_DIAG` JSON lines for the deterministic `ge`
+  inventory path. Each requested product now records parsed props, resolver
+  status/reason, candidate SKU/path list, `available_today`, threshold, and
+  store id/path in the per-task log.
+- Validation:
+  - `uv run python -m py_compile agent.py llm.py && uv run python smoke_test.py`
+    passed.
+  - Targeted `t16` diagnostic run:
+    `artifacts/sweeps/2026-05-26-inventory-diag-emission-t16-r1/` scored `0/1`
+    with missing required ref
+    `/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0008_3ir0e1ik/PNT-3MJQLL5R.json`.
+    The diagnostic shows the current resolver fell back to sibling
+    `PNT-1L3EG9LJ` with `available_today=0` for the Tikkurila wood-stain item,
+    while other selected refs were `Mascot` and `Uvex` work-jacket candidates.
+- This confirms the next behavior fix should be family sibling augmentation:
+  when a fallback candidate has a `family_id` directory, list/read sibling JSON
+  or otherwise query same-family SKUs before declaring the requested variant
+  unresolved or selecting an unrelated fallback.
+
 **Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
 `claude:sonnet` as the cheap regression canary. 10-minute platform-time target
 is still unmet at 100% quality.

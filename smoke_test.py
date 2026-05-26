@@ -8,8 +8,11 @@ Run: `uv run python smoke_test.py`  (or `python smoke_test.py` with pydantic
 installed). Exits non-zero on failure.
 """
 
+import io
+import json
 import sys
 import types
+from contextlib import redirect_stdout
 from types import SimpleNamespace
 
 
@@ -896,6 +899,37 @@ def test_inventory_ref_policy_counts_one_available_sku_per_requested_product():
     print("ok: inventory ref policy counts one available sku per requested product")
 
 
+def test_inventory_solver_emits_structured_diagnostics_for_ge_groups():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["FROM inventory"] = "sku,available_today\nFST-LOW,1\nWRK-HIGH,5\n"
+    task = (
+        "How many of these products have at least 5 items available in the central Brno PowerTool branch today: "
+        "the Nut Bolt and Washer from Heco in the Heco Unix HECO 2VD-VNA Nut Bolt and Washer line "
+        "that has fastener type threaded rod,"
+        "the Work Jacket from Mascot in the Mascot Advanced ACC 35W-IIS Work Jacket line "
+        'that has color family Blue? Answer in exactly format "%d" (no quotes)'
+    )
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    diag_lines = [
+        json.loads(line.removeprefix("INVENTORY_DIAG "))
+        for line in buf.getvalue().splitlines()
+        if line.startswith("INVENTORY_DIAG ")
+    ]
+    assert len(diag_lines) == 2
+    assert diag_lines[0]["status"] == "exact"
+    assert diag_lines[0]["reason"] == "exact_group"
+    assert diag_lines[0]["candidates"][0]["sku"] == "FST-LOW"
+    assert diag_lines[0]["candidates"][0]["available_today"] == 1
+    assert diag_lines[1]["candidates"][0]["sku"] == "WRK-HIGH"
+    assert diag_lines[1]["candidates"][0]["available_today"] == 5
+    print("ok: inventory solver emits structured diagnostics for ge groups")
+
+
 def test_inventory_solver_does_not_cite_zero_stock_products_for_below_threshold():
     vm = _inventory_solver_vm()
     vm.sql_outputs["FROM inventory"] = (
@@ -1018,6 +1052,7 @@ def main():
     test_property_parser_handles_comma_and_fit_property()
     test_inventory_resolver_reports_exact_and_fallback_statuses()
     test_inventory_ref_policy_counts_one_available_sku_per_requested_product()
+    test_inventory_solver_emits_structured_diagnostics_for_ge_groups()
     test_inventory_solver_does_not_cite_zero_stock_products_for_below_threshold()
     test_inventory_solver_handles_below_available_today_shape()
     test_inventory_solver_handles_none_available_today_shape()

@@ -1686,6 +1686,42 @@ def _build_inventory_refs(
     }
 
 
+def _emit_inventory_diagnostics(
+    store: dict,
+    specs: "list[dict]",
+    candidate_groups: "list[dict]",
+    avail_by_sku: "dict[str, int]",
+    threshold: int,
+    op: str,
+) -> None:
+    for spec, group in zip(specs, candidate_groups):
+        record = {
+            "brand": spec.get("brand", ""),
+            "kind": spec.get("kind", ""),
+            "line": spec.get("line", ""),
+            "op": op,
+            "threshold": threshold,
+            "store_id": store.get("id", ""),
+            "store_path": store.get("path", ""),
+            "status": group.get("status", ""),
+            "reason": group.get("reason", ""),
+            "props": [
+                {"keys": keys, "value": value}
+                for keys, value in spec.get("props", [])
+            ],
+            "candidates": [
+                {
+                    "sku": p.get("sku", ""),
+                    "path": p.get("path", ""),
+                    "available_today": avail_by_sku.get(p.get("sku", ""), 0),
+                }
+                for p in group.get("candidates", [])
+            ],
+            "diagnostics": group.get("diagnostics", {}),
+        }
+        print("INVENTORY_DIAG " + json.dumps(record, sort_keys=True))
+
+
 def _all_stores(vm: EcomRuntimeClientSync) -> "list[dict[str, str]]":
     return _csv_dicts(_exec_sql_stdout(vm, "SELECT id,path,name,city,is_open FROM stores ORDER BY id;"))
 
@@ -1987,6 +2023,7 @@ WHERE store_id={_sql_quote(store['id'])}
 """
         rows = _csv_dicts(_exec_sql_stdout(vm, q))
         avail_by_sku = {r.get("sku", ""): int(r.get("available_today") or 0) for r in rows}
+        _emit_inventory_diagnostics(store, specs, candidate_groups, avail_by_sku, threshold, op)
         inventory_result = _build_inventory_refs(store, candidate_groups, avail_by_sku, threshold, op)
         return ReportTaskCompletion(
             tool="report_completion",
