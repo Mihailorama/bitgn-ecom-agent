@@ -1356,7 +1356,7 @@ _PROP_PREFIXES = [
     "bar length", "battery platform", "cleaner type", "coating", "color family", "connection type", "connector type", "current",
     "cutting width",
     "device type", "disc diameter", "drive type", "fastener type", "fitting type", "ip rating", "kit contents",
-    "finish", "garment type", "lens color", "luminous flux", "machine type", "mask type", "piece count", "product type",
+    "finish", "fit", "garment type", "lens color", "luminous flux", "machine type", "mask type", "piece count", "product type",
     "protection class", "protection type",
     "pack count", "power source", "screw type", "sealant type", "storage type", "thread type",
     "stackable system", "tool profile", "tool type", "trap type", "vehicle type", "viscosity", "wattage", "voltage", "volume",
@@ -1389,6 +1389,8 @@ def _prop_key_candidates(label: str, value: str) -> "list[str]":
         out += ["luminous_flux_lm", "lumens"]
     if label == "color family":
         out.append("color")
+    if label == "fit":
+        out.append("garment_fit")
     return list(dict.fromkeys(out))
 
 
@@ -1397,6 +1399,7 @@ def _parse_properties(text: str) -> "list[tuple[list[str], str]]":
     rest = re.sub(r"\band has\b", " and ", text or "", flags=re.I)
     while rest:
         low = rest.lower().lstrip(" ,")
+        low = re.sub(r"^and\s+", "", low)
         rest = rest[len(rest) - len(low):]
         match_label = None
         for label in sorted(_PROP_PREFIXES, key=len, reverse=True):
@@ -1409,7 +1412,7 @@ def _parse_properties(text: str) -> "list[tuple[list[str], str]]":
         # Stop at the next " and <known-property> " or ", <known-property> ".
         stop = len(low)
         for label in sorted(_PROP_PREFIXES, key=len, reverse=True):
-            m = re.search(r"(?:\s+and\s+|,\s*)" + re.escape(label) + r"\s+", low[start:])
+            m = re.search(r"(?:\s+and\s+|,\s*(?:and\s+)?)" + re.escape(label) + r"\s+", low[start:])
             if m:
                 stop = min(stop, start + m.start())
         value = low[start:stop].strip(" ,.")
@@ -1577,6 +1580,34 @@ def _select_product(vm: EcomRuntimeClientSync, spec: dict, strict_props: bool = 
         vm,
         sorted(pool, key=lambda p: (-_prop_match_count(p), -_line_score(p, spec), p["sku"]))[0],
     )
+
+
+def _exact_product_candidates(vm: EcomRuntimeClientSync, spec: dict) -> "list[dict]":
+    props = spec.get("props", [])
+    if not props:
+        return []
+    candidates = _load_product_candidates(vm, spec)
+    if not candidates:
+        return []
+    hints = _line_model_hints(spec)
+    if hints:
+        hinted = []
+        for p in candidates:
+            hay = " ".join([p.get("series", ""), p.get("model", ""), p.get("name", "")]).lower()
+            if all(h in hay for h in hints):
+                hinted.append(p)
+        if hinted:
+            candidates = hinted
+    line_filtered = [p for p in candidates if _line_score(p, spec) >= max(1, len(_norm_word(spec.get("line", "")).split()) - 2)]
+    pool = line_filtered or candidates
+    full = [
+        p for p in pool
+        if all(_prop_matches(p, keys, value) for keys, value in props)
+    ]
+    return [
+        _canonical_product_path(vm, p)
+        for p in sorted(full, key=lambda p: (-_line_score(p, spec), p["sku"]))
+    ]
 
 
 def _all_stores(vm: EcomRuntimeClientSync) -> "list[dict[str, str]]":
@@ -1854,6 +1885,60 @@ def _try_inventory_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTa
     specs = _extract_product_specs(list_text)
     if not store or not specs:
         return None
+    if op == "ge":
+        candidate_groups = []
+        for spec in specs:
+            group = _exact_product_candidates(vm, spec)
+            if not group:
+                product = _select_product(vm, spec, strict_props=True)
+                if product is None:
+                    product = _select_product(vm, spec, strict_props=False)
+                if product is None:
+                    return None
+                group = [product]
+            candidate_groups.append(group)
+        query_skus = []
+        seen_query_skus = set()
+        for group in candidate_groups:
+            for p in group:
+                sku = p.get("sku", "")
+                if sku and sku not in seen_query_skus:
+                    seen_query_skus.add(sku)
+                    query_skus.append(sku)
+        if not query_skus:
+            return None
+        skus = ",".join(_sql_quote(sku) for sku in query_skus)
+        q = f"""
+SELECT sku, available_today
+FROM inventory
+WHERE store_id={_sql_quote(store['id'])}
+  AND sku IN ({skus});
+"""
+        rows = _csv_dicts(_exec_sql_stdout(vm, q))
+        avail_by_sku = {r.get("sku", ""): int(r.get("available_today") or 0) for r in rows}
+        qualifying = []
+        seen_skus = set()
+        for group in candidate_groups:
+            available = [
+                p for p in group
+                if p.get("sku") and avail_by_sku.get(p["sku"], 0) >= threshold
+            ]
+            if not available:
+                continue
+            chosen = sorted(available, key=lambda p: (-avail_by_sku.get(p["sku"], 0), p["sku"]))[0]
+            if chosen["sku"] in seen_skus:
+                continue
+            seen_skus.add(chosen["sku"])
+            qualifying.append(chosen)
+        refs = _normalize_refs([store["path"]] + [p["path"] for p in qualifying])
+        return ReportTaskCompletion(
+            tool="report_completion",
+            completed_steps_laconic=["deterministic store inventory count via exact candidate SQL"],
+            message=_format_numeric_for_task(task_text, len(qualifying)),
+            grounding_refs=refs,
+            outcome="OUTCOME_OK",
+            verified=True,
+        )
     products = []
     for spec in specs:
         product = _select_product(vm, spec, strict_props=True)

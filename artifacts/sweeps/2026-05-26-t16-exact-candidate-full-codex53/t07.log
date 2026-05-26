@@ -1,0 +1,342 @@
+TASK t07 (model codex:gpt-5.3-codex)
+INSTRUCTION: A support note claims we stock the Extension Cable from Wago in the Wago Compact 222 3V7-GBQ Extension Cable line that has color family Yellow and length 1 m and has color family gray. Check the actual catalogue item, cite the exact product record, and if the base product exists but that extra catalogue claim is absent, answer with <NO> and include the checked SKU.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2024-07-17T20:49:48Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query products/product_kinds/families/product_properties for Wago Compact 222 3V7-GBQ Extension Cable candidates and return sku+path. (20237 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, pk.name AS kind,\n       pp.key, pp.value_text, pp.value_number\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE lower(p.brand) = 'wago'\n  AND lower(p.series) = 'compact 222'\n  AND lower(p.model) = '3v7-gbq'\n  AND lower(pk.name) = 'extension cable'\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, pk.name AS kind,
+       pp.key, pp.value_text, pp.value_number
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE lower(p.brand) = 'wago'
+  AND lower(p.series) = 'compact 222'
+  AND lower(p.model) = '3v7-gbq'
+  AND lower(pk.name) = 'extension cable'
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,kind,key,value_text,value_number
+Next step_2... Run a broader SQL candidate search for Wago + Compact 222 + 3V7-GBQ + Extension Cable terms across products/families/kinds. (23206 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN families f ON f.id = p.family_id\nWHERE lower(p.brand) LIKE '%wago%'\n  AND (\n    lower(p.series) LIKE '%compact 222%'\n    OR lower(f.series) LIKE '%compact 222%'\n    OR lower(p.name) LIKE '%compact 222%'\n  )\n  AND (\n    lower(p.model) LIKE '%3v7-gbq%'\n    OR lower(f.model) LIKE '%3v7-gbq%'\n    OR lower(p.name) LIKE '%3v7-gbq%'\n  )\n  AND (\n    lower(pk.name) LIKE '%extension cable%'\n    OR lower(p.name) LIKE '%extension cable%'\n  )\nORDER BY p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN families f ON f.id = p.family_id
+WHERE lower(p.brand) LIKE '%wago%'
+  AND (
+    lower(p.series) LIKE '%compact 222%'
+    OR lower(f.series) LIKE '%compact 222%'
+    OR lower(p.name) LIKE '%compact 222%'
+  )
+  AND (
+    lower(p.model) LIKE '%3v7-gbq%'
+    OR lower(f.model) LIKE '%3v7-gbq%'
+    OR lower(p.name) LIKE '%3v7-gbq%'
+  )
+  AND (
+    lower(pk.name) LIKE '%extension cable%'
+    OR lower(p.name) LIKE '%extension cable%'
+  )
+ORDER BY p.sku;
+SQL
+sku,path,brand,series,model,name,kind
+ELC-12BYNXQU,/proc/catalog/electrical/extension_cables/ELC-12BYNXQU.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 50m IP20 Black,Extension Cable
+ELC-1HCKP24Y,/proc/catalog/electrical/extension_cables/ELC-1HCKP24Y.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 1m IP20 Blue,Extension Cable
+ELC-1S73L10D,/proc/catalog/electrical/extension_cables/ELC-1S73L10D.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 2m IP54 Black,Extension Cable
+ELC-20TSK1ZW,/proc/catalog/electrical/extension_cables/ELC-20TSK1ZW.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 2m IP54 Gray,Extension Cable
+ELC-2QBDE3HQ,/proc/catalog/electrical/extension_cables/ELC-2QBDE3HQ.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 3m IP54 Yellow,Extension Cable
+ELC-2W7QNQD1,/proc/catalog/electrical/extension_cables/ELC-2W7QNQD1.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 15m IP44 Blue,Extension Cable
+ELC-3UD9R6ML,/proc/catalog/electrical/extension_cables/ELC-3UD9R6ML.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 10m IP44 Orange,Extension Cable
+ELC-CWJKBND7,/proc/catalog/electrical/extension_cables/ELC-CWJKBND7.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 1m IP20 Orange,Extension Cable
+ELC-KRF8PC93,/proc/catalog/electrical/extension_cables/ELC-KRF8PC93.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 1m IP44 Yellow,Extension Cable
+ELC-MC4A3LVJ,/proc/catalog/electrical/extension_cables/ELC-MC4A3LVJ.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 1m IP44 Gray,Extension Cable
+ELC-NQLPC6B8,/proc/catalog/electrical/extension_cables/ELC-NQLPC6B8.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 10m IP54 Orange,Extension Cable
+ELC-ZUMPO7OL,/proc/catalog/electrical/extension_cables/ELC-ZUMPO7OL.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 15m IP20 Orange,Extension Cable
+Next step_3... Query product_properties for all candidate SKUs to read exact keys/values for length and color_family. (16664 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, pp.key, pp.value_text, pp.value_number\nFROM products p\nJOIN product_properties pp ON pp.sku = p.sku\nWHERE p.sku IN (\n  'ELC-12BYNXQU','ELC-1HCKP24Y','ELC-1S73L10D','ELC-20TSK1ZW','ELC-2QBDE3HQ','ELC-2W7QNQD1',\n  'ELC-3UD9R6ML','ELC-CWJKBND7','ELC-KRF8PC93','ELC-MC4A3LVJ','ELC-NQLPC6B8','ELC-ZUMPO7OL'\n)\nAND pp.key IN ('color_family','length_m','length','cable_length_m')\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, pp.key, pp.value_text, pp.value_number
+FROM products p
+JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.sku IN (
+  'ELC-12BYNXQU','ELC-1HCKP24Y','ELC-1S73L10D','ELC-20TSK1ZW','ELC-2QBDE3HQ','ELC-2W7QNQD1',
+  'ELC-3UD9R6ML','ELC-CWJKBND7','ELC-KRF8PC93','ELC-MC4A3LVJ','ELC-NQLPC6B8','ELC-ZUMPO7OL'
+)
+AND pp.key IN ('color_family','length_m','length','cable_length_m')
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,key,value_text,value_number
+ELC-12BYNXQU,/proc/catalog/electrical/extension_cables/ELC-12BYNXQU.json,color_family,black,
+ELC-12BYNXQU,/proc/catalog/electrical/extension_cables/ELC-12BYNXQU.json,length_m,50,50
+ELC-1HCKP24Y,/proc/catalog/electrical/extension_cables/ELC-1HCKP24Y.json,color_family,blue,
+ELC-1HCKP24Y,/proc/catalog/electrical/extension_cables/ELC-1HCKP24Y.json,length_m,1,1
+ELC-1S73L10D,/proc/catalog/electrical/extension_cables/ELC-1S73L10D.json,color_family,black,
+ELC-1S73L10D,/proc/catalog/electrical/extension_cables/ELC-1S73L10D.json,length_m,2,2
+ELC-20TSK1ZW,/proc/catalog/electrical/extension_cables/ELC-20TSK1ZW.json,color_family,gray,
+ELC-20TSK1ZW,/proc/catalog/electrical/extension_cables/ELC-20TSK1ZW.json,length_m,2,2
+ELC-2QBDE3HQ,/proc/catalog/electrical/extension_cables/ELC-2QBDE3HQ.json,color_family,yellow,
+ELC-2QBDE3HQ,/proc/catalog/electrical/extension_cables/ELC-2QBDE3HQ.json,length_m,3,3
+ELC-2W7QNQD1,/proc/catalog/electrical/extension_cables/ELC-2W7QNQD1.json,color_family,blue,
+ELC-2W7QNQD1,/proc/catalog/electrical/extension_cables/ELC-2W7QNQD1.json,length_m,15,15
+ELC-3UD9R6ML,/proc/catalog/electrical/extension_cables/ELC-3UD9R6ML.json,color_family,orange,
+ELC-3UD9R6ML,/proc/catalog/electrical/extension_cables/ELC-3UD9R6ML.json,length_m,10,10
+ELC-CWJKBND7,/proc/catalog/electrical/extension_cables/ELC-CWJKBND7.json,color_family,orange,
+ELC-CWJKBND7,/proc/catalog/electrical/extension_cables/ELC-CWJKBND7.json,length_m,1,1
+ELC-KRF8PC93,/proc/catalog/electrical/extension_cables/ELC-KRF8PC93.json,color_family,yellow,
+ELC-KRF8PC93,/proc/catalog/electrical/extension_cables/ELC-KRF8PC93.json,length_m,1,1
+ELC-MC4A3LVJ,/proc/catalog/electrical/extension_cables/ELC-MC4A3LVJ.json,color_family,gray,
+ELC-MC4A3LVJ,/proc/catalog/electrical/extension_cables/ELC-MC4A3LVJ.json,length_m,1,1
+ELC-NQLPC6B8,/proc/catalog/electrical/extension_cables/ELC-NQLPC6B8.json,color_family,orange,
+ELC-NQLPC6B8,/proc/catalog/electrical/extension_cables/ELC-NQLPC6B8.json,length_m,10,10
+ELC-ZUMPO7OL,/proc/catalog/electrical/extension_cables/ELC-ZUMPO7OL.json,color_family,orange,
+ELC-ZUMPO7OL,/proc/catalog/electrical/extension_cables/ELC-ZUMPO7OL.json,length_m,15,15
+Next step_4... Report final result in required token format with checked SKU. (12763 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved candidate SKUs', 'Verified properties for 1m yellow variant', 'Confirmed extra gray claim absent on that SKU'] message='<NO> ELC-KRF8PC93' grounding_refs=['/proc/catalog/electrical/extension_cables/ELC-KRF8PC93.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved candidate SKUs
+- Verified properties for 1m yellow variant
+- Confirmed extra gray claim absent on that SKU
+
+[34mAGENT SUMMARY: <NO> ELC-KRF8PC93[0m
+- [34m/proc/catalog/electrical/extension_cables/ELC-KRF8PC93.json[0m

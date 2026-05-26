@@ -721,6 +721,102 @@ def test_inventory_solver_handles_have_n_or_more_ready_shape():
     print("ok: inventory solver handles have-N-or-more-ready prompts")
 
 
+def test_inventory_solver_counts_available_exact_candidate_sibling_for_ge():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["lower(p.brand) = lower('Hager')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "ELC-1AAA0000,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0001_a/ELC-1AAA0000.json,"
+        "fam_electrical_wiring_devices_0001_a,Hager,Workshop,Volta 2CH-UHR,"
+        "Hager Workshop Volta 2CH-UHR Wiring Device black switch,Wiring Device,device_type,switch,\n"
+        "ELC-1AAA0000,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0001_a/ELC-1AAA0000.json,"
+        "fam_electrical_wiring_devices_0001_a,Hager,Workshop,Volta 2CH-UHR,"
+        "Hager Workshop Volta 2CH-UHR Wiring Device black switch,Wiring Device,color_family,Black,\n"
+        "ELC-1AAA0000,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0001_a/ELC-1AAA0000.json,"
+        "fam_electrical_wiring_devices_0001_a,Hager,Workshop,Volta 2CH-UHR,"
+        "Hager Workshop Volta 2CH-UHR Wiring Device black switch,Wiring Device,ip_rating,IP20,\n"
+        "ELC-3O0L7AGC,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0019_qj6u2soy/ELC-3O0L7AGC.json,"
+        "fam_electrical_wiring_devices_0019_qj6u2soy,Hager,Workshop,Volta 2CH-UHR,"
+        "Hager Workshop Volta 2CH-UHR Wiring Device black switch,Wiring Device,device_type,switch,\n"
+        "ELC-3O0L7AGC,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0019_qj6u2soy/ELC-3O0L7AGC.json,"
+        "fam_electrical_wiring_devices_0019_qj6u2soy,Hager,Workshop,Volta 2CH-UHR,"
+        "Hager Workshop Volta 2CH-UHR Wiring Device black switch,Wiring Device,color_family,Black,\n"
+        "ELC-3O0L7AGC,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0019_qj6u2soy/ELC-3O0L7AGC.json,"
+        "fam_electrical_wiring_devices_0019_qj6u2soy,Hager,Workshop,Volta 2CH-UHR,"
+        "Hager Workshop Volta 2CH-UHR Wiring Device black switch,Wiring Device,ip_rating,IP20,\n"
+    )
+    vm.sql_outputs["FROM inventory"] = "sku,available_today\nELC-1AAA0000,0\nELC-3O0L7AGC,3\n"
+    task = (
+        "How many of these products have at least 3 items available in the central Brno PowerTool branch today: "
+        "the Wiring Device from Hager in the Hager Workshop Volta 2CH-UHR Wiring Device line "
+        "that has device type switch and color family Black and ip rating IP20? "
+        'Answer in exactly format "<COUNT:%d>" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "<COUNT:1>"
+    assert fn.grounding_refs == [
+        "/proc/stores/store_brno_veveri.json",
+        "/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0019_qj6u2soy/ELC-3O0L7AGC.json",
+    ]
+    print("ok: inventory solver counts available exact-candidate siblings for ge prompts")
+
+
+def test_inventory_solver_uses_exact_candidates_when_other_ge_specs_need_fallback():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["lower(p.brand) = lower('Hager')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "ELC-1AAA0000,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0001_a/ELC-1AAA0000.json,"
+        "fam_electrical_wiring_devices_0001_a,Hager,Workshop,Volta 2CH-UHR,"
+        "Hager Workshop Volta 2CH-UHR Wiring Device black switch,Wiring Device,device_type,switch,\n"
+        "ELC-1AAA0000,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0001_a/ELC-1AAA0000.json,"
+        "fam_electrical_wiring_devices_0001_a,Hager,Workshop,Volta 2CH-UHR,"
+        "Hager Workshop Volta 2CH-UHR Wiring Device black switch,Wiring Device,color_family,Black,\n"
+        "ELC-3O0L7AGC,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0019_qj6u2soy/ELC-3O0L7AGC.json,"
+        "fam_electrical_wiring_devices_0019_qj6u2soy,Hager,Workshop,Volta 2CH-UHR,"
+        "Hager Workshop Volta 2CH-UHR Wiring Device black switch,Wiring Device,device_type,switch,\n"
+        "ELC-3O0L7AGC,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0019_qj6u2soy/ELC-3O0L7AGC.json,"
+        "fam_electrical_wiring_devices_0019_qj6u2soy,Hager,Workshop,Volta 2CH-UHR,"
+        "Hager Workshop Volta 2CH-UHR Wiring Device black switch,Wiring Device,color_family,Black,\n"
+    )
+    vm.sql_outputs["FROM inventory"] = (
+        "sku,available_today\n"
+        "ELC-1AAA0000,0\n"
+        "ELC-3O0L7AGC,3\n"
+        "WRK-HIGH,4\n"
+    )
+    task = (
+        "How many of these products have at least 3 items available in the central Brno PowerTool branch today: "
+        "the Wiring Device from Hager in the Hager Workshop Volta 2CH-UHR Wiring Device line "
+        "that has device type switch and color family Black,"
+        "the Work Jacket from Mascot in the Mascot Advanced ACC 35W-IIS Work Jacket line "
+        "that has fit relaxed? "
+        'Answer in exactly format "%d" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "2"
+    assert fn.grounding_refs == [
+        "/proc/stores/store_brno_veveri.json",
+        "/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0019_qj6u2soy/ELC-3O0L7AGC.json",
+        "/proc/catalog/workwear/work_jackets/WRK-HIGH.json",
+    ]
+    print("ok: inventory solver keeps exact ge groups when another spec needs fallback")
+
+
+def test_property_parser_handles_comma_and_fit_property():
+    props = agent._parse_properties("color family Yellow, size L, and fit relaxed")
+
+    by_key = {keys[0]: value for keys, value in props}
+    assert by_key["color_family"] == "yellow"
+    assert by_key["size"] == "l"
+    assert by_key["fit"] == "relaxed"
+    print("ok: property parser handles comma-and fit properties")
+
+
 def test_inventory_solver_does_not_cite_zero_stock_products_for_below_threshold():
     vm = _inventory_solver_vm()
     vm.sql_outputs["FROM inventory"] = (
@@ -838,6 +934,9 @@ def main():
     test_inventory_solver_handles_fewer_than_items_available_in_shape()
     test_inventory_solver_handles_count_products_fewer_units_from_list_shape()
     test_inventory_solver_handles_have_n_or_more_ready_shape()
+    test_inventory_solver_counts_available_exact_candidate_sibling_for_ge()
+    test_inventory_solver_uses_exact_candidates_when_other_ge_specs_need_fallback()
+    test_property_parser_handles_comma_and_fit_property()
     test_inventory_solver_does_not_cite_zero_stock_products_for_below_threshold()
     test_inventory_solver_handles_below_available_today_shape()
     test_inventory_solver_handles_none_available_today_shape()

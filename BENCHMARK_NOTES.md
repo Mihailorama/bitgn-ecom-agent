@@ -483,6 +483,30 @@ Current state in `agent.py` includes:
 - Milestone retrospective and test-data index:
   `artifacts/milestones/2026-05-26-v47-46of47-retrospective.md`.
 
+**2026-05-26 t16 exact-candidate diagnostic candidate.**
+- Saved a narrow candidate change for `ge` inventory counts: exact candidate
+  groups are checked across all matching SKUs before selecting one qualifying
+  ref, and the property parser now handles `fit` plus comma-`and` property
+  boundaries. This is intentionally recorded as diagnostic state, not as an
+  accepted scoring milestone.
+- Validation:
+  - `uv run python -m py_compile agent.py llm.py && uv run python smoke_test.py`
+    passed.
+  - Targeted `t16` reached `1/1` once:
+    `artifacts/sweeps/2026-05-26-t16-exact-candidate-targeted-r3/`.
+  - Inventory subset `t13 t14 t15 t16 t45` passed `5/5`:
+    `artifacts/sweeps/2026-05-26-t16-exact-candidate-inventory-regression-r1/`.
+  - Full sweep stayed at `97.9%` (`46/47`) at `286s`; only `t16` missed:
+    `artifacts/sweeps/2026-05-26-t16-exact-candidate-full-codex53/`.
+  - A 10-run `t16` sample passed only `3/10`; logs are under
+    `artifacts/sweeps/2026-05-26-t16-variant-sample-r*/`, summary:
+    `artifacts/diagnostics/2026-05-26-t16-variant-sample.md`.
+  - Security grep stayed clean.
+- Decision: do not keep stacking property aliases as the next scoring fix. The
+  failure pattern is resolver-level: some seeds are numeric false positives,
+  while others have the right-looking count but wrong sibling refs. Continue
+  with the typed resolver/ref-policy extraction before further behavior changes.
+
 **Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
 `claude:sonnet` as the cheap regression canary. 10-minute platform-time target
 is still unmet at 100% quality.
