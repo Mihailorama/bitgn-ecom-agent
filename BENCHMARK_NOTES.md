@@ -480,6 +480,8 @@ Current state in `agent.py` includes:
   already-covered `less than` wording. The only remaining miss was:
   - `t16`: deterministic inventory missed required product ref
     `/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0019_qj6u2soy/ELC-3O0L7AGC.json`.
+- Milestone retrospective and test-data index:
+  `artifacts/milestones/2026-05-26-v47-46of47-retrospective.md`.
 
 **Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
 `claude:sonnet` as the cheap regression canary. 10-minute platform-time target
