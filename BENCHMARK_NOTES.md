@@ -588,6 +588,19 @@ Current state in `agent.py` includes:
   fix path for `t16` only. No shared inventory/catalog resolver change in that
   cycle.
 
+**2026-05-26 t16 RED tests (task-local, pre-fix).**
+- Added two explicit RED tests in `smoke_test.py`:
+  - `test_red_t16_missing_required_ref_should_use_available_family_sibling`
+  - `test_red_t16_count_mismatch_should_not_overcount_fallback_candidate`
+- These tests are intentionally not called from `main()` yet, so default
+  offline smoke stays green while the fix is not implemented.
+- Verified RED status with targeted commands:
+  - `uv run python -c "import smoke_test as s; s.test_red_t16_missing_required_ref_should_use_available_family_sibling()"`
+  - `uv run python -c "import smoke_test as s; s.test_red_t16_count_mismatch_should_not_overcount_fallback_candidate()"`
+- Both commands fail on current code and print deterministic `INVENTORY_DIAG`
+  traces matching the observed failure classes (`fallback_single` sibling miss
+  and fallback overcount).
+
 **Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
 `claude:sonnet` as the cheap regression canary. 10-minute platform-time target
 is still unmet at 100% quality.

@@ -810,6 +810,113 @@ def test_inventory_solver_uses_exact_candidates_when_other_ge_specs_need_fallbac
     print("ok: inventory solver keeps exact ge groups when another spec needs fallback")
 
 
+def test_red_t16_missing_required_ref_should_use_available_family_sibling():
+    vm = FakeVM()
+    vm.sql_outputs["SELECT id,path,name,city,is_open FROM stores ORDER BY id;"] = (
+        "id,path,name,city,is_open\n"
+        "store_graz_lend,/proc/stores/store_graz_lend.json,PowerTool Graz Lend,Graz,1\n"
+    )
+    vm.sql_outputs["lower(p.brand) = lower('Geberit')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "PLB-1JZJSYLJ,/proc/catalog/plumbing/drain_traps_siphons/PLB-1JZJSYLJ.json,"
+        "fam_plumbing_drain_traps_siphons_0017_1e8dyy1h,Geberit,Compact,Mapress 3M1-GB1,"
+        "Geberit Compact Mapress 3M1-GB1 Drain Trap and Siphon,Drain Trap and Siphon,trap_type,bottle trap,\n"
+        "PLB-89OIMQ7V,/proc/catalog/plumbing/drain_traps_siphons/PLB-89OIMQ7V.json,"
+        "fam_plumbing_drain_traps_siphons_0017_1e8dyy1h,Geberit,Compact,Mapress 3M1-GB1,"
+        "Geberit Compact Mapress 3M1-GB1 Drain Trap and Siphon,Drain Trap and Siphon,trap_type,floor trap,\n"
+    )
+    vm.sql_outputs["lower(p.brand) = lower('WD-40')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "AUT-1BSYPDAG,/proc/catalog/automotive/automotive_cleaners/AUT-1BSYPDAG.json,,WD-40,"
+        "Professional Specialist,2S0-3I4,WD-40 Professional Specialist 2S0-3I4 Automotive Cleaner,"
+        "Automotive Cleaner,cleaner_type,polish,\n"
+        "AUT-1BSYPDAG,/proc/catalog/automotive/automotive_cleaners/AUT-1BSYPDAG.json,,WD-40,"
+        "Professional Specialist,2S0-3I4,WD-40 Professional Specialist 2S0-3I4 Automotive Cleaner,"
+        "Automotive Cleaner,volume_ml,,500\n"
+        "AUT-1BSYPDAG,/proc/catalog/automotive/automotive_cleaners/AUT-1BSYPDAG.json,,WD-40,"
+        "Professional Specialist,2S0-3I4,WD-40 Professional Specialist 2S0-3I4 Automotive Cleaner,"
+        "Automotive Cleaner,vehicle_type,universal,\n"
+    )
+    vm.sql_outputs["FROM inventory"] = (
+        "sku,available_today\n"
+        "PLB-1JZJSYLJ,0\n"
+        "PLB-89OIMQ7V,2\n"
+        "AUT-1BSYPDAG,5\n"
+    )
+    task = (
+        "How many of these products have at least 2 items available in Graz Lend hardware shop today: "
+        "the Drain Trap and Siphon from Geberit in the Geberit Compact Mapress 3M1-GB1 Drain Trap and Siphon line "
+        "that has trap type drain trap and diameter 25 mm,"
+        "the Automotive Cleaner from WD-40 in the WD-40 Professional Specialist 2S0-3I4 Automotive Cleaner line "
+        "that has cleaner type polish, volume 500 ml, and vehicle type universal? "
+        'Answer in exactly format "<COUNT:%d>" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "<COUNT:2>"
+    assert "/proc/catalog/plumbing/drain_traps_siphons/fam_plumbing_drain_traps_siphons_0017_1e8dyy1h/PLB-89OIMQ7V.json" in fn.grounding_refs
+    print("red: t16 missing-ref case expects available sibling ref/count")
+
+
+def test_red_t16_count_mismatch_should_not_overcount_fallback_candidate():
+    vm = FakeVM()
+    vm.sql_outputs["SELECT id,path,name,city,is_open FROM stores ORDER BY id;"] = (
+        "id,path,name,city,is_open\n"
+        "store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,1\n"
+    )
+    vm.sql_outputs["lower(p.brand) = lower('Sikkens')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "PNT-10A5POBG,/proc/catalog/paints_finishes/wall_paint/PNT-10A5POBG.json,"
+        "fam_paints_finishes_wall_paint_0004_1f15bjf6,Sikkens,Premium,Rubbol U97-PMQ,"
+        "Sikkens Premium Rubbol U97-PMQ Wall Paint,Wall Paint,color_family,Blue,\n"
+    )
+    vm.sql_outputs["lower(p.brand) = lower('Hilti')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "PWR-1JBBXGS1,/proc/catalog/power_tools/cordless_drill_driver/PWR-1JBBXGS1.json,"
+        "fam_power_tools_cordless_drill_driver_0011_1gle6t2h,Hilti,Professional,SID 1RW-M62,"
+        "Hilti Professional SID 1RW-M62 Cordless Drill Driver,Cordless Drill Driver,voltage_v,,36\n"
+        "PWR-1JBBXGS1,/proc/catalog/power_tools/cordless_drill_driver/PWR-1JBBXGS1.json,"
+        "fam_power_tools_cordless_drill_driver_0011_1gle6t2h,Hilti,Professional,SID 1RW-M62,"
+        "Hilti Professional SID 1RW-M62 Cordless Drill Driver,Cordless Drill Driver,battery_platform,xl-system,\n"
+        "PWR-1JBBXGS1,/proc/catalog/power_tools/cordless_drill_driver/PWR-1JBBXGS1.json,"
+        "fam_power_tools_cordless_drill_driver_0011_1gle6t2h,Hilti,Professional,SID 1RW-M62,"
+        "Hilti Professional SID 1RW-M62 Cordless Drill Driver,Cordless Drill Driver,kit_contents,bare tool,\n"
+    )
+    vm.sql_outputs["lower(p.brand) = lower('Makita')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "PWR-59VADCZW,/proc/catalog/power_tools/corded_angle_grinder/PWR-59VADCZW.json,"
+        "fam_power_tools_corded_angle_grinder_0012_2gzb9xjh,Makita,Precision,DDF 1RQ-F32,"
+        "Makita Precision DDF 1RQ-F32 Corded Angle Grinder,Corded Angle Grinder,disc_diameter_mm,,115\n"
+        "PWR-59VADCZW,/proc/catalog/power_tools/corded_angle_grinder/PWR-59VADCZW.json,"
+        "fam_power_tools_corded_angle_grinder_0012_2gzb9xjh,Makita,Precision,DDF 1RQ-F32,"
+        "Makita Precision DDF 1RQ-F32 Corded Angle Grinder,Corded Angle Grinder,power_w,,650\n"
+    )
+    vm.sql_outputs["FROM inventory"] = (
+        "sku,available_today\n"
+        "PNT-10A5POBG,8\n"
+        "PWR-1JBBXGS1,9\n"
+        "PWR-59VADCZW,5\n"
+    )
+    task = (
+        "How many of these products have at least 2 items available in the central Bratislava PowerTool shop today: "
+        "the Wall Paint from Sikkens in the Sikkens Premium Rubbol U97-PMQ Wall Paint line "
+        "that has color family Black and finish satin,"
+        "the Cordless Drill Driver from Hilti in the Hilti Professional SID 1RW-M62 Cordless Drill Driver line "
+        "that has voltage 36 V, battery platform xl-system, and kit contents bare tool,"
+        "the Corded Angle Grinder from Makita in the Makita Precision DDF 1RQ-F32 Corded Angle Grinder line "
+        "that has disc diameter 115 mm and power 650 W? "
+        'Answer in exactly format "[QTY:%d]" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "[QTY:2]"
+    print("red: t16 count-mismatch case expects no fallback overcount")
+
+
 def test_property_parser_handles_comma_and_fit_property():
     props = agent._parse_properties("color family Yellow, size L, and fit relaxed")
 
