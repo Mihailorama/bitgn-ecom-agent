@@ -817,6 +817,85 @@ def test_property_parser_handles_comma_and_fit_property():
     print("ok: property parser handles comma-and fit properties")
 
 
+def test_inventory_resolver_reports_exact_and_fallback_statuses():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["lower(p.brand) = lower('Hager')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "ELC-1AAA0000,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0001_a/ELC-1AAA0000.json,"
+        "fam_electrical_wiring_devices_0001_a,Hager,Workshop,Volta 2CH-UHR,"
+        "Hager Workshop Volta 2CH-UHR Wiring Device black switch,Wiring Device,device_type,switch,\n"
+        "ELC-1AAA0000,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0001_a/ELC-1AAA0000.json,"
+        "fam_electrical_wiring_devices_0001_a,Hager,Workshop,Volta 2CH-UHR,"
+        "Hager Workshop Volta 2CH-UHR Wiring Device black switch,Wiring Device,color_family,Black,\n"
+        "ELC-3O0L7AGC,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0019_qj6u2soy/ELC-3O0L7AGC.json,"
+        "fam_electrical_wiring_devices_0019_qj6u2soy,Hager,Workshop,Volta 2CH-UHR,"
+        "Hager Workshop Volta 2CH-UHR Wiring Device black switch,Wiring Device,device_type,switch,\n"
+        "ELC-3O0L7AGC,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0019_qj6u2soy/ELC-3O0L7AGC.json,"
+        "fam_electrical_wiring_devices_0019_qj6u2soy,Hager,Workshop,Volta 2CH-UHR,"
+        "Hager Workshop Volta 2CH-UHR Wiring Device black switch,Wiring Device,color_family,Black,\n"
+    )
+    exact_spec = {
+        "kind": "Wiring Device",
+        "brand": "Hager",
+        "line": "Hager Workshop Volta 2CH-UHR Wiring Device",
+        "props": agent._parse_properties("device type switch and color family Black"),
+    }
+    fallback_spec = {
+        "kind": "Work Jacket",
+        "brand": "Mascot",
+        "line": "Mascot Advanced ACC 35W-IIS Work Jacket",
+        "props": agent._parse_properties("fit relaxed"),
+    }
+
+    exact = agent._resolve_product_variant(vm, exact_spec)
+    fallback = agent._resolve_product_variant(vm, fallback_spec)
+
+    assert exact["status"] == "exact"
+    assert exact["reason"] == "exact_group"
+    assert [p["sku"] for p in exact["candidates"]] == ["ELC-1AAA0000", "ELC-3O0L7AGC"]
+    assert exact["diagnostics"]["prop_count"] == 2
+    assert fallback["status"] == "fallback"
+    assert fallback["reason"] == "fallback_single"
+    assert [p["sku"] for p in fallback["candidates"]] == ["WRK-HIGH"]
+    print("ok: inventory resolver reports exact and fallback statuses")
+
+
+def test_inventory_ref_policy_counts_one_available_sku_per_requested_product():
+    store = {"path": "/proc/stores/store_brno_veveri.json"}
+    groups = [
+        {
+            "status": "exact",
+            "candidates": [
+                {
+                    "sku": "ELC-1AAA0000",
+                    "path": "/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0001_a/ELC-1AAA0000.json",
+                },
+                {
+                    "sku": "ELC-3O0L7AGC",
+                    "path": "/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0019_qj6u2soy/ELC-3O0L7AGC.json",
+                },
+            ],
+        },
+        {
+            "status": "fallback",
+            "candidates": [
+                {"sku": "WRK-HIGH", "path": "/proc/catalog/workwear/work_jackets/WRK-HIGH.json"},
+            ],
+        },
+    ]
+    avail_by_sku = {"ELC-1AAA0000": 0, "ELC-3O0L7AGC": 3, "WRK-HIGH": 4}
+
+    result = agent._build_inventory_refs(store, groups, avail_by_sku, threshold=3, op="ge")
+
+    assert result["count"] == 2
+    assert result["refs"] == [
+        "/proc/stores/store_brno_veveri.json",
+        "/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0019_qj6u2soy/ELC-3O0L7AGC.json",
+        "/proc/catalog/workwear/work_jackets/WRK-HIGH.json",
+    ]
+    print("ok: inventory ref policy counts one available sku per requested product")
+
+
 def test_inventory_solver_does_not_cite_zero_stock_products_for_below_threshold():
     vm = _inventory_solver_vm()
     vm.sql_outputs["FROM inventory"] = (
@@ -937,6 +1016,8 @@ def main():
     test_inventory_solver_counts_available_exact_candidate_sibling_for_ge()
     test_inventory_solver_uses_exact_candidates_when_other_ge_specs_need_fallback()
     test_property_parser_handles_comma_and_fit_property()
+    test_inventory_resolver_reports_exact_and_fallback_statuses()
+    test_inventory_ref_policy_counts_one_available_sku_per_requested_product()
     test_inventory_solver_does_not_cite_zero_stock_products_for_below_threshold()
     test_inventory_solver_handles_below_available_today_shape()
     test_inventory_solver_handles_none_available_today_shape()

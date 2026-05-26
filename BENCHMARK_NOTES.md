@@ -507,6 +507,23 @@ Current state in `agent.py` includes:
   while others have the right-looking count but wrong sibling refs. Continue
   with the typed resolver/ref-policy extraction before further behavior changes.
 
+**2026-05-26 resolver/ref-policy extraction.**
+- Extracted typed helper seams without adding family-JSON sibling behavior:
+  `_resolve_product_variant()` returns exact/fallback/unresolved status with
+  diagnostics, and `_build_inventory_refs()` owns the one-qualifying-SKU-per
+  requested-product count/ref policy.
+- Validation:
+  - `uv run python -m py_compile agent.py llm.py && uv run python smoke_test.py`
+    passed.
+  - Inventory regression subset `t13 t14 t15 t16 t45` scored `4/5`; `t13`,
+    `t14`, `t15`, and `t45` passed, while `t16` hit the known numeric
+    false-positive instability. Logs:
+    `artifacts/sweeps/2026-05-26-inventory-resolver-extract-regression-r1/`.
+  - Security grep stayed clean.
+- Next behavior change should use the new seam to augment resolver candidates
+  from family JSON siblings, with RED tests for at least one numeric
+  false-positive and one wrong-sibling-ref saved `t16` seed.
+
 **Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
 `claude:sonnet` as the cheap regression canary. 10-minute platform-time target
 is still unmet at 100% quality.

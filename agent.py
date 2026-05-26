@@ -1610,6 +1610,82 @@ def _exact_product_candidates(vm: EcomRuntimeClientSync, spec: dict) -> "list[di
     ]
 
 
+def _resolve_product_variant(vm: EcomRuntimeClientSync, spec: dict) -> dict:
+    exact = _exact_product_candidates(vm, spec)
+    diagnostics = {
+        "brand": spec.get("brand", ""),
+        "kind": spec.get("kind", ""),
+        "line": spec.get("line", ""),
+        "prop_count": len(spec.get("props", [])),
+        "exact_candidate_count": len(exact),
+    }
+    if exact:
+        return {
+            "status": "exact",
+            "reason": "exact_group",
+            "candidates": exact,
+            "diagnostics": diagnostics,
+        }
+    product = _select_product(vm, spec, strict_props=True)
+    if product is None:
+        product = _select_product(vm, spec, strict_props=False)
+    if product is None:
+        return {
+            "status": "unresolved",
+            "reason": "no_candidate",
+            "candidates": [],
+            "diagnostics": diagnostics,
+        }
+    diagnostics["fallback_sku"] = product.get("sku", "")
+    return {
+        "status": "fallback",
+        "reason": "fallback_single",
+        "candidates": [product],
+        "diagnostics": diagnostics,
+    }
+
+
+def _build_inventory_refs(
+    store: dict,
+    candidate_groups: "list[dict]",
+    avail_by_sku: "dict[str, int]",
+    threshold: int,
+    op: str,
+) -> dict:
+    qualifying = []
+    seen_skus = set()
+    for group in candidate_groups:
+        candidates = group.get("candidates", [])
+        if op == "ge":
+            available = [
+                p for p in candidates
+                if p.get("sku") and avail_by_sku.get(p["sku"], 0) >= threshold
+            ]
+            if not available:
+                continue
+            chosen = sorted(available, key=lambda p: (-avail_by_sku.get(p["sku"], 0), p["sku"]))[0]
+        else:
+            if not candidates:
+                continue
+            chosen = candidates[0]
+            if avail_by_sku.get(chosen.get("sku", ""), 0) >= threshold:
+                continue
+        sku = chosen.get("sku", "")
+        if not sku or sku in seen_skus:
+            continue
+        seen_skus.add(sku)
+        qualifying.append(chosen)
+    if op == "ge":
+        ref_products = qualifying
+    else:
+        ref_products = [p for p in qualifying if avail_by_sku.get(p.get("sku", ""), 0) > 0]
+    return {
+        "count": len(qualifying),
+        "refs": _normalize_refs([store["path"]] + [p["path"] for p in ref_products]),
+        "qualifying": qualifying,
+    }
+
+
 def _all_stores(vm: EcomRuntimeClientSync) -> "list[dict[str, str]]":
     return _csv_dicts(_exec_sql_stdout(vm, "SELECT id,path,name,city,is_open FROM stores ORDER BY id;"))
 
@@ -1888,19 +1964,14 @@ def _try_inventory_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTa
     if op == "ge":
         candidate_groups = []
         for spec in specs:
-            group = _exact_product_candidates(vm, spec)
-            if not group:
-                product = _select_product(vm, spec, strict_props=True)
-                if product is None:
-                    product = _select_product(vm, spec, strict_props=False)
-                if product is None:
-                    return None
-                group = [product]
+            group = _resolve_product_variant(vm, spec)
+            if group["status"] == "unresolved":
+                return None
             candidate_groups.append(group)
         query_skus = []
         seen_query_skus = set()
         for group in candidate_groups:
-            for p in group:
+            for p in group["candidates"]:
                 sku = p.get("sku", "")
                 if sku and sku not in seen_query_skus:
                     seen_query_skus.add(sku)
@@ -1916,26 +1987,12 @@ WHERE store_id={_sql_quote(store['id'])}
 """
         rows = _csv_dicts(_exec_sql_stdout(vm, q))
         avail_by_sku = {r.get("sku", ""): int(r.get("available_today") or 0) for r in rows}
-        qualifying = []
-        seen_skus = set()
-        for group in candidate_groups:
-            available = [
-                p for p in group
-                if p.get("sku") and avail_by_sku.get(p["sku"], 0) >= threshold
-            ]
-            if not available:
-                continue
-            chosen = sorted(available, key=lambda p: (-avail_by_sku.get(p["sku"], 0), p["sku"]))[0]
-            if chosen["sku"] in seen_skus:
-                continue
-            seen_skus.add(chosen["sku"])
-            qualifying.append(chosen)
-        refs = _normalize_refs([store["path"]] + [p["path"] for p in qualifying])
+        inventory_result = _build_inventory_refs(store, candidate_groups, avail_by_sku, threshold, op)
         return ReportTaskCompletion(
             tool="report_completion",
             completed_steps_laconic=["deterministic store inventory count via exact candidate SQL"],
-            message=_format_numeric_for_task(task_text, len(qualifying)),
-            grounding_refs=refs,
+            message=_format_numeric_for_task(task_text, inventory_result["count"]),
+            grounding_refs=inventory_result["refs"],
             outcome="OUTCOME_OK",
             verified=True,
         )
