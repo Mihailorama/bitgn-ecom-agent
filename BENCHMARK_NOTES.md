@@ -165,6 +165,28 @@ latest stability runs are mostly `43/44`:
   typed product-variant resolver plus ref policy tests, then class-local routing
   that only bypasses fallback when the resolver can prove exactness.
 
+**2026-05-26 exact-candidate inventory grouping.**
+- Landed a narrow runtime improvement for inventory tasks: parse additional
+  high-density labels (`tank volume`, `grip type`, `fit`, `colour/color
+  temperature`) and, for exact product candidate groups, check inventory across
+  all exact SKUs before choosing the grounding ref. This targets the repeated
+  "right count / wrong sibling ref" failure mode without removing the relaxed
+  fallback.
+- Validation:
+  - Targeted `t13 t14 t15 t16 t32` passed `5/5` at `61s`; logs:
+    `artifacts/sweeps/2026-05-26-inventory-exact-group-color-targeted/`.
+  - Full sweep reached `97.7%` (`43/44`) at `236s`; only `t16` missed a
+    required product ref. Logs:
+    `artifacts/sweeps/2026-05-26-inventory-exact-group-color-full-43of44/`.
+  - Security grep stayed clean.
+- Rejected follow-up aliases:
+  - `color family -> colour_family` and `battery platform -> battery_system`
+    guesses did not close targeted `t16`; logs are preserved under
+    `artifacts/sweeps/2026-05-26-inventory-exact-group-colorfamily-targeted-rejected/`.
+  - Stop stacking label aliases. The remaining `t16` instability requires a
+    real resolver diagnostic layer that records exact candidate sets, inventory
+    rows, chosen ref, and reason code per requested product.
+
 Current state in `agent.py` includes:
 - EvidenceLedger + `_harvest`: tracks every confirmed `/proc` path (SQL `path` col,
   read/stat/find/search/list).
@@ -175,8 +197,9 @@ Current state in `agent.py` includes:
 - Format enforcement (`_required_format`/`_enforce_format_inplace`): coerces
   `<COUNT:%d>`/`[QTY:%d]`/`count : %d`; never synthesizes yes/no polarity.
 - Variant-disambiguation + deterministic inventory resolution for multi-item
-  counts (currently strict-first product selection with relaxed fallback; global
-  strict-only mode is rejected because it regresses full sweeps).
+  counts (currently exact-candidate grouping before inventory lookup, then
+  strict-first product selection with relaxed fallback for unresolved specs;
+  global strict-only mode is rejected because it regresses full sweeps).
 - Outcome decision-order (security-primary) + 3DS recovery requiring verified
   ownership+eligibility (closed a v6 security miss; over-refusals t21/t24/t41/t43 fixed).
 - Cite-the-subject gate (`_subject_paths`): OK-only, nudges citing a named
@@ -211,6 +234,8 @@ is still unmet at 100% quality.
 3. Refactor step 1 (no behavior expansion): isolate helper layer for
    `resolve_product_variant()` and `build_grounding_refs()` so variant logic and
    refs logic are testable independently.
+   Include a diagnostic record per requested product: parsed props, exact
+   candidate SKUs, inventory rows, selected ref, and reason code.
 4. Add focused regression tests for `t13-t16` deterministic inventory grounding:
    - required product ref present even when answer is numeric
    - no invalid refs survive `_verify_refs`.

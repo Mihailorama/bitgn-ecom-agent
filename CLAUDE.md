@@ -110,9 +110,11 @@ behave; `agent.py` adds deterministic post-processing each step:
 - `_submit_completion` checkout auto-cite — adds `/docs/checkout.md` alongside
   `/docs/security.md` on checkout-style instructions.
 - Variant-disambiguation + deterministic inventory resolution for multi-item
-  counts. Current runtime still has a strict-first resolver with a relaxed
-  fallback; removing that fallback globally was tested and rejected because it
-  pushed more tasks back to slow/unstable LLM resolution.
+  counts. Current runtime resolves exact product candidate groups before
+  inventory lookup, then chooses an actually available sibling for refs. It still
+  has a relaxed fallback for unresolved specs; removing that fallback globally
+  was tested and rejected because it pushed more tasks back to slow/unstable LLM
+  resolution.
 - Outcome decision-order is **security-primary**; 3DS recovery requires verified
   ownership AND eligibility before proceeding (closed a v6 security miss without
   causing over-refusals on `t21/t24/t41/t43`).

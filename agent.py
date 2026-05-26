@@ -1353,14 +1353,14 @@ def _format_numeric_for_task(task_text: str, n: int) -> str:
 
 _PROP_PREFIXES = [
     "adapter type", "adhesive type", "anchor type",
-    "bar length", "battery platform", "cleaner type", "coating", "color family", "connection type", "connector type", "current",
+    "bar length", "battery platform", "cleaner type", "coating", "color family", "color temperature", "colour family", "colour temperature", "connection type", "connector type", "current",
     "cutting width",
     "device type", "disc diameter", "drive type", "fastener type", "fitting type", "ip rating", "kit contents",
     "finish", "garment type", "lens color", "luminous flux", "machine type", "mask type", "piece count", "product type",
     "protection class", "protection type",
     "pack count", "power source", "screw type", "sealant type", "storage type", "thread type",
     "stackable system", "tool profile", "tool type", "trap type", "vehicle type", "viscosity", "wattage", "voltage", "volume",
-    "cleaning type", "diameter", "length", "power", "size", "surface", "fitting",
+    "cleaning type", "diameter", "fit", "grip type", "length", "power", "size", "surface", "tank volume", "fitting",
 ]
 
 
@@ -1377,6 +1377,8 @@ def _prop_key_candidates(label: str, value: str) -> "list[str]":
         out.append("cutting_width_cm")
     if label == "volume":
         out.append("volume_l" if re.search(r"\b\d+\s*l\b", value, re.I) and "ml" not in value.lower() else "volume_ml")
+    if label == "tank volume":
+        out.append("tank_volume_l" if re.search(r"\b\d+\s*l\b", value, re.I) and "ml" not in value.lower() else "tank_volume_ml")
     if label == "wattage":
         out += ["wattage_w", "power_w"]
     if label == "power":
@@ -1389,6 +1391,10 @@ def _prop_key_candidates(label: str, value: str) -> "list[str]":
         out += ["luminous_flux_lm", "lumens"]
     if label == "color family":
         out.append("color")
+    if label == "colour family":
+        out += ["colour_family", "color_family", "color"]
+    if label == "color temperature" or label == "colour temperature":
+        out += ["color_temperature_k", "colour_temperature_k", "temperature_k"]
     return list(dict.fromkeys(out))
 
 
@@ -1577,6 +1583,34 @@ def _select_product(vm: EcomRuntimeClientSync, spec: dict, strict_props: bool = 
         vm,
         sorted(pool, key=lambda p: (-_prop_match_count(p), -_line_score(p, spec), p["sku"]))[0],
     )
+
+
+def _strict_product_matches(vm: EcomRuntimeClientSync, spec: dict) -> "list[dict]":
+    candidates = _load_product_candidates(vm, spec)
+    if not candidates:
+        return []
+    hints = _line_model_hints(spec)
+    if hints:
+        hinted = []
+        for p in candidates:
+            hay = " ".join([p.get("series", ""), p.get("model", ""), p.get("name", "")]).lower()
+            if all(h in hay for h in hints):
+                hinted.append(p)
+        if hinted:
+            candidates = hinted
+    line_filtered = [p for p in candidates if _line_score(p, spec) >= max(1, len(_norm_word(spec.get("line", "")).split()) - 2)]
+    pool = line_filtered or candidates
+    props = spec.get("props", [])
+    if not props:
+        return []
+    full = [
+        p for p in pool
+        if all(_prop_matches(p, keys, value) for keys, value in props)
+    ]
+    return [
+        _canonical_product_path(vm, p)
+        for p in sorted(full, key=lambda p: (-_line_score(p, spec), p["sku"]))
+    ]
 
 
 def _all_stores(vm: EcomRuntimeClientSync) -> "list[dict[str, str]]":
@@ -1791,8 +1825,29 @@ def _try_inventory_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTa
     specs = _extract_product_specs(m.group(3))
     if not store or not specs:
         return None
+    available = []
     products = []
     for spec in specs:
+        exact_matches = _strict_product_matches(vm, spec)
+        if exact_matches:
+            skus = ",".join(_sql_quote(p["sku"]) for p in exact_matches)
+            q = f"""
+SELECT sku, available_today
+FROM inventory
+WHERE store_id={_sql_quote(store['id'])}
+  AND sku IN ({skus});
+"""
+            rows = _csv_dicts(_exec_sql_stdout(vm, q))
+            avail_by_sku = {r.get("sku", ""): int(r.get("available_today") or 0) for r in rows}
+            exact_available = [
+                p for p in exact_matches
+                if avail_by_sku.get(p["sku"], 0) >= threshold
+            ]
+            if exact_available:
+                available.append(
+                    sorted(exact_available, key=lambda p: (-avail_by_sku.get(p["sku"], 0), p["sku"]))[0]
+                )
+            continue
         product = _select_product(vm, spec, strict_props=True)
         if product is None:
             product = _select_product(vm, spec, strict_props=False)
@@ -1807,18 +1862,17 @@ def _try_inventory_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTa
             continue
         seen_skus.add(sku)
         uniq_products.append(p)
-    if not uniq_products:
-        return None
-    skus = ",".join(_sql_quote(p["sku"]) for p in uniq_products)
-    q = f"""
+    if uniq_products:
+        skus = ",".join(_sql_quote(p["sku"]) for p in uniq_products)
+        q = f"""
 SELECT sku, available_today
 FROM inventory
 WHERE store_id={_sql_quote(store['id'])}
   AND sku IN ({skus});
 """
-    rows = _csv_dicts(_exec_sql_stdout(vm, q))
-    avail_by_sku = {r.get("sku", ""): int(r.get("available_today") or 0) for r in rows}
-    available = [p for p in uniq_products if avail_by_sku.get(p["sku"], 0) >= threshold]
+        rows = _csv_dicts(_exec_sql_stdout(vm, q))
+        avail_by_sku = {r.get("sku", ""): int(r.get("available_today") or 0) for r in rows}
+        available.extend([p for p in uniq_products if avail_by_sku.get(p["sku"], 0) >= threshold])
     n = len(available)
     refs = [store["path"]] + [p["path"] for p in available]
     return ReportTaskCompletion(

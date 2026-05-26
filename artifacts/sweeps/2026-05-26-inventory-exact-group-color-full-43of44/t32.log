@@ -1,0 +1,347 @@
+TASK t32 (model codex:gpt-5.3-codex)
+INSTRUCTION: A support note claims we stock the Wall Paint from Helios in the Helios Interior Mobihel GHH-2WC Wall Paint line that has color family White, finish eggshell, and volume 5000 ml and has Bluetooth control. Check the actual catalogue item, cite the exact product record, and if the base product exists but that extra capability is absent, answer with <NO> and include the checked SKU.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query products + product_properties to find candidate SKU(s) matching brand/series/model/kind and stated properties (color family, finish, volume). (20694 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       k.name AS kind,\n       pp.key, pp.value_text, pp.value_number\nFROM products p\nJOIN product_kinds k ON k.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'Helios'\n  AND p.series = 'Interior Mobihel'\n  AND p.model = 'GHH-2WC'\n  AND k.name = 'Wall Paint'\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       k.name AS kind,
+       pp.key, pp.value_text, pp.value_number
+FROM products p
+JOIN product_kinds k ON k.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'Helios'
+  AND p.series = 'Interior Mobihel'
+  AND p.model = 'GHH-2WC'
+  AND k.name = 'Wall Paint'
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,kind,key,value_text,value_number
+Next step_2... Run a broader SQL query for Helios wall-paint products to enumerate real series/model/name values and candidate SKUs. (12287 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, k.name AS kind\nFROM products p\nJOIN product_kinds k ON k.id = p.kind_id\nWHERE p.brand = 'Helios'\n  AND (k.name LIKE '%Paint%' OR p.name LIKE '%Paint%')\nORDER BY p.series, p.model, p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, k.name AS kind
+FROM products p
+JOIN product_kinds k ON k.id = p.kind_id
+WHERE p.brand = 'Helios'
+  AND (k.name LIKE '%Paint%' OR p.name LIKE '%Paint%')
+ORDER BY p.series, p.model, p.sku;
+SQL
+sku,path,brand,series,model,name,kind
+PNT-1RL6NMFS,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0001_3sxxip6a/PNT-1RL6NMFS.json,Helios,Belton,Belton 3GP-7QL,Helios Belton Belton 3GP-7QL Metal and Concrete Paint metal paint Gray matte 750ml,Metal and Concrete Paint
+PNT-1TOOKPTG,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0001_3sxxip6a/PNT-1TOOKPTG.json,Helios,Belton,Belton 3GP-7QL,Helios Belton Belton 3GP-7QL Metal and Concrete Paint concrete sealer Yellow transparent 2500ml,Metal and Concrete Paint
+PNT-2OATFXLL,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0001_3sxxip6a/PNT-2OATFXLL.json,Helios,Belton,Belton 3GP-7QL,Helios Belton Belton 3GP-7QL Metal and Concrete Paint primer Gray matte 2500ml,Metal and Concrete Paint
+PNT-2SUM6MOJ,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0001_3sxxip6a/PNT-2SUM6MOJ.json,Helios,Belton,Belton 3GP-7QL,Helios Belton Belton 3GP-7QL Metal and Concrete Paint metal paint Beige gloss 2500ml,Metal and Concrete Paint
+PNT-3C2OUKSR,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0001_3sxxip6a/PNT-3C2OUKSR.json,Helios,Belton,Belton 3GP-7QL,Helios Belton Belton 3GP-7QL Metal and Concrete Paint metal paint Orange transparent 500ml,Metal and Concrete Paint
+PNT-3K6PI1TZ,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0001_3sxxip6a/PNT-3K6PI1TZ.json,Helios,Belton,Belton 3GP-7QL,Helios Belton Belton 3GP-7QL Metal and Concrete Paint facade paint White satin 500ml,Metal and Concrete Paint
+PNT-3PZJ9ION,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0001_3sxxip6a/PNT-3PZJ9ION.json,Helios,Belton,Belton 3GP-7QL,Helios Belton Belton 3GP-7QL Metal and Concrete Paint metal paint Beige matte 500ml,Metal and Concrete Paint
+PNT-3R5MSIMJ,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0001_3sxxip6a/PNT-3R5MSIMJ.json,Helios,Belton,Belton 3GP-7QL,Helios Belton Belton 3GP-7QL Metal and Concrete Paint metal paint Black matte 2500ml,Metal and Concrete Paint
+PNT-17VS0QPX,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-17VS0QPX.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint White eggshell 10000ml,Wall Paint
+PNT-195HNOT1,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-195HNOT1.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint Clear satin 10000ml,Wall Paint
+PNT-1CNY3I42,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-1CNY3I42.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint Blue matte 750ml,Wall Paint
+PNT-22Q3TEKW,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-22Q3TEKW.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint White gloss 750ml,Wall Paint
+PNT-2E80FH5M,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-2E80FH5M.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint Beige matte 750ml,Wall Paint
+PNT-2HGX6R8O,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-2HGX6R8O.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint White matte 750ml,Wall Paint
+PNT-2XQQ0L11,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-2XQQ0L11.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint Black eggshell 1000ml,Wall Paint
+PNT-30Q2SBLW,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-30Q2SBLW.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint Beige eggshell 750ml,Wall Paint
+PNT-363IGI1Z,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-363IGI1Z.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint White satin 2500ml,Wall Paint
+PNT-3RZ7QXCN,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-3RZ7QXCN.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint Red matte 1000ml,Wall Paint
+PNT-FAWC1O6A,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-FAWC1O6A.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint Black matte 2500ml,Wall Paint
+PNT-K0ILT5BU,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-K0ILT5BU.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint Green eggshell 750ml,Wall Paint
+PNT-QW2LWWM6,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-QW2LWWM6.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint Beige satin 10000ml,Wall Paint
+PNT-QY0P7R8W,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-QY0P7R8W.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint Red eggshell 10000ml,Wall Paint
+PNT-RZ5W36YX,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-RZ5W36YX.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint Gray matte 5000ml,Wall Paint
+PNT-SQFZWKCY,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-SQFZWKCY.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint Gray eggshell 10000ml,Wall Paint
+PNT-TE133URK,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-TE133URK.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint Black gloss 2500ml,Wall Paint
+PNT-YSLNJSWO,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0006_1ef12k4h/PNT-YSLNJSWO.json,Helios,Eco,Mobihel 3MJ-ZFN,Helios Eco Mobihel 3MJ-ZFN Wall Paint Gray matte 1000ml,Wall Paint
+PNT-18KICEZE,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0017_2nvxe3z6/PNT-18KICEZE.json,Helios,Interior,Belton 1VS-ZMH,Helios Interior Belton 1VS-ZMH Wall Paint Yellow satin 2500ml,Wall Paint
+PNT-1G78JAHA,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0017_2nvxe3z6/PNT-1G78JAHA.json,Helios,Interior,Belton 1VS-ZMH,Helios Interior Belton 1VS-ZMH Wall Paint White matte 5000ml,Wall Paint
+PNT-1KCK7FB5,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0017_2nvxe3z6/PNT-1KCK7FB5.json,Helios,Interior,Belton 1VS-ZMH,Helios Interior Belton 1VS-ZMH Wall Paint Blue matte 10000ml,Wall Paint
+PNT-20QCXPA0,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0017_2nvxe3z6/PNT-20QCXPA0.json,Helios,Interior,Belton 1VS-ZMH,Helios Interior Belton 1VS-ZMH Wall Paint White satin 10000ml,Wall Paint
+PNT-214YCUHS,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0017_2nvxe3z6/PNT-214YCUHS.json,Helios,Interior,Belton 1VS-ZMH,Helios Interior Belton 1VS-ZMH Wall Paint Gray eggshell 1000ml,Wall Paint
+PNT-27AZ7L0H,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0017_2nvxe3z6/PNT-27AZ7L0H.json,Helios,Interior,Belton 1VS-ZMH,Helios Interior Belton 1VS-ZMH Wall Paint Brown eggshell 2500ml,Wall Paint
+PNT-2ETD6LDR,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0017_2nvxe3z6/PNT-2ETD6LDR.json,Helios,Interior,Belton 1VS-ZMH,Helios Interior Belton 1VS-ZMH Wall Paint Beige eggshell 2500ml,Wall Paint
+PNT-2LAWHGN9,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0017_2nvxe3z6/PNT-2LAWHGN9.json,Helios,Interior,Belton 1VS-ZMH,Helios Interior Belton 1VS-ZMH Wall Paint Black satin 2500ml,Wall Paint
+PNT-3BKFPJCE,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0017_2nvxe3z6/PNT-3BKFPJCE.json,Helios,Interior,Belton 1VS-ZMH,Helios Interior Belton 1VS-ZMH Wall Paint Green matte 750ml,Wall Paint
+PNT-3N8JYG4Q,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0017_2nvxe3z6/PNT-3N8JYG4Q.json,Helios,Interior,Belton 1VS-ZMH,Helios Interior Belton 1VS-ZMH Wall Paint Blue eggshell 2500ml,Wall Paint
+PNT-6C8YNGSV,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0017_2nvxe3z6/PNT-6C8YNGSV.json,Helios,Interior,Belton 1VS-ZMH,Helios Interior Belton 1VS-ZMH Wall Paint Gray matte 10000ml,Wall Paint
+PNT-ANPGD28R,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0017_2nvxe3z6/PNT-ANPGD28R.json,Helios,Interior,Belton 1VS-ZMH,Helios Interior Belton 1VS-ZMH Wall Paint Purple eggshell 2500ml,Wall Paint
+PNT-G07QAZM6,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0017_2nvxe3z6/PNT-G07QAZM6.json,Helios,Interior,Belton 1VS-ZMH,Helios Interior Belton 1VS-ZMH Wall Paint White gloss 10000ml,Wall Paint
+PNT-SX8XHH1W,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0017_2nvxe3z6/PNT-SX8XHH1W.json,Helios,Interior,Belton 1VS-ZMH,Helios Interior Belton 1VS-ZMH Wall Paint Brown satin 5000ml,Wall Paint
+PNT-1DIRT0PL,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-1DIRT0PL.json,Helios,Interior,Mobihel GHH-2WC,Helios Interior Mobihel GHH-2WC Wall Paint Beige gloss 2500ml,Wall Paint
+PNT-1E9KEERR,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-1E9KEERR.json,Helios,Interior,Mobihel GHH-2WC,Helios Interior Mobihel GHH-2WC Wall Paint Orange eggshell 10000ml,Wall Paint
+PNT-1ISVUH99,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-1ISVUH99.json,Helios,Interior,Mobihel GHH-2WC,Helios Interior Mobihel GHH-2WC Wall Paint White satin 1000ml,Wall Paint
+PNT-28RZQH2Y,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-28RZQH2Y.json,Helios,Interior,Mobihel GHH-2WC,Helios Interior Mobihel GHH-2WC Wall Paint White eggshell 5000ml,Wall Paint
+PNT-2F5CCKQ7,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-2F5CCKQ7.json,Helios,Interior,Mobihel GHH-2WC,Helios Interior Mobihel GHH-2WC Wall Paint Yellow matte 2500ml,Wall Paint
+PNT-2HLH11Q0,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-2HLH11Q0.json,Helios,Interior,Mobihel GHH-2WC,Helios Interior Mobihel GHH-2WC Wall Paint Black gloss 2500ml,Wall Paint
+PNT-2HWEA6GS,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-2HWEA6GS.json,Helios,Interior,Mobihel GHH-2WC,Helios Interior Mobihel GHH-2WC Wall Paint White gloss 10000ml,Wall Paint
+PNT-2OE5CX69,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-2OE5CX69.json,Helios,Interior,Mobihel GHH-2WC,Helios Interior Mobihel GHH-2WC Wall Paint Clear matte 1000ml,Wall Paint
+PNT-3BD37MFG,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-3BD37MFG.json,Helios,Interior,Mobihel GHH-2WC,Helios Interior Mobihel GHH-2WC Wall Paint Beige satin 5000ml,Wall Paint
+PNT-3BOX7VJW,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-3BOX7VJW.json,Helios,Interior,Mobihel GHH-2WC,Helios Interior Mobihel GHH-2WC Wall Paint Black eggshell 2500ml,Wall Paint
+PNT-3GATEJG6,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-3GATEJG6.json,Helios,Interior,Mobihel GHH-2WC,Helios Interior Mobihel GHH-2WC Wall Paint Orange matte 1000ml,Wall Paint
+PNT-3RYIUHWG,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-3RYIUHWG.json,Helios,Interior,Mobihel GHH-2WC,Helios Interior Mobihel GHH-2WC Wall Paint Gray satin 2500ml,Wall Paint
+PNT-3UQZ1BG1,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-3UQZ1BG1.json,Helios,Interior,Mobihel GHH-2WC,Helios Interior Mobihel GHH-2WC Wall Paint Clear matte 750ml,Wall Paint
+PNT-Q0GNRM94,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-Q0GNRM94.json,Helios,Interior,Mobihel GHH-2WC,Helios Interior Mobihel GHH-2WC Wall Paint White eggshell 1000ml,Wall Paint
+Next step_3... Query product_properties for SKU PNT-28RZQH2Y to verify stated attributes and check for any Bluetooth-control property. (9142 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, pp.key, pp.value_text, pp.value_number\nFROM products p\nJOIN product_properties pp ON pp.sku = p.sku\nWHERE p.sku = 'PNT-28RZQH2Y'\nORDER BY pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, pp.key, pp.value_text, pp.value_number
+FROM products p
+JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.sku = 'PNT-28RZQH2Y'
+ORDER BY pp.key;
+SQL
+sku,path,key,value_text,value_number
+PNT-28RZQH2Y,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-28RZQH2Y.json,base_type,acrylic,
+PNT-28RZQH2Y,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-28RZQH2Y.json,color_family,white,
+PNT-28RZQH2Y,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-28RZQH2Y.json,finish,eggshell,
+PNT-28RZQH2Y,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-28RZQH2Y.json,use_area,interior,
+PNT-28RZQH2Y,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-28RZQH2Y.json,volume_ml,5000,5000
+Next step_4... Return report_completion with required <NO> token and checked SKU, citing exact product record path. (14079 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved the exact Helios Interior Mobihel GHH-2WC Wall Paint white eggshell 5000ml SKU.', 'Checked product_properties for the SKU and found no Bluetooth-control capability.'] message='<NO> SKU PNT-28RZQH2Y' grounding_refs=['/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-28RZQH2Y.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved the exact Helios Interior Mobihel GHH-2WC Wall Paint white eggshell 5000ml SKU.
+- Checked product_properties for the SKU and found no Bluetooth-control capability.
+
+[34mAGENT SUMMARY: <NO> SKU PNT-28RZQH2Y[0m
+- [34m/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0008_2e7a4nv2/PNT-28RZQH2Y.json[0m
