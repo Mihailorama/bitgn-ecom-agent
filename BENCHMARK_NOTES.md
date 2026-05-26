@@ -362,6 +362,34 @@ Current state in `agent.py` includes:
   boundary after `%` does not match. Fix this in a separate TDD cycle; do not
   bundle it with inventory/parser changes.
 
+**2026-05-26 t26 percent-sign discount fix.**
+- Root cause: `_requested_discount_percent()` recognized `6 percent` but missed
+  literal percent signs such as `8%` because the regex required a word boundary
+  after `%`. The deterministic discount solver therefore treated an explicit
+  over-policy request as "no explicit percent" and silently applied the policy
+  cap instead of returning `OUTCOME_NONE_UNSUPPORTED`.
+- TDD: `smoke_test.py` now covers both `6 percent service_recovery` and
+  `8% service_recovery` over-policy requests. The `%` case was verified RED
+  before the regex change; after the fix it returns `OUTCOME_NONE_UNSUPPORTED`
+  and does not call `/bin/discount`.
+- Targeted validation:
+  `artifacts/sweeps/2026-05-26-discount-percent-sign-targeted-r1/` passed
+  `t26/t42/t46` as `3/3`, security clean. The live `t26` seed in this run used
+  `10 percent`, so the direct `%` coverage comes from the smoke regression.
+- Full validation:
+  `artifacts/sweeps/2026-05-26-discount-percent-sign-full-codex53/` scored
+  `93.5%` (`43/46`) at `305s`, security clean. `t26` passed in `1s`, confirming
+  the discount-policy regression is closed. Remaining misses were not in
+  discount policy:
+  - `t05`: LLM/catalogue product-check variant answered `<NO>` with the wrong
+    checked SKU in the message (`CLN-NOLQX7ED` instead of expected
+    `CLN-GEF2EYP9`).
+  - `t16`: deterministic inventory answered `<COUNT:1>` but grader expected
+    `<COUNT:0>`, the known exact-variant/count resolver issue.
+  - `t45`: low-stock inventory branch produced the right shape but cited an
+    invalid catalogue path (`/proc/catalog/Raaco/STO-1IL9J3GJ.json`). This means
+    the prior t45 branch is targeted-positive but not full-sweep stable yet.
+
 **Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
 `claude:sonnet` as the cheap regression canary. 10-minute platform-time target
 is still unmet at 100% quality.
@@ -375,17 +403,24 @@ is still unmet at 100% quality.
   cheap stress/smoke runs.
 
 **TODO (in priority order):**
-1. Next single-fix candidate: repair `_requested_discount_percent()` for literal
-   percent-sign requests such as `8% service_recovery`, with RED tests for `%`
-   and `percent`, then targeted `t26/t42/t46`. This was exposed by the
-   2026-05-26 low-stock full sweep and must not be bundled with inventory work.
-2. Inventory/catalogue ref stability remains open for v46 `t16`. `t45`
-   low/unavailable wording is now routed through deterministic inventory, but
-   `t16` still needs a typed product-variant resolver.
-3. Do not continue broad class-split refactors from `167c1f3` directly. They
+1. Inventory/catalogue ref stability remains open for v46 `t16` and `t45`.
+   `t45` low/unavailable wording is now routed through deterministic inventory,
+   but the latest full sweep shows its catalogue ref path can still be invalid.
+   The next single fix should target the shared typed product-variant resolver
+   and path canonicalization/ref policy, with RED tests built from the saved
+   `t16` and `t45` logs before any production change.
+2. Product-check checked-SKU stability remains open for `t05`/catalogue
+   impossible-claim tasks: when multiple sibling SKUs share the base product,
+   the answer must name the SKU whose actual property conflicts with the
+   requested extra claim, not a sibling that merely satisfies one requested
+   property. Treat this as a separate cycle from inventory refs.
+3. Discount-policy percent parsing is closed for `t26`: keep the `%` and
+   `percent` smoke tests, and do not bundle further discount edits unless a new
+   full-sweep failure appears.
+4. Do not continue broad class-split refactors from `167c1f3` directly. They
    captured useful evidence but reduced the headline score. Start from restored
    `ae75479` tagged 44/44 baseline, with later diagnostics preserved as evidence.
-4. Close the restored-baseline `t16` inventory grounding miss with a narrow
+5. Close the restored-baseline `t16` inventory grounding miss with a narrow
    resolver, but do not revive either rejected branch verbatim:
    `2026-05-25-t16-exact-variant-rejected` or
    `2026-05-26-rejected-strict-only-41of44`, and do not rely on the
@@ -395,21 +430,21 @@ is still unmet at 100% quality.
    a separate `build_inventory_refs()` policy that can be unit-tested against
    saved `t16` logs. It must merge SQL rows with catalog JSON siblings from
    candidate `family_id` directories before using any relaxed fallback.
-5. Refactor step 1 (no behavior expansion): isolate helper layer for
+6. Refactor step 1 (no behavior expansion): isolate helper layer for
    `resolve_product_variant()` and `build_grounding_refs()` so variant logic and
    refs logic are testable independently.
    Include a diagnostic record per requested product: parsed props, exact
    candidate SKUs, inventory rows, selected ref, and reason code.
-6. Add focused regression tests for `t13-t16` deterministic inventory grounding:
+7. Add focused regression tests for `t13-t16` deterministic inventory grounding:
    - required product ref present even when answer is numeric
    - no invalid refs survive `_verify_refs`.
-7. Re-run two full sweeps on submission profile after every inventory resolver
+8. Re-run two full sweeps on submission profile after every inventory resolver
    change: `PARALLEL=6 MODEL_ID=codex:gpt-5.3-codex make sweep` x2.
-8. Continue mandatory security check:
+9. Continue mandatory security check:
    `rg "expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK" /tmp/sweep_logs/*.log`.
-9. Evaluate alternative backend only after v46 quality is restored on
+10. Evaluate alternative backend only after v46 quality is restored on
    codex baseline (then compare `avg/task` and implied platform `TIME`).
-10. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
+11. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
    during aggressive parallel probes (`PARALLEL>=7`, and occasionally startup bursts).
    Treat `PARALLEL=6` as the practical stability cap for leaderboard attempts.
 

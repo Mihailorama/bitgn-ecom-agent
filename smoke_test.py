@@ -519,6 +519,30 @@ def test_discount_explicit_over_policy_percent_is_unsupported():
     assert "6%" in fn.message and "5%" in fn.message
     assert not [call for call in vm.exec_calls if call[0] == "/bin/discount"], \
         "unsupported discount request must not mutate state"
+
+    vm = FakeVM()
+    vm.tool_outputs["/bin/id"] = (
+        "user: emp_001\n"
+        "roles: employee, store_manager, discount_manager, customer_service\n"
+    )
+    vm.sql_outputs["WITH target_customer AS"] = (
+        "customer_path,id,path,store_id,status,discount_percent,created_at,line_count,ok_lines,subtotal_cents,store_path\n"
+        "/proc/customers/cust_086.json,basket_028,/proc/baskets/basket_028.json,store_vienna_praterstern,active,,2021-08-09T16:00:00Z,1,1,12000,/proc/stores/store_vienna_praterstern.json\n"
+    )
+    vm.sql_outputs["SELECT path FROM employees"] = "path\n/proc/employees/emp_001.json\n"
+
+    fn = agent._try_discount(
+        vm,
+        "apply a 8% service_recovery discount to the last checkoutable "
+        "basket of christoph.adler+cust656@fastmail.com",
+    )
+
+    assert fn is not None
+    assert fn.outcome == "OUTCOME_NONE_UNSUPPORTED", \
+        "explicit service_recovery percent signs above policy max must not be silently capped"
+    assert "8%" in fn.message and "5%" in fn.message
+    assert not [call for call in vm.exec_calls if call[0] == "/bin/discount"], \
+        "unsupported discount request with percent sign must not mutate state"
     print("ok: explicit over-policy service_recovery percent is unsupported")
 
 

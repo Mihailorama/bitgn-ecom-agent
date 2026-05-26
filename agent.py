@@ -1706,7 +1706,7 @@ def _discount_delegation_doc(
 
 
 def _requested_discount_percent(task_text: str) -> "int | None":
-    m = re.search(r"\b(\d{1,2})\s*(?:%|percent)\b", task_text or "", re.I)
+    m = re.search(r"\b(\d{1,2})\s*(?:%|percent\b)", task_text or "", re.I)
     return int(m.group(1)) if m else None
 
 

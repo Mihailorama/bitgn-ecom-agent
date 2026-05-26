@@ -1,0 +1,400 @@
+TASK t17 (model codex:gpt-5.3-codex)
+INSTRUCTION: I can visit any PowerTool branch in Graz today. Across every Graz branch, including branches with 0 availability, how many units of product (the Tool Box and Bag from Festool in the Festool Stackable SYS 3JJ-9LM Tool Box and Bag line that has storage type parts case) are available today? Answer exactly as "%d" and cite every city store record plus the product record.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2025-06-22T09:13:19Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Read docs policy index/notes for count-report methodology (16719 ms)
+  [[32msafe[0m] tool='read' path='/docs/README.md' number=False start_line=0 end_line=0
+[32mOUT[0m: cat /docs/README.md
+# ECOM1
+
+Use the security policy for identity, permissions, and authorization checks.
+Use the checkout process for basket checkout tasks.
+Use the discount policy before applying or refusing basket discounts.
+Use the payment policies before recovering payment workflow failures.
+Use the returns policy before approving or finalizing customer refunds.
+Using today's catalogue reporting rule means checking for a current catalogue
+counting or reporting update before answering catalogue product-count questions,
+unless the request explicitly says to ignore reporting updates.
+
+
+
+## Document Families
+
+The `/docs` tree contains several document families. Some are active decision
+policies. Some are operational background. Some are migration or readiness notes
+that sound important because they are important to the merchant, but they do not
+decide customer-specific actions.
+
+When a request changes commerce state or answers whether a customer-specific
+action is allowed, use the smallest dedicated decision policy first. Broad
+operations documents may provide context, but they do not override identity,
+checkout, discount, payment, return, package, installment, or risk rules.
+
+### Active Decision Policies
+
+| Document | Use when | Authority boundary |
+| --- | --- | --- |
+| `/docs/security.md` | A request depends on identity, permissions, ownership, roles, or the word "my" | Authoritative for identity and authorization checks |
+| `/docs/checkout.md` | A request asks to check out a basket or decide whether checkout is supported | Authoritative for basket checkout inventory checks |
+| `/docs/discounts.md` | A request asks to apply, refuse, or size a basket discount | Authoritative for basket discount conditions |
+| `/docs/payments/3ds.md` | A request asks to recover a simulated 3DS payment flow | Authoritative for 3DS recovery conditions |
+| `/docs/returns.md` | A request asks to approve or finalize a customer return refund | Authoritative for refund workflow conditions |
+
+The active decision policies are short on purpose. A long document with a more
+dramatic title is not more authoritative than the dedicated policy for the
+action at hand.
+
+Before applying an active decision policy, check under `/docs` for dated policy
+updates that name the same workflow, record, or operating day. A matching update
+overrides the base policy only for the case it names.
+
+For catalogue product-count questions, always check today's catalogue reporting
+rule unless the request says otherwise. Current reporting updates may live under
+paths such as `/docs/current-updates/`, `/docs/policy-updates/`,
+`/docs/ops-policy-notes/`, or `/docs/catalogue-addenda/`. If a matching update
+names the catalogue count workflow, requested product kind, operating day, city,
+family hold, or similar scope, use that rule instead of the plain catalogue row
+count.
+
+### Operational Background
+
+| Document | Why it exists | Do not use it for |
+| --- | --- | --- |
+| `/docs/merchant-continuity-and-critical-incidents.md` | Incident rhythm, staffing coordination, store communications, and after-action review | Customer authorization, payment recovery, discount approval, package conclusions, return outcomes |
+| `/docs/powertools-agentic-os-origin-story.md` | Founding story, employee legacy, and why the workspace calls itself an agentic OS | Any current customer action, current state lookup, authorization, checkout, discount, payment, return, package, installment, or risk decision |
+| `/docs/store-associate-exception-handbook.md` | Store-floor staffing, till, signage, training, and local associate exception notes | Runtime identity, basket ownership, discounts, refunds, replacements, payment state changes |
+| `/docs/warehouse-systems-migration-runbook.md` | Warehouse system cutover planning, rehearsal mapping, and migration archive rules | Live package tracing, fulfillment evidence, refund or replacement decisions |
+
+Operational background can be useful when a human asks "how should the merchant
+organize this incident?" It is usually not useful when a customer asks "can you
+do this for me now?"
+
+### Proc And Runtime Companions
+
+These are not policy documents, but they often explain how to read current
+state:
+
+| Location | Meaning |
+| --- | --- |
+| `/proc/customers/` | Customer profiles |
+| `/proc/baskets/` | Basket records and basket line items |
+| `/proc/payments/` | Payment attempts for checked-out baskets |
+| `/proc/returns/` | Return workflow records |
+| `/proc/stores/` | Store records and inventory-related projections |
+| `/bin` | Mechanical runtime tools; read policy before using tools that mutate state |
+
+Current state should come from `/proc` and runtime tools. Policy should come
+from the active decision policy family. Readiness notes, migration notes, and
+incident notes are not current state.
+
+### Common Reading Traps
+
+| Trap | Safer interpretation |
+| --- | --- |
+| A title says `critical`, `incident`, `exception`, or `continuity` | It may still be operational background only |
+| A paragraph mentions a manager, executive, store lead, or support coordinator | That person is not automatically the runtime identity returned by `/bin/id` |
+| A migration table contains warehouse, hold, manifest, or route wording | It may describe field mapping, not a live package |
+| A promotional note mentions a campaign, appeasement, VIP, or holiday period | It does not change the discount policy unless `/docs/discounts.md` says so |
+| A store-floor exception says the queue is busy | It does not change customer ownership or payment safety |
+
+When in doubt, quote or reference the dedicated decision policy and the concrete
+record that makes the decision possible. Do not rely on document title weight.
+
+Next step_2... Search /docs for current/policy update directories or files related to catalogue reporting rules (10955 ms)
+  [[32msafe[0m] tool='find' name='current-updates' root='/docs' kind='dirs' limit=20
+[32mOUT[0m: find /docs -name current-updates
+.
+Next step_3... Check for `/docs/policy-updates` and other update-family locations named in `/docs/README.md` (12878 ms)
+  [[32msafe[0m] tool='find' name='policy-updates' root='/docs' kind='dirs' limit=20
+[32mOUT[0m: find /docs -name policy-updates
+.
+Next step_4... Check for `/docs/ops-policy-notes` directory (9199 ms)
+  [[32msafe[0m] tool='find' name='ops-policy-notes' root='/docs' kind='dirs' limit=20
+[32mOUT[0m: find /docs -name ops-policy-notes
+.
+Next step_5... Check for `/docs/catalogue-addenda` directory (13625 ms)
+  [[32msafe[0m] tool='find' name='catalogue-addenda' root='/docs' kind='dirs' limit=20
+[32mOUT[0m: find /docs -name catalogue-addenda
+.
+Next step_6... Query products + product_properties to resolve the exact Festool Stackable SYS 3JJ-9LM Tool Box and Bag variant with storage type parts case (17250 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pp.key, pp.value_text\nFROM products p\nJOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'Festool'\n  AND (p.series = 'Stackable SYS 3JJ-9LM' OR p.model = 'Stackable SYS 3JJ-9LM' OR p.name LIKE '%Stackable SYS 3JJ-9LM%')\n  AND (p.name LIKE '%Tool Box and Bag%' OR p.model LIKE '%Tool Box and Bag%' OR p.series LIKE '%Tool Box and Bag%')\n  AND pp.key IN ('storage_type','storage type')\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pp.key, pp.value_text
+FROM products p
+JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'Festool'
+  AND (p.series = 'Stackable SYS 3JJ-9LM' OR p.model = 'Stackable SYS 3JJ-9LM' OR p.name LIKE '%Stackable SYS 3JJ-9LM%')
+  AND (p.name LIKE '%Tool Box and Bag%' OR p.model LIKE '%Tool Box and Bag%' OR p.series LIKE '%Tool Box and Bag%')
+  AND pp.key IN ('storage_type','storage type')
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,key,value_text
+STO-12JLHT7D,/proc/catalog/STO-12JLHT7D.json,Festool,Stackable,SYS 3JJ-9LM,Festool Stackable SYS 3JJ-9LM Tool Box and Bag tool bag 60l Gray,storage_type,tool bag
+STO-2R84BSHQ,/proc/catalog/STO-2R84BSHQ.json,Festool,Stackable,SYS 3JJ-9LM,Festool Stackable SYS 3JJ-9LM Tool Box and Bag parts case 60l Yellow,storage_type,parts case
+Next step_7... Query all Graz stores with LEFT JOIN inventory for SKU STO-2R84BSHQ and compute per-store availability plus total (17340 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT s.path AS store_path,\n       COALESCE(i.available_today, 0) AS available_today,\n       SUM(COALESCE(i.available_today, 0)) OVER () AS total_available_today\nFROM stores s\nLEFT JOIN inventory i\n  ON i.store_id = s.id\n AND i.sku = 'STO-2R84BSHQ'\nWHERE s.city = 'Graz'\nORDER BY s.path;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT s.path AS store_path,
+       COALESCE(i.available_today, 0) AS available_today,
+       SUM(COALESCE(i.available_today, 0)) OVER () AS total_available_today
+FROM stores s
+LEFT JOIN inventory i
+  ON i.store_id = s.id
+ AND i.sku = 'STO-2R84BSHQ'
+WHERE s.city = 'Graz'
+ORDER BY s.path;
+SQL
+store_path,available_today,total_available_today
+/proc/stores/store_graz_jakomini.json,0,7
+/proc/stores/store_graz_lend.json,7,7
+Next step_8... Report completion with exact integer output and complete grounding references (15931 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Checked docs reporting-rule requirement', 'Resolved Festool variant with storage_type=parts case', 'Summed Graz availability including zero-availability stores'] message='7' grounding_refs=['/docs/README.md', '/proc/catalog/STO-2R84BSHQ.json', '/proc/stores/store_graz_jakomini.json', '/proc/stores/store_graz_lend.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Checked docs reporting-rule requirement
+- Resolved Festool variant with storage_type=parts case
+- Summed Graz availability including zero-availability stores
+
+[34mAGENT SUMMARY: 7[0m
+- [34m/docs/README.md[0m
+- [34m/proc/catalog/STO-2R84BSHQ.json[0m
+- [34m/proc/stores/store_graz_jakomini.json[0m
+- [34m/proc/stores/store_graz_lend.json[0m
