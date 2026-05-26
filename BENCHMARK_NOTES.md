@@ -288,6 +288,26 @@ Current state in `agent.py` includes:
   should start with a shadow-mode typed `resolve_product_variant()` and
   per-task diagnostic JSON, not another broad resolver mutation.
 
+### 2026-05-26 ECOM1-DEV v46 refresh
+
+- BitGN API now reports `46` tasks for `bitgn/ecom1-dev`; the ceiling moved from
+  `44` to `46`.
+- Fresh baseline sweep on restored `ae75479` agent:
+  `artifacts/sweeps/2026-05-26-ecom1dev-v46-baseline-codex53/` scored `95.7%`
+  (`44/46`) at `265s`, security clean. New tasks `t45` and `t46` both passed.
+- Misses:
+  - `t26`: expected `OUTCOME_NONE_UNSUPPORTED`, got `OUTCOME_OK`. The
+    deterministic discount solver silently capped a requested `6%`
+    `service_recovery` discount to `5%` and applied it. New grader behavior
+    wants unsupported/clarification for an explicit over-policy percentage.
+  - `t42`: denial was correct, but the answer omitted required token
+    `DESK_COVERAGE_NOT_DISCOUNT_AUTHORITY_2021_08_09` from the current update
+    document.
+- Immediate target is the discount policy solver, not inventory/product
+  resolution: preserve successful `t45/t46`, add an over-policy explicit-percent
+  branch for `t26`, and include the desk-coverage token on Graz Lend authority
+  denials for `t42`.
+
 **Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
 `claude:sonnet` as the cheap regression canary. 10-minute platform-time target
 is still unmet at 100% quality.
@@ -301,10 +321,16 @@ is still unmet at 100% quality.
   cheap stress/smoke runs.
 
 **TODO (in priority order):**
-1. Do not continue broad class-split refactors from `167c1f3` directly. They
+1. Patch and validate the v46 discount-policy branch:
+   - explicit requested service recovery above policy max must return
+     `OUTCOME_NONE_UNSUPPORTED`, not silently cap and apply
+   - Graz Lend desk-coverage denials must include
+     `DESK_COVERAGE_NOT_DISCOUNT_AUTHORITY_2021_08_09`
+   - validate with targeted `t26 t42 t45 t46`, then one full v46 sweep.
+2. Do not continue broad class-split refactors from `167c1f3` directly. They
    captured useful evidence but reduced the headline score. Start from restored
    `ae75479` tagged 44/44 baseline, with later diagnostics preserved as evidence.
-2. Close the restored-baseline `t16` inventory grounding miss with a narrow
+3. Close the restored-baseline `t16` inventory grounding miss with a narrow
    resolver, but do not revive either rejected branch verbatim:
    `2026-05-25-t16-exact-variant-rejected` or
    `2026-05-26-rejected-strict-only-41of44`, and do not rely on the
@@ -314,21 +340,21 @@ is still unmet at 100% quality.
    a separate `build_inventory_refs()` policy that can be unit-tested against
    saved `t16` logs. It must merge SQL rows with catalog JSON siblings from
    candidate `family_id` directories before using any relaxed fallback.
-3. Refactor step 1 (no behavior expansion): isolate helper layer for
+4. Refactor step 1 (no behavior expansion): isolate helper layer for
    `resolve_product_variant()` and `build_grounding_refs()` so variant logic and
    refs logic are testable independently.
    Include a diagnostic record per requested product: parsed props, exact
    candidate SKUs, inventory rows, selected ref, and reason code.
-4. Add focused regression tests for `t13-t16` deterministic inventory grounding:
+5. Add focused regression tests for `t13-t16` deterministic inventory grounding:
    - required product ref present even when answer is numeric
    - no invalid refs survive `_verify_refs`.
-5. Re-run two full sweeps on submission profile after every inventory resolver
+6. Re-run two full sweeps on submission profile after every inventory resolver
    change: `PARALLEL=6 MODEL_ID=codex:gpt-5.3-codex make sweep` x2.
-6. Continue mandatory security check:
+7. Continue mandatory security check:
    `rg "expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK" /tmp/sweep_logs/*.log`.
-7. Evaluate alternative backend only after `44/44` stability is restored on
+8. Evaluate alternative backend only after v46 quality is restored on
    codex baseline (then compare `avg/task` and implied platform `TIME`).
-8. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
+9. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
    during aggressive parallel probes (`PARALLEL>=7`, and occasionally startup bursts).
    Treat `PARALLEL=6` as the practical stability cap for leaderboard attempts.
 

@@ -1,0 +1,442 @@
+TASK t32 (model codex:gpt-5.3-codex)
+INSTRUCTION: A support note claims we stock the Automotive Charger and Bulb from Osram in the Osram Professional OS 2O4-0UO Automotive Charger and Bulb line that has product type battery charger, voltage 12 V, and current 6 A and is wifi-enabled. Check the actual catalogue item, cite the exact product record, and if the base product exists but that extra capability is absent, answer with <NO> and include the checked SKU.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query candidate Osram products matching brand/series/model/name and kind battery charger (16485 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind, pp.key, pp.value_text, pp.value_number\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'Osram'\n  AND p.series = 'Osram Professional'\n  AND p.model = 'OS 2O4-0UO'\n  AND p.name = 'Automotive Charger and Bulb'\n  AND pk.name = 'battery charger'\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind, pp.key, pp.value_text, pp.value_number
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'Osram'
+  AND p.series = 'Osram Professional'
+  AND p.model = 'OS 2O4-0UO'
+  AND p.name = 'Automotive Charger and Bulb'
+  AND pk.name = 'battery charger'
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,kind,key,value_text,value_number
+Next step_2... Run a broader SQL query for Osram products to enumerate candidate rows and kinds (12210 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nWHERE p.brand = 'Osram'\n   OR p.name LIKE '%Automotive Charger and Bulb%'\n   OR p.model LIKE '%2O4-0UO%'\nORDER BY p.brand, p.series, p.model, p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+WHERE p.brand = 'Osram'
+   OR p.name LIKE '%Automotive Charger and Bulb%'
+   OR p.model LIKE '%2O4-0UO%'
+ORDER BY p.brand, p.series, p.model, p.sku;
+SQL
+sku,path,brand,series,model,name,kind
+AUT-17TTKBPR,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0007_pnso56bs/AUT-17TTKBPR.json,Bosch,Premium,BBS 3KE-JDB,Bosch Premium BBS 3KE-JDB Automotive Charger and Bulb jump starter 12V 16A,Automotive Charger and Bulb
+AUT-1SJPI2YE,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0007_pnso56bs/AUT-1SJPI2YE.json,Bosch,Premium,BBS 3KE-JDB,Bosch Premium BBS 3KE-JDB Automotive Charger and Bulb jump starter 12V 4A,Automotive Charger and Bulb
+AUT-2H0HLRCX,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0007_pnso56bs/AUT-2H0HLRCX.json,Bosch,Premium,BBS 3KE-JDB,Bosch Premium BBS 3KE-JDB Automotive Charger and Bulb battery charger 12V 10A,Automotive Charger and Bulb
+AUT-340SCAVM,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0007_pnso56bs/AUT-340SCAVM.json,Bosch,Premium,BBS 3KE-JDB,Bosch Premium BBS 3KE-JDB Automotive Charger and Bulb battery charger 12V 16A,Automotive Charger and Bulb
+AUT-53DXL1YS,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0007_pnso56bs/AUT-53DXL1YS.json,Bosch,Premium,BBS 3KE-JDB,Bosch Premium BBS 3KE-JDB Automotive Charger and Bulb battery charger 24V 4A,Automotive Charger and Bulb
+AUT-5WHISCAS,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0007_pnso56bs/AUT-5WHISCAS.json,Bosch,Premium,BBS 3KE-JDB,Bosch Premium BBS 3KE-JDB Automotive Charger and Bulb battery pack 12V 4A,Automotive Charger and Bulb
+AUT-XGG9GQOP,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0007_pnso56bs/AUT-XGG9GQOP.json,Bosch,Premium,BBS 3KE-JDB,Bosch Premium BBS 3KE-JDB Automotive Charger and Bulb jump starter 6V 2A,Automotive Charger and Bulb
+AUT-ZDWDL454,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0007_pnso56bs/AUT-ZDWDL454.json,Bosch,Premium,BBS 3KE-JDB,Bosch Premium BBS 3KE-JDB Automotive Charger and Bulb battery pack 24V 2A,Automotive Charger and Bulb
+AUT-1I5D5C7A,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0006_126hmne6/AUT-1I5D5C7A.json,Bosch,Professional,BBS 1P7-CG5,Bosch Professional BBS 1P7-CG5 Automotive Charger and Bulb jump starter 6V 6A,Automotive Charger and Bulb
+AUT-1LHMEKTS,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0006_126hmne6/AUT-1LHMEKTS.json,Bosch,Professional,BBS 1P7-CG5,Bosch Professional BBS 1P7-CG5 Automotive Charger and Bulb jump starter 6V 2A,Automotive Charger and Bulb
+AUT-2GXN9MHM,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0006_126hmne6/AUT-2GXN9MHM.json,Bosch,Professional,BBS 1P7-CG5,Bosch Professional BBS 1P7-CG5 Automotive Charger and Bulb battery charger 24V 4A,Automotive Charger and Bulb
+AUT-2YYACN4L,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0006_126hmne6/AUT-2YYACN4L.json,Bosch,Professional,BBS 1P7-CG5,Bosch Professional BBS 1P7-CG5 Automotive Charger and Bulb battery charger 24V 4A,Automotive Charger and Bulb
+AUT-3P4RWCSR,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0006_126hmne6/AUT-3P4RWCSR.json,Bosch,Professional,BBS 1P7-CG5,Bosch Professional BBS 1P7-CG5 Automotive Charger and Bulb battery pack 12V 10A,Automotive Charger and Bulb
+AUT-3SYX9Q5S,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0006_126hmne6/AUT-3SYX9Q5S.json,Bosch,Professional,BBS 1P7-CG5,Bosch Professional BBS 1P7-CG5 Automotive Charger and Bulb battery pack 12V 16A,Automotive Charger and Bulb
+AUT-LH6M0ANN,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0006_126hmne6/AUT-LH6M0ANN.json,Bosch,Professional,BBS 1P7-CG5,Bosch Professional BBS 1P7-CG5 Automotive Charger and Bulb battery pack 24V 2A,Automotive Charger and Bulb
+AUT-TT2JLE6Q,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0006_126hmne6/AUT-TT2JLE6Q.json,Bosch,Professional,BBS 1P7-CG5,Bosch Professional BBS 1P7-CG5 Automotive Charger and Bulb battery charger 6V 2A,Automotive Charger and Bulb
+AUT-12PR46BM,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0005_17dh3ymc/AUT-12PR46BM.json,Bosch,Universal,IXO 3PQ-9QF,Bosch Universal IXO 3PQ-9QF Automotive Charger and Bulb battery charger 24V 2A,Automotive Charger and Bulb
+AUT-1QIMI705,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0005_17dh3ymc/AUT-1QIMI705.json,Bosch,Universal,IXO 3PQ-9QF,Bosch Universal IXO 3PQ-9QF Automotive Charger and Bulb battery charger 12V 4A,Automotive Charger and Bulb
+AUT-1YUROH9F,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0005_17dh3ymc/AUT-1YUROH9F.json,Bosch,Universal,IXO 3PQ-9QF,Bosch Universal IXO 3PQ-9QF Automotive Charger and Bulb battery charger 24V 2A,Automotive Charger and Bulb
+AUT-2AEUOLXI,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0005_17dh3ymc/AUT-2AEUOLXI.json,Bosch,Universal,IXO 3PQ-9QF,Bosch Universal IXO 3PQ-9QF Automotive Charger and Bulb bulb set 6V 2A,Automotive Charger and Bulb
+AUT-E626QASW,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0005_17dh3ymc/AUT-E626QASW.json,Bosch,Universal,IXO 3PQ-9QF,Bosch Universal IXO 3PQ-9QF Automotive Charger and Bulb jump starter 12V 2A,Automotive Charger and Bulb
+AUT-KMSNK3T2,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0005_17dh3ymc/AUT-KMSNK3T2.json,Bosch,Universal,IXO 3PQ-9QF,Bosch Universal IXO 3PQ-9QF Automotive Charger and Bulb jump starter 12V 2A,Automotive Charger and Bulb
+AUT-SRSMZ7RA,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0005_17dh3ymc/AUT-SRSMZ7RA.json,Bosch,Universal,IXO 3PQ-9QF,Bosch Universal IXO 3PQ-9QF Automotive Charger and Bulb jump starter 6V 4A,Automotive Charger and Bulb
+AUT-W6IVJ5CL,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0005_17dh3ymc/AUT-W6IVJ5CL.json,Bosch,Universal,IXO 3PQ-9QF,Bosch Universal IXO 3PQ-9QF Automotive Charger and Bulb battery charger 6V 6A,Automotive Charger and Bulb
+AUT-1RA88XGE,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0003_2hxhpvx1/AUT-1RA88XGE.json,Liqui Moly,Workshop,Special VKX-LRS,Liqui Moly Workshop Special VKX-LRS Automotive Charger and Bulb jump starter 24V 10A,Automotive Charger and Bulb
+AUT-1VCB1JNZ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0003_2hxhpvx1/AUT-1VCB1JNZ.json,Liqui Moly,Workshop,Special VKX-LRS,Liqui Moly Workshop Special VKX-LRS Automotive Charger and Bulb battery charger 24V 6A,Automotive Charger and Bulb
+AUT-1WS87SQW,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0003_2hxhpvx1/AUT-1WS87SQW.json,Liqui Moly,Workshop,Special VKX-LRS,Liqui Moly Workshop Special VKX-LRS Automotive Charger and Bulb battery charger 12V 6A,Automotive Charger and Bulb
+AUT-2PWOJJ6G,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0003_2hxhpvx1/AUT-2PWOJJ6G.json,Liqui Moly,Workshop,Special VKX-LRS,Liqui Moly Workshop Special VKX-LRS Automotive Charger and Bulb jump starter 24V 4A,Automotive Charger and Bulb
+AUT-35ZFTX89,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0003_2hxhpvx1/AUT-35ZFTX89.json,Liqui Moly,Workshop,Special VKX-LRS,Liqui Moly Workshop Special VKX-LRS Automotive Charger and Bulb battery pack 12V 2A,Automotive Charger and Bulb
+AUT-3BJTFGWG,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0003_2hxhpvx1/AUT-3BJTFGWG.json,Liqui Moly,Workshop,Special VKX-LRS,Liqui Moly Workshop Special VKX-LRS Automotive Charger and Bulb battery charger 12V 10A,Automotive Charger and Bulb
+AUT-3FA1KO3J,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0003_2hxhpvx1/AUT-3FA1KO3J.json,Liqui Moly,Workshop,Special VKX-LRS,Liqui Moly Workshop Special VKX-LRS Automotive Charger and Bulb battery pack 24V 10A,Automotive Charger and Bulb
+AUT-3I92CKLF,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0003_2hxhpvx1/AUT-3I92CKLF.json,Liqui Moly,Workshop,Special VKX-LRS,Liqui Moly Workshop Special VKX-LRS Automotive Charger and Bulb battery charger 12V 4A,Automotive Charger and Bulb
+AUT-5BEFDKUY,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0003_2hxhpvx1/AUT-5BEFDKUY.json,Liqui Moly,Workshop,Special VKX-LRS,Liqui Moly Workshop Special VKX-LRS Automotive Charger and Bulb jump starter 12V 6A,Automotive Charger and Bulb
+AUT-ZE1EG5Q0,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0003_2hxhpvx1/AUT-ZE1EG5Q0.json,Liqui Moly,Workshop,Special VKX-LRS,Liqui Moly Workshop Special VKX-LRS Automotive Charger and Bulb battery charger 6V 6A,Automotive Charger and Bulb
+AUT-1458F5U2,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0001_2p5yvcnp/AUT-1458F5U2.json,Michelin,Compact,MC C0M-09C,Michelin Compact MC C0M-09C Automotive Charger and Bulb jump starter 24V 6A,Automotive Charger and Bulb
+AUT-168KHXH7,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0001_2p5yvcnp/AUT-168KHXH7.json,Michelin,Compact,MC C0M-09C,Michelin Compact MC C0M-09C Automotive Charger and Bulb jump starter 24V 4A,Automotive Charger and Bulb
+AUT-1Q29C2JP,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0001_2p5yvcnp/AUT-1Q29C2JP.json,Michelin,Compact,MC C0M-09C,Michelin Compact MC C0M-09C Automotive Charger and Bulb battery charger 12V 2A,Automotive Charger and Bulb
+AUT-1ZNSW104,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0001_2p5yvcnp/AUT-1ZNSW104.json,Michelin,Compact,MC C0M-09C,Michelin Compact MC C0M-09C Automotive Charger and Bulb jump starter 12V 10A,Automotive Charger and Bulb
+AUT-2W5G5H5L,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0001_2p5yvcnp/AUT-2W5G5H5L.json,Michelin,Compact,MC C0M-09C,Michelin Compact MC C0M-09C Automotive Charger and Bulb battery charger 12V 4A,Automotive Charger and Bulb
+AUT-364HW6TX,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0001_2p5yvcnp/AUT-364HW6TX.json,Michelin,Compact,MC C0M-09C,Michelin Compact MC C0M-09C Automotive Charger and Bulb jump starter 12V 2A,Automotive Charger and Bulb
+AUT-3JA7HR14,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0001_2p5yvcnp/AUT-3JA7HR14.json,Michelin,Compact,MC C0M-09C,Michelin Compact MC C0M-09C Automotive Charger and Bulb battery pack 12V 4A,Automotive Charger and Bulb
+AUT-CH2Y4AER,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0001_2p5yvcnp/AUT-CH2Y4AER.json,Michelin,Compact,MC C0M-09C,Michelin Compact MC C0M-09C Automotive Charger and Bulb battery charger 12V 10A,Automotive Charger and Bulb
+AUT-UGRV5SWA,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0001_2p5yvcnp/AUT-UGRV5SWA.json,Michelin,Compact,MC C0M-09C,Michelin Compact MC C0M-09C Automotive Charger and Bulb battery pack 6V 6A,Automotive Charger and Bulb
+AUT-W9OY0V36,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0001_2p5yvcnp/AUT-W9OY0V36.json,Michelin,Compact,MC C0M-09C,Michelin Compact MC C0M-09C Automotive Charger and Bulb battery charger 12V 10A,Automotive Charger and Bulb
+AUT-11FPTGBD,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0011_ubeikg3w/AUT-11FPTGBD.json,Michelin,Compact,Radius ONB-OGX,Michelin Compact Radius ONB-OGX Automotive Charger and Bulb jump starter 24V 16A,Automotive Charger and Bulb
+AUT-1RBWZV38,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0011_ubeikg3w/AUT-1RBWZV38.json,Michelin,Compact,Radius ONB-OGX,Michelin Compact Radius ONB-OGX Automotive Charger and Bulb jump starter 6V 6A,Automotive Charger and Bulb
+AUT-1Y99HSUU,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0011_ubeikg3w/AUT-1Y99HSUU.json,Michelin,Compact,Radius ONB-OGX,Michelin Compact Radius ONB-OGX Automotive Charger and Bulb jump starter 12V 6A,Automotive Charger and Bulb
+AUT-211LVID8,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0011_ubeikg3w/AUT-211LVID8.json,Michelin,Compact,Radius ONB-OGX,Michelin Compact Radius ONB-OGX Automotive Charger and Bulb jump starter 12V 10A,Automotive Charger and Bulb
+AUT-24RV6BPY,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0011_ubeikg3w/AUT-24RV6BPY.json,Michelin,Compact,Radius ONB-OGX,Michelin Compact Radius ONB-OGX Automotive Charger and Bulb battery pack 24V 16A,Automotive Charger and Bulb
+AUT-2UKTP97I,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0011_ubeikg3w/AUT-2UKTP97I.json,Michelin,Compact,Radius ONB-OGX,Michelin Compact Radius ONB-OGX Automotive Charger and Bulb battery charger 12V 4A,Automotive Charger and Bulb
+AUT-GFBDWYRA,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0011_ubeikg3w/AUT-GFBDWYRA.json,Michelin,Compact,Radius ONB-OGX,Michelin Compact Radius ONB-OGX Automotive Charger and Bulb battery charger 12V 6A,Automotive Charger and Bulb
+AUT-PNVKWHUK,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0011_ubeikg3w/AUT-PNVKWHUK.json,Michelin,Compact,Radius ONB-OGX,Michelin Compact Radius ONB-OGX Automotive Charger and Bulb battery pack 12V 16A,Automotive Charger and Bulb
+AUT-12DU3FSB,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0013_2r6zqzh0/AUT-12DU3FSB.json,Osram,Classic,Night 3QE-SVE,Osram Classic Night 3QE-SVE Automotive Charger and Bulb jump starter 12V 6A,Automotive Charger and Bulb
+AUT-1CXCFETB,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0013_2r6zqzh0/AUT-1CXCFETB.json,Osram,Classic,Night 3QE-SVE,Osram Classic Night 3QE-SVE Automotive Charger and Bulb battery charger 6V 6A,Automotive Charger and Bulb
+AUT-1V628Y3J,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0013_2r6zqzh0/AUT-1V628Y3J.json,Osram,Classic,Night 3QE-SVE,Osram Classic Night 3QE-SVE Automotive Charger and Bulb battery charger 6V 2A,Automotive Charger and Bulb
+AUT-26RB0JOW,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0013_2r6zqzh0/AUT-26RB0JOW.json,Osram,Classic,Night 3QE-SVE,Osram Classic Night 3QE-SVE Automotive Charger and Bulb jump starter 24V 16A,Automotive Charger and Bulb
+AUT-2BPM82W3,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0013_2r6zqzh0/AUT-2BPM82W3.json,Osram,Classic,Night 3QE-SVE,Osram Classic Night 3QE-SVE Automotive Charger and Bulb battery charger 12V 10A,Automotive Charger and Bulb
+AUT-35A15K66,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0013_2r6zqzh0/AUT-35A15K66.json,Osram,Classic,Night 3QE-SVE,Osram Classic Night 3QE-SVE Automotive Charger and Bulb battery charger 24V 6A,Automotive Charger and Bulb
+AUT-6KAAGS3M,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0013_2r6zqzh0/AUT-6KAAGS3M.json,Osram,Classic,Night 3QE-SVE,Osram Classic Night 3QE-SVE Automotive Charger and Bulb battery pack 6V 2A,Automotive Charger and Bulb
+AUT-A5KMBG23,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0013_2r6zqzh0/AUT-A5KMBG23.json,Osram,Classic,Night 3QE-SVE,Osram Classic Night 3QE-SVE Automotive Charger and Bulb jump starter 12V 10A,Automotive Charger and Bulb
+AUT-NOFU8829,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0013_2r6zqzh0/AUT-NOFU8829.json,Osram,Classic,Night 3QE-SVE,Osram Classic Night 3QE-SVE Automotive Charger and Bulb jump starter 24V 4A,Automotive Charger and Bulb
+AUT-XS2XC6T3,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0013_2r6zqzh0/AUT-XS2XC6T3.json,Osram,Classic,Night 3QE-SVE,Osram Classic Night 3QE-SVE Automotive Charger and Bulb battery charger 24V 2A,Automotive Charger and Bulb
+AUT-14Y7GUOT,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0012_2dqsst0f/AUT-14Y7GUOT.json,Osram,Classic,OS K0I-SX5,Osram Classic OS K0I-SX5 Automotive Charger and Bulb battery pack 24V 2A,Automotive Charger and Bulb
+AUT-1LXXA60J,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0012_2dqsst0f/AUT-1LXXA60J.json,Osram,Classic,OS K0I-SX5,Osram Classic OS K0I-SX5 Automotive Charger and Bulb battery pack 24V 2A,Automotive Charger and Bulb
+AUT-3H95P7AO,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0012_2dqsst0f/AUT-3H95P7AO.json,Osram,Classic,OS K0I-SX5,Osram Classic OS K0I-SX5 Automotive Charger and Bulb battery charger 12V 6A,Automotive Charger and Bulb
+AUT-3JICBZY2,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0012_2dqsst0f/AUT-3JICBZY2.json,Osram,Classic,OS K0I-SX5,Osram Classic OS K0I-SX5 Automotive Charger and Bulb battery charger 12V 16A,Automotive Charger and Bulb
+AUT-3PBF6W7Q,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0012_2dqsst0f/AUT-3PBF6W7Q.json,Osram,Classic,OS K0I-SX5,Osram Classic OS K0I-SX5 Automotive Charger and Bulb battery pack 12V 10A,Automotive Charger and Bulb
+AUT-AQUFXEDV,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0012_2dqsst0f/AUT-AQUFXEDV.json,Osram,Classic,OS K0I-SX5,Osram Classic OS K0I-SX5 Automotive Charger and Bulb battery pack 12V 4A,Automotive Charger and Bulb
+AUT-NYGPAEPC,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0012_2dqsst0f/AUT-NYGPAEPC.json,Osram,Classic,OS K0I-SX5,Osram Classic OS K0I-SX5 Automotive Charger and Bulb battery charger 12V 2A,Automotive Charger and Bulb
+AUT-P8OLFO98,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0012_2dqsst0f/AUT-P8OLFO98.json,Osram,Classic,OS K0I-SX5,Osram Classic OS K0I-SX5 Automotive Charger and Bulb jump starter 24V 6A,Automotive Charger and Bulb
+ELC-1BJBC17F,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0019_zfmksof7/ELC-1BJBC17F.json,Osram,Eco,Classic 3GQ-XQO,Osram Eco Classic 3GQ-XQO LED Bulb GU10 8W 6500K non-dimmable,LED Bulb
+ELC-1MC3CRJN,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0019_zfmksof7/ELC-1MC3CRJN.json,Osram,Eco,Classic 3GQ-XQO,Osram Eco Classic 3GQ-XQO LED Bulb E14 4W 2700K non-dimmable,LED Bulb
+ELC-20KY0P7C,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0019_zfmksof7/ELC-20KY0P7C.json,Osram,Eco,Classic 3GQ-XQO,Osram Eco Classic 3GQ-XQO LED Bulb E27 8W 2700K non-dimmable,LED Bulb
+ELC-2CRRU8PR,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0019_zfmksof7/ELC-2CRRU8PR.json,Osram,Eco,Classic 3GQ-XQO,Osram Eco Classic 3GQ-XQO LED Bulb E27 10W 2700K non-dimmable,LED Bulb
+ELC-2IGY9QRJ,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0019_zfmksof7/ELC-2IGY9QRJ.json,Osram,Eco,Classic 3GQ-XQO,Osram Eco Classic 3GQ-XQO LED Bulb GU10 8W 6500K non-dimmable,LED Bulb
+ELC-2YM3BUL4,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0019_zfmksof7/ELC-2YM3BUL4.json,Osram,Eco,Classic 3GQ-XQO,Osram Eco Classic 3GQ-XQO LED Bulb E14 15W 4000K non-dimmable,LED Bulb
+ELC-2YXD6P0U,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0019_zfmksof7/ELC-2YXD6P0U.json,Osram,Eco,Classic 3GQ-XQO,Osram Eco Classic 3GQ-XQO LED Bulb E27 6W 4000K dimmable,LED Bulb
+ELC-3NLIJSP6,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0019_zfmksof7/ELC-3NLIJSP6.json,Osram,Eco,Classic 3GQ-XQO,Osram Eco Classic 3GQ-XQO LED Bulb GU10 6W 4000K non-dimmable,LED Bulb
+ELC-57CUFKQK,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0019_zfmksof7/ELC-57CUFKQK.json,Osram,Eco,Classic 3GQ-XQO,Osram Eco Classic 3GQ-XQO LED Bulb E14 12W 2700K non-dimmable,LED Bulb
+ELC-5P25VQ1Q,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0019_zfmksof7/ELC-5P25VQ1Q.json,Osram,Eco,Classic 3GQ-XQO,Osram Eco Classic 3GQ-XQO LED Bulb E14 10W 2700K non-dimmable,LED Bulb
+ELC-JW7RFU7W,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0019_zfmksof7/ELC-JW7RFU7W.json,Osram,Eco,Classic 3GQ-XQO,Osram Eco Classic 3GQ-XQO LED Bulb E27 8W 4000K non-dimmable,LED Bulb
+ELC-S3JNS5Z9,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0019_zfmksof7/ELC-S3JNS5Z9.json,Osram,Eco,Classic 3GQ-XQO,Osram Eco Classic 3GQ-XQO LED Bulb E27 10W 4000K dimmable,LED Bulb
+ELC-18M6FOEA,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0015_ldthuxe8/ELC-18M6FOEA.json,Osram,Eco,Night 3L3-00T,Osram Eco Night 3L3-00T LED Bulb E14 10W 6500K non-dimmable,LED Bulb
+ELC-199UI2K2,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0015_ldthuxe8/ELC-199UI2K2.json,Osram,Eco,Night 3L3-00T,Osram Eco Night 3L3-00T LED Bulb G9 10W 3000K non-dimmable,LED Bulb
+ELC-1FVM430W,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0015_ldthuxe8/ELC-1FVM430W.json,Osram,Eco,Night 3L3-00T,Osram Eco Night 3L3-00T LED Bulb E14 12W 2700K non-dimmable,LED Bulb
+ELC-1MUT3NNY,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0015_ldthuxe8/ELC-1MUT3NNY.json,Osram,Eco,Night 3L3-00T,Osram Eco Night 3L3-00T LED Bulb E27 8W 3000K non-dimmable,LED Bulb
+ELC-27DHFFFK,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0015_ldthuxe8/ELC-27DHFFFK.json,Osram,Eco,Night 3L3-00T,Osram Eco Night 3L3-00T LED Bulb E27 10W 3000K non-dimmable,LED Bulb
+ELC-2BQYJS27,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0015_ldthuxe8/ELC-2BQYJS27.json,Osram,Eco,Night 3L3-00T,Osram Eco Night 3L3-00T LED Bulb E27 6W 2700K dimmable,LED Bulb
+ELC-2H8X6HLW,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0015_ldthuxe8/ELC-2H8X6HLW.json,Osram,Eco,Night 3L3-00T,Osram Eco Night 3L3-00T LED Bulb E14 10W 2700K dimmable,LED Bulb
+ELC-2UZ3W3OS,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0015_ldthuxe8/ELC-2UZ3W3OS.json,Osram,Eco,Night 3L3-00T,Osram Eco Night 3L3-00T LED Bulb E14 15W 2700K dimmable,LED Bulb
+ELC-2UZFQLCE,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0015_ldthuxe8/ELC-2UZFQLCE.json,Osram,Eco,Night 3L3-00T,Osram Eco Night 3L3-00T LED Bulb E27 12W 2700K non-dimmable,LED Bulb
+ELC-3N5HO206,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0015_ldthuxe8/ELC-3N5HO206.json,Osram,Eco,Night 3L3-00T,Osram Eco Night 3L3-00T LED Bulb E14 8W 2700K non-dimmable,LED Bulb
+ELC-3RGA2254,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0015_ldthuxe8/ELC-3RGA2254.json,Osram,Eco,Night 3L3-00T,Osram Eco Night 3L3-00T LED Bulb GU10 6W 3000K non-dimmable,LED Bulb
+ELC-3VOIYR91,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0015_ldthuxe8/ELC-3VOIYR91.json,Osram,Eco,Night 3L3-00T,Osram Eco Night 3L3-00T LED Bulb E27 4W 2700K dimmable,LED Bulb
+ELC-REQQIPUU,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0015_ldthuxe8/ELC-REQQIPUU.json,Osram,Eco,Night 3L3-00T,Osram Eco Night 3L3-00T LED Bulb E27 6W 3000K non-dimmable,LED Bulb
+ELC-XATNRXFX,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0015_ldthuxe8/ELC-XATNRXFX.json,Osram,Eco,Night 3L3-00T,Osram Eco Night 3L3-00T LED Bulb E27 6W 2700K non-dimmable,LED Bulb
+ELC-1GHJ2SR3,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0003_2xf76vmg/ELC-1GHJ2SR3.json,Osram,LED Star,OS 3GQ-NKD,Osram LED Star OS 3GQ-NKD LED Bulb GU10 10W 3000K non-dimmable,LED Bulb
+ELC-1ZIA8BCC,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0003_2xf76vmg/ELC-1ZIA8BCC.json,Osram,LED Star,OS 3GQ-NKD,Osram LED Star OS 3GQ-NKD LED Bulb GU10 12W 2700K non-dimmable,LED Bulb
+ELC-2IURPB9W,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0003_2xf76vmg/ELC-2IURPB9W.json,Osram,LED Star,OS 3GQ-NKD,Osram LED Star OS 3GQ-NKD LED Bulb E27 10W 6500K non-dimmable,LED Bulb
+ELC-2K8CR17L,/proc/catalog/electrical/led_bulbs/fam_electrical_led_bulbs_0003_2xf76vmg/ELC-2K8CR17L.json,Osram,LED Star,OS 3GQ-NKD,Osram LED Star OS 3GQ-NKD LED Bulb G9 6W 3000K non-dimmable,LED Bulb
+warning: result truncated at 100 rows
+Next step_3... Query Osram Automotive Charger and Bulb candidates with targeted series/model/name filters (23395 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.series, p.model, p.name, pp.key, pp.value_text, pp.value_number\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'Osram'\n  AND pk.name = 'Automotive Charger and Bulb'\n  AND (\n    p.series LIKE '%Professional%'\n    OR p.model LIKE '%2O4-0UO%'\n    OR p.model LIKE '%204-0UO%'\n    OR p.model LIKE '%2O4-OUO%'\n    OR p.name LIKE '%battery charger 12V 6A%'\n  )\nORDER BY p.series, p.model, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.series, p.model, p.name, pp.key, pp.value_text, pp.value_number
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'Osram'
+  AND pk.name = 'Automotive Charger and Bulb'
+  AND (
+    p.series LIKE '%Professional%'
+    OR p.model LIKE '%2O4-0UO%'
+    OR p.model LIKE '%204-0UO%'
+    OR p.model LIKE '%2O4-OUO%'
+    OR p.name LIKE '%battery charger 12V 6A%'
+  )
+ORDER BY p.series, p.model, p.sku, pp.key;
+SQL
+sku,path,series,model,name,key,value_text,value_number
+AUT-3H95P7AO,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0012_2dqsst0f/AUT-3H95P7AO.json,Classic,OS K0I-SX5,Osram Classic OS K0I-SX5 Automotive Charger and Bulb battery charger 12V 6A,current_a,6,6
+AUT-3H95P7AO,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0012_2dqsst0f/AUT-3H95P7AO.json,Classic,OS K0I-SX5,Osram Classic OS K0I-SX5 Automotive Charger and Bulb battery charger 12V 6A,product_type,battery charger,
+AUT-3H95P7AO,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0012_2dqsst0f/AUT-3H95P7AO.json,Classic,OS K0I-SX5,Osram Classic OS K0I-SX5 Automotive Charger and Bulb battery charger 12V 6A,vehicle_type,universal,
+AUT-3H95P7AO,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0012_2dqsst0f/AUT-3H95P7AO.json,Classic,OS K0I-SX5,Osram Classic OS K0I-SX5 Automotive Charger and Bulb battery charger 12V 6A,voltage_v,12,12
+AUT-1HIMVJZR,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-1HIMVJZR.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb jump starter 6V 4A,current_a,4,4
+AUT-1HIMVJZR,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-1HIMVJZR.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb jump starter 6V 4A,product_type,jump starter,
+AUT-1HIMVJZR,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-1HIMVJZR.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb jump starter 6V 4A,vehicle_type,universal,
+AUT-1HIMVJZR,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-1HIMVJZR.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb jump starter 6V 4A,voltage_v,6,6
+AUT-1KWLQ6XV,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-1KWLQ6XV.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb jump starter 12V 2A,current_a,2,2
+AUT-1KWLQ6XV,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-1KWLQ6XV.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb jump starter 12V 2A,product_type,jump starter,
+AUT-1KWLQ6XV,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-1KWLQ6XV.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb jump starter 12V 2A,vehicle_type,van,
+AUT-1KWLQ6XV,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-1KWLQ6XV.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb jump starter 12V 2A,voltage_v,12,12
+AUT-29Z8RR8Q,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-29Z8RR8Q.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery charger 24V 4A,current_a,4,4
+AUT-29Z8RR8Q,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-29Z8RR8Q.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery charger 24V 4A,product_type,battery charger,
+AUT-29Z8RR8Q,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-29Z8RR8Q.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery charger 24V 4A,vehicle_type,universal,
+AUT-29Z8RR8Q,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-29Z8RR8Q.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery charger 24V 4A,voltage_v,24,24
+AUT-2D57MFFG,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-2D57MFFG.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb bulb set 12V 2A,current_a,2,2
+AUT-2D57MFFG,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-2D57MFFG.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb bulb set 12V 2A,product_type,bulb set,
+AUT-2D57MFFG,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-2D57MFFG.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb bulb set 12V 2A,vehicle_type,universal,
+AUT-2D57MFFG,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-2D57MFFG.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb bulb set 12V 2A,voltage_v,12,12
+AUT-2OEKWNSC,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-2OEKWNSC.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery charger 12V 4A,current_a,4,4
+AUT-2OEKWNSC,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-2OEKWNSC.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery charger 12V 4A,product_type,battery charger,
+AUT-2OEKWNSC,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-2OEKWNSC.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery charger 12V 4A,vehicle_type,motorcycle,
+AUT-2OEKWNSC,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-2OEKWNSC.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery charger 12V 4A,voltage_v,12,12
+AUT-3A954ZEQ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-3A954ZEQ.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery pack 6V 10A,current_a,10,10
+AUT-3A954ZEQ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-3A954ZEQ.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery pack 6V 10A,product_type,battery pack,
+AUT-3A954ZEQ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-3A954ZEQ.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery pack 6V 10A,vehicle_type,universal,
+AUT-3A954ZEQ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-3A954ZEQ.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery pack 6V 10A,voltage_v,6,6
+AUT-3C4VUW40,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-3C4VUW40.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb jump starter 12V 10A,current_a,10,10
+AUT-3C4VUW40,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-3C4VUW40.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb jump starter 12V 10A,product_type,jump starter,
+AUT-3C4VUW40,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-3C4VUW40.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb jump starter 12V 10A,vehicle_type,motorcycle,
+AUT-3C4VUW40,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-3C4VUW40.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb jump starter 12V 10A,voltage_v,12,12
+AUT-3MEUBYEB,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-3MEUBYEB.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery charger 12V 6A,current_a,6,6
+AUT-3MEUBYEB,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-3MEUBYEB.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery charger 12V 6A,product_type,battery charger,
+AUT-3MEUBYEB,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-3MEUBYEB.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery charger 12V 6A,vehicle_type,truck,
+AUT-3MEUBYEB,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-3MEUBYEB.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery charger 12V 6A,voltage_v,12,12
+AUT-ISZV5BPZ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-ISZV5BPZ.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery charger 24V 4A,current_a,4,4
+AUT-ISZV5BPZ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-ISZV5BPZ.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery charger 24V 4A,product_type,battery charger,
+AUT-ISZV5BPZ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-ISZV5BPZ.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery charger 24V 4A,vehicle_type,car,
+AUT-ISZV5BPZ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-ISZV5BPZ.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb battery charger 24V 4A,voltage_v,24,24
+AUT-JONFBZKJ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-JONFBZKJ.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb jump starter 12V 10A,current_a,10,10
+AUT-JONFBZKJ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-JONFBZKJ.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb jump starter 12V 10A,product_type,jump starter,
+AUT-JONFBZKJ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-JONFBZKJ.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb jump starter 12V 10A,vehicle_type,universal,
+AUT-JONFBZKJ,/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-JONFBZKJ.json,Professional,OS 2O4-0UO,Osram Professional OS 2O4-0UO Automotive Charger and Bulb jump starter 12V 10A,voltage_v,12,12
+Next step_4... Report completion with the required <NO> result and checked SKU, citing the exact product record (20427 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved the matching base product variant by brand/series/model/type/specs', 'Verified the SKU AUT-3MEUBYEB properties do not include wifi-enabled capability'] message='<NO> AUT-3MEUBYEB' grounding_refs=['/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-3MEUBYEB.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved the matching base product variant by brand/series/model/type/specs
+- Verified the SKU AUT-3MEUBYEB properties do not include wifi-enabled capability
+
+[34mAGENT SUMMARY: <NO> AUT-3MEUBYEB[0m
+- [34m/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0014_3gp4vle8/AUT-3MEUBYEB.json[0m

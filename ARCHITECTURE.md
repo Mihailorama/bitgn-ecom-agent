@@ -183,6 +183,22 @@ reason about cross-task drift and increased runtime.
 
 ## Degradation Analysis
 
+### v46 Refresh
+
+On 2026-05-26 the benchmark API reported `46` tasks instead of `44`. A fresh
+full sweep of the restored `ae75479` baseline scored `44/46` (`95.7%`) at
+`265s`, security clean. The two newly visible tasks, `t45` and `t46`, passed.
+
+The misses were both discount-policy variants:
+
+- `t26`: explicit `6% service_recovery` request should be unsupported; the
+  deterministic solver capped it to `5%` and applied it.
+- `t42`: authority denial was correct, but the new grader requires token
+  `DESK_COVERAGE_NOT_DISCOUNT_AUTHORITY_2021_08_09`.
+
+This narrows the next growth point: patch discount policy handling first, then
+return to inventory/product resolver work.
+
 Recent full sweeps after the last recorded 44/44:
 
 - `2026-05-26 07:59`: `41/44`
@@ -220,6 +236,8 @@ Observed causes:
 | Inventory | SQL candidates miss JSON siblings | `t16` diagnostics show required sibling refs outside exposed candidate set | Build shadow-mode `resolve_product_variant()` before behavior change |
 | Grounding refs | Correct answer with missing required citation | Historical `t15/t16/t36` misses | Continue ledger-backed grounding gate; do not fabricate refs |
 | Security | OK answer on security-denial task | No current miss in latest sweeps | Security grep is a hard reject gate |
+| Discount policy | Silent cap on explicit over-policy request | v46 `t26` expected unsupported, solver applied 5% | Explicit requested percent above policy max must return unsupported/clarification |
+| Discount authority | Missing required current-update token | v46 `t42` expected `DESK_COVERAGE_NOT_DISCOUNT_AUTHORITY_2021_08_09` | Denial refs/tokens must include current update document requirements |
 | Speed | Local wall time underestimates platform time | Platform showed ~18-23 min for local ~226-236s runs | Optimize platform-visible task duration, not only local wall |
 | Parallelism | Rate/quality collapse above 6 | `PARALLEL=7/10/12` rows degraded | Use `PARALLEL=6` for scoring, higher only for diagnostics |
 | Prompt bloat | Slower steps and correction starvation | Runtime grew with extra rules | Prefer typed code gates over broad prose when invariant is precise |
