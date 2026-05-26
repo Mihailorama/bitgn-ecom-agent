@@ -326,6 +326,42 @@ Current state in `agent.py` includes:
   `t42`, `t46` all passed). Remaining misses were unrelated inventory/catalogue
   refs: `t16` missing required product ref and `t45` invalid product ref.
 
+**2026-05-26 t45 low-stock deterministic branch.**
+- Rejected first candidate: post-submit catalog ref canonicalization. It added
+  no reliable live improvement; targeted `t45` still produced invalid shallow
+  product refs. Logs are preserved under:
+  - `artifacts/sweeps/2026-05-26-catalog-ref-canon-t45-r1/`
+  - `artifacts/sweeps/2026-05-26-catalog-ref-sql-canon-t45-r*/`
+- Landed candidate scope: extend `_try_inventory_count` to handle v46 `t45`
+  low/unavailable wording variants (`less/fewer than`, `below`, `none`,
+  `no same-day availability`, `not available`) before the LLM loop. The branch
+  keeps the existing exact-product resolver and changes only the request parser
+  plus low-stock reference policy.
+- Ref policy for low-stock/unavailable counts: count every SKU with
+  `available_today < threshold`, but cite only the store plus qualifying products
+  that still have positive availability. Do not cite zero-stock products; the
+  runtime AGENTS.MD says availability answers should not reference unavailable
+  products.
+- TDD added in `smoke_test.py` for each accepted wording and for the zero-stock
+  citation rule.
+- Targeted validation:
+  - `artifacts/sweeps/2026-05-26-inventory-lt-none-regression-r1/` passed
+    `t13/t14/t15/t45` as `4/4`, all deterministic at `1s`.
+  - `artifacts/sweeps/2026-05-26-inventory-lt-none-t45-r6/` passed `t45`
+    as `1/1` in `1s`.
+  - `artifacts/sweeps/2026-05-26-inventory-lt-none-t16-check-r1/` still failed
+    `t16` with the known missing required sibling ref; this fix does not solve
+    `t16`.
+- Full validation:
+  `artifacts/sweeps/2026-05-26-inventory-lt-none-full-codex53/` scored `91.3%`
+  (`42/46`) at `237s`, with `t45` passing and security grep clean. Misses were:
+  `t01` invalid refs, `t12` count drift, `t16` missing required product ref, and
+  `t26` expected `OUTCOME_NONE_UNSUPPORTED` but got `OUTCOME_OK`.
+- New finding from that full sweep: `t26` can request `8%` with the percent sign;
+  `_requested_discount_percent()` currently misses this because the trailing word
+  boundary after `%` does not match. Fix this in a separate TDD cycle; do not
+  bundle it with inventory/parser changes.
+
 **Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
 `claude:sonnet` as the cheap regression canary. 10-minute platform-time target
 is still unmet at 100% quality.
@@ -339,13 +375,17 @@ is still unmet at 100% quality.
   cheap stress/smoke runs.
 
 **TODO (in priority order):**
-1. Next quality target is no longer discount-policy; it is inventory/catalogue
-   ref stability on v46 (`t16`, `t45`). Keep the discount fix untouched unless a
-   future run reopens `t26` or `t42`.
-2. Do not continue broad class-split refactors from `167c1f3` directly. They
+1. Next single-fix candidate: repair `_requested_discount_percent()` for literal
+   percent-sign requests such as `8% service_recovery`, with RED tests for `%`
+   and `percent`, then targeted `t26/t42/t46`. This was exposed by the
+   2026-05-26 low-stock full sweep and must not be bundled with inventory work.
+2. Inventory/catalogue ref stability remains open for v46 `t16`. `t45`
+   low/unavailable wording is now routed through deterministic inventory, but
+   `t16` still needs a typed product-variant resolver.
+3. Do not continue broad class-split refactors from `167c1f3` directly. They
    captured useful evidence but reduced the headline score. Start from restored
    `ae75479` tagged 44/44 baseline, with later diagnostics preserved as evidence.
-3. Close the restored-baseline `t16` inventory grounding miss with a narrow
+4. Close the restored-baseline `t16` inventory grounding miss with a narrow
    resolver, but do not revive either rejected branch verbatim:
    `2026-05-25-t16-exact-variant-rejected` or
    `2026-05-26-rejected-strict-only-41of44`, and do not rely on the
@@ -355,21 +395,21 @@ is still unmet at 100% quality.
    a separate `build_inventory_refs()` policy that can be unit-tested against
    saved `t16` logs. It must merge SQL rows with catalog JSON siblings from
    candidate `family_id` directories before using any relaxed fallback.
-4. Refactor step 1 (no behavior expansion): isolate helper layer for
+5. Refactor step 1 (no behavior expansion): isolate helper layer for
    `resolve_product_variant()` and `build_grounding_refs()` so variant logic and
    refs logic are testable independently.
    Include a diagnostic record per requested product: parsed props, exact
    candidate SKUs, inventory rows, selected ref, and reason code.
-5. Add focused regression tests for `t13-t16` deterministic inventory grounding:
+6. Add focused regression tests for `t13-t16` deterministic inventory grounding:
    - required product ref present even when answer is numeric
    - no invalid refs survive `_verify_refs`.
-6. Re-run two full sweeps on submission profile after every inventory resolver
+7. Re-run two full sweeps on submission profile after every inventory resolver
    change: `PARALLEL=6 MODEL_ID=codex:gpt-5.3-codex make sweep` x2.
-7. Continue mandatory security check:
+8. Continue mandatory security check:
    `rg "expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK" /tmp/sweep_logs/*.log`.
-8. Evaluate alternative backend only after v46 quality is restored on
+9. Evaluate alternative backend only after v46 quality is restored on
    codex baseline (then compare `avg/task` and implied platform `TIME`).
-9. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
+10. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
    during aggressive parallel probes (`PARALLEL>=7`, and occasionally startup bursts).
    Treat `PARALLEL=6` as the practical stability cap for leaderboard attempts.
 

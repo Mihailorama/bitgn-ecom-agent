@@ -1,0 +1,342 @@
+TASK t45 (model codex:gpt-5.3-codex)
+INSTRUCTION: pls check the central Brno PowerTool branch, how many of these have less than 4 available today: the Nut Bolt and Washer from Heco in the Heco Unix HECO 2VD-VNA Nut Bolt and Washer line that has fastener type threaded rod,the Work Jacket from Mascot in the Mascot Advanced ACC 35W-IIS Work Jacket line that has color family Blue,the LED Bulb from Philips in the Philips Professional Hue 3JS-MSN LED Bulb line that has wattage 10 W and luminous flux 1521 lm,the Valve and Connector from Geberit in the Geberit Mapress Silent IC5-GU6 Valve and Connector line that has connector type shower hose,the Adhesive and Glue from Gorilla in the Gorilla Crystal Grip 2ZQ-D83 Adhesive and Glue line that has adhesive type contact adhesive,the Cleaning Liquid from Mellerud in the Mellerud Bio MEL 233-MOB Cleaning Liquid line that has cleaner type floor cleaner? Answer in exactly format "%d" (no quotes)
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2025-10-08T16:53:18Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query stores to identify the exact central Brno PowerTool branch and capture its id/path. (18751 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT id, path, name, city, is_open FROM stores WHERE city='Brno' ORDER BY name;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT id, path, name, city, is_open FROM stores WHERE city='Brno' ORDER BY name;
+SQL
+id,path,name,city,is_open
+store_brno_veveri,/proc/stores/store_brno_veveri.json,PowerTool Brno Veveri,Brno,1
+Next step_2... Query candidate products and their property rows for all six requested items. (21325 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind, pp.key, pp.value_text, pp.value_number\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand IN ('Heco','Mascot','Philips','Geberit','Gorilla','Mellerud')\n  AND pk.name IN ('Nut Bolt and Washer','Work Jacket','LED Bulb','Valve and Connector','Adhesive and Glue','Cleaning Liquid')\n  AND (\n    p.series LIKE '%Unix%' OR p.model LIKE '%2VD-VNA%' OR\n    p.series LIKE '%Advanced%' OR p.model LIKE '%35W-IIS%' OR\n    p.series LIKE '%Professional Hue%' OR p.model LIKE '%3JS-MSN%' OR\n    p.series LIKE '%Mapress Silent%' OR p.model LIKE '%IC5-GU6%' OR\n    p.series LIKE '%Crystal Grip%' OR p.model LIKE '%2ZQ-D83%' OR\n    p.series LIKE '%Bio%' OR p.model LIKE '%233-MOB%'\n  )\n  AND (\n    pp.key IS NULL OR pp.key IN (\n      'fastener_type','color_family','connector_type','adhesive_type','cleaner_type',\n      'wattage','wattage_w','luminous_flux','luminous_flux_lm'\n    )\n  )\nORDER BY p.brand, pk.name, p.series, p.model, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind, pp.key, pp.value_text, pp.value_number
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand IN ('Heco','Mascot','Philips','Geberit','Gorilla','Mellerud')
+  AND pk.name IN ('Nut Bolt and Washer','Work Jacket','LED Bulb','Valve and Connector','Adhesive and Glue','Cleaning Liquid')
+  AND (
+    p.series LIKE '%Unix%' OR p.model LIKE '%2VD-VNA%' OR
+    p.series LIKE '%Advanced%' OR p.model LIKE '%35W-IIS%' OR
+    p.series LIKE '%Professional Hue%' OR p.model LIKE '%3JS-MSN%' OR
+    p.series LIKE '%Mapress Silent%' OR p.model LIKE '%IC5-GU6%' OR
+    p.series LIKE '%Crystal Grip%' OR p.model LIKE '%2ZQ-D83%' OR
+    p.series LIKE '%Bio%' OR p.model LIKE '%233-MOB%'
+  )
+  AND (
+    pp.key IS NULL OR pp.key IN (
+      'fastener_type','color_family','connector_type','adhesive_type','cleaner_type',
+      'wattage','wattage_w','luminous_flux','luminous_flux_lm'
+    )
+  )
+ORDER BY p.brand, pk.name, p.series, p.model, p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,kind,key,value_text,value_number
+PLB-2PM8UPP9,/proc/catalog/Geberit/PLB-2PM8UPP9.json,Geberit,Mapress,Silent IC5-GU6,Geberit Mapress Silent IC5-GU6 Valve and Connector ball valve 25mm 1/2 inch,Valve and Connector,connector_type,ball valve,
+PLB-38D7UO80,/proc/catalog/Geberit/PLB-38D7UO80.json,Geberit,Mapress,Silent IC5-GU6,Geberit Mapress Silent IC5-GU6 Valve and Connector shower hose 16mm 1/2 inch,Valve and Connector,connector_type,shower hose,
+PLB-AG4YIFN2,/proc/catalog/Geberit/PLB-AG4YIFN2.json,Geberit,Mapress,Silent IC5-GU6,Geberit Mapress Silent IC5-GU6 Valve and Connector thread adapter 12mm M24,Valve and Connector,connector_type,thread adapter,
+ADH-2ET6DODM,/proc/catalog/Gorilla/ADH-2ET6DODM.json,Gorilla,Crystal,Grip 2ZQ-D83,Gorilla Crystal Grip 2ZQ-D83 Adhesive and Glue contact adhesive White 100ml,Adhesive and Glue,adhesive_type,contact adhesive,
+ADH-2ET6DODM,/proc/catalog/Gorilla/ADH-2ET6DODM.json,Gorilla,Crystal,Grip 2ZQ-D83,Gorilla Crystal Grip 2ZQ-D83 Adhesive and Glue contact adhesive White 100ml,Adhesive and Glue,color_family,white,
+ADH-3KO8R29L,/proc/catalog/Gorilla/ADH-3KO8R29L.json,Gorilla,Crystal,Grip 2ZQ-D83,Gorilla Crystal Grip 2ZQ-D83 Adhesive and Glue wood glue Gray 300ml,Adhesive and Glue,adhesive_type,wood glue,
+ADH-3KO8R29L,/proc/catalog/Gorilla/ADH-3KO8R29L.json,Gorilla,Crystal,Grip 2ZQ-D83,Gorilla Crystal Grip 2ZQ-D83 Adhesive and Glue wood glue Gray 300ml,Adhesive and Glue,color_family,gray,
+ADH-XXNVMZ76,/proc/catalog/Gorilla/ADH-XXNVMZ76.json,Gorilla,Crystal,Grip 2ZQ-D83,Gorilla Crystal Grip 2ZQ-D83 Adhesive and Glue epoxy Clear 300ml,Adhesive and Glue,adhesive_type,epoxy,
+ADH-XXNVMZ76,/proc/catalog/Gorilla/ADH-XXNVMZ76.json,Gorilla,Crystal,Grip 2ZQ-D83,Gorilla Crystal Grip 2ZQ-D83 Adhesive and Glue epoxy Clear 300ml,Adhesive and Glue,color_family,clear,
+FST-1S0ZWLK7,/proc/catalog/Heco/FST-1S0ZWLK7.json,Heco,Unix,HECO 2VD-VNA,Heco Unix HECO 2VD-VNA Nut Bolt and Washer bolt 12mm 40mm 500pc,Nut Bolt and Washer,fastener_type,bolt,
+FST-332WM3WI,/proc/catalog/Heco/FST-332WM3WI.json,Heco,Unix,HECO 2VD-VNA,Heco Unix HECO 2VD-VNA Nut Bolt and Washer bolt 12mm 40mm 100pc,Nut Bolt and Washer,fastener_type,bolt,
+FST-Y43LKHBB,/proc/catalog/Heco/FST-Y43LKHBB.json,Heco,Unix,HECO 2VD-VNA,Heco Unix HECO 2VD-VNA Nut Bolt and Washer threaded rod 8mm 20mm 100pc,Nut Bolt and Washer,fastener_type,threaded rod,
+WRK-1A7JZ7P3,/proc/catalog/Mascot/WRK-1A7JZ7P3.json,Mascot,Advanced,ACC 35W-IIS,Mascot Advanced ACC 35W-IIS Work Jacket Blue XL waterproof,Work Jacket,color_family,blue,
+WRK-3JV3G2YY,/proc/catalog/Mascot/WRK-3JV3G2YY.json,Mascot,Advanced,ACC 35W-IIS,Mascot Advanced ACC 35W-IIS Work Jacket Purple S waterproof,Work Jacket,color_family,purple,
+WRK-3QX06WWQ,/proc/catalog/Mascot/WRK-3QX06WWQ.json,Mascot,Advanced,ACC 35W-IIS,Mascot Advanced ACC 35W-IIS Work Jacket Black S waterproof,Work Jacket,color_family,black,
+CLN-15KJ3KVR,/proc/catalog/Mellerud/CLN-15KJ3KVR.json,Mellerud,Bio,MEL 233-MOB,Mellerud Bio MEL 233-MOB Cleaning Liquid floor cleaner 1000ml fresh,Cleaning Liquid,cleaner_type,floor cleaner,
+CLN-3AIT54S2,/proc/catalog/Mellerud/CLN-3AIT54S2.json,Mellerud,Bio,MEL 233-MOB,Mellerud Bio MEL 233-MOB Cleaning Liquid interior cleaner 5000ml citrus,Cleaning Liquid,cleaner_type,interior cleaner,
+CLN-3Q19VP4J,/proc/catalog/Mellerud/CLN-3Q19VP4J.json,Mellerud,Bio,MEL 233-MOB,Mellerud Bio MEL 233-MOB Cleaning Liquid degreaser 500ml citrus,Cleaning Liquid,cleaner_type,degreaser,
+CLN-G49YK0ZE,/proc/catalog/Mellerud/CLN-G49YK0ZE.json,Mellerud,Bio,MEL 233-MOB,Mellerud Bio MEL 233-MOB Cleaning Liquid multi surface cleaner 5000ml none,Cleaning Liquid,cleaner_type,multi surface cleaner,
+ELC-32HZWSG4,/proc/catalog/Philips/ELC-32HZWSG4.json,Philips,Professional,Hue 3JS-MSN,Philips Professional Hue 3JS-MSN LED Bulb E14 10W 4000K non-dimmable,LED Bulb,wattage_w,10,10
+ELC-38WOXMKV,/proc/catalog/Philips/ELC-38WOXMKV.json,Philips,Professional,Hue 3JS-MSN,Philips Professional Hue 3JS-MSN LED Bulb E14 12W 2700K dimmable,LED Bulb,wattage_w,12,12
+ELC-B54HCJ4L,/proc/catalog/Philips/ELC-B54HCJ4L.json,Philips,Professional,Hue 3JS-MSN,Philips Professional Hue 3JS-MSN LED Bulb GU10 10W 3000K non-dimmable,LED Bulb,wattage_w,10,10
+Next step_3... Fetch full property rows for the two 10W Philips candidate SKUs to identify which one has luminous flux 1521 lm. (14257 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT sku, key, value_text, value_number FROM product_properties WHERE sku IN ('ELC-32HZWSG4','ELC-B54HCJ4L') ORDER BY sku, key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT sku, key, value_text, value_number FROM product_properties WHERE sku IN ('ELC-32HZWSG4','ELC-B54HCJ4L') ORDER BY sku, key;
+SQL
+sku,key,value_text,value_number
+ELC-32HZWSG4,color_temperature_k,4000,4000
+ELC-32HZWSG4,dimmable,no,
+ELC-32HZWSG4,energy_class,E,
+ELC-32HZWSG4,fitting,E14,
+ELC-32HZWSG4,lumen,470,470
+ELC-32HZWSG4,wattage_w,10,10
+ELC-B54HCJ4L,color_temperature_k,3000,3000
+ELC-B54HCJ4L,dimmable,no,
+ELC-B54HCJ4L,energy_class,E,
+ELC-B54HCJ4L,fitting,GU10,
+ELC-B54HCJ4L,lumen,1521,1521
+ELC-B54HCJ4L,wattage_w,10,10
+Next step_4... Run one COUNT aggregation on inventory for store_brno_veveri over the six resolved SKUs with available_today < 4. (14849 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT COUNT(*) AS qty_under_4\nFROM inventory\nWHERE store_id='store_brno_veveri'\n  AND sku IN ('FST-Y43LKHBB','WRK-1A7JZ7P3','ELC-B54HCJ4L','PLB-38D7UO80','ADH-2ET6DODM','CLN-15KJ3KVR')\n  AND available_today < 4;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT COUNT(*) AS qty_under_4
+FROM inventory
+WHERE store_id='store_brno_veveri'
+  AND sku IN ('FST-Y43LKHBB','WRK-1A7JZ7P3','ELC-B54HCJ4L','PLB-38D7UO80','ADH-2ET6DODM','CLN-15KJ3KVR')
+  AND available_today < 4;
+SQL
+qty_under_4
+0
+Next step_5... Report completion with exact numeric output token. (15352 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved Brno store id/path.', 'Resolved all six requested variants to exact SKUs via properties.', 'Counted SKUs with available_today < 4 at the store.'] message='0' grounding_refs=['/proc/stores/store_brno_veveri.json', '/proc/catalog/Heco/FST-Y43LKHBB.json', '/proc/catalog/Mascot/WRK-1A7JZ7P3.json', '/proc/catalog/Philips/ELC-B54HCJ4L.json', '/proc/catalog/Geberit/PLB-38D7UO80.json', '/proc/catalog/Gorilla/ADH-2ET6DODM.json', '/proc/catalog/Mellerud/CLN-15KJ3KVR.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved Brno store id/path.
+- Resolved all six requested variants to exact SKUs via properties.
+- Counted SKUs with available_today < 4 at the store.
+
+[34mAGENT SUMMARY: 0[0m
+- [34m/proc/stores/store_brno_veveri.json[0m
+- [34m/proc/catalog/Heco/FST-Y43LKHBB.json[0m
+- [34m/proc/catalog/Mascot/WRK-1A7JZ7P3.json[0m
+- [34m/proc/catalog/Philips/ELC-B54HCJ4L.json[0m
+- [34m/proc/catalog/Geberit/PLB-38D7UO80.json[0m
+- [34m/proc/catalog/Gorilla/ADH-2ET6DODM.json[0m
+- [34m/proc/catalog/Mellerud/CLN-15KJ3KVR.json[0m

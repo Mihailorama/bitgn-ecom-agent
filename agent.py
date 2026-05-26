@@ -1795,13 +1795,55 @@ def _try_product_check(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTask
     )
 
 
+def _parse_inventory_count_request(task_text: str) -> "tuple[str, int, str, str] | None":
+    patterns = [
+        (
+            r"How many of these products have at least (\d+) items available in (.+?) today:\s*(.+?)\? Answer",
+            lambda m: ("ge", int(m.group(1)), m.group(2), m.group(3)),
+        ),
+        (
+            r"How many of these products have (?:fewer|less) than (\d+) items available in (.+?) today:\s*(.+?)\? Answer",
+            lambda m: ("lt", int(m.group(1)), m.group(2), m.group(3)),
+        ),
+        (
+            r"how many of these have (at least|less than) (\d+) (?:items )?available today at (.+?):\s*(.+?)\? Answer",
+            lambda m: ("ge" if m.group(1).lower() == "at least" else "lt", int(m.group(2)), m.group(3), m.group(4)),
+        ),
+        (
+            r"how many from this list are below (\d+) available today at (.+?):\s*(.+?)\? Answer",
+            lambda m: ("lt", int(m.group(1)), m.group(2), m.group(3)),
+        ),
+        (
+            r"(?:pls |please |hello dear, |could you please )?(?:check|look at|review)\s+(.+?),\s*how many of these have (at least|less than) (\d+) (?:items )?available today:\s*(.+?)\? Answer",
+            lambda m: ("ge" if m.group(2).lower() == "at least" else "lt", int(m.group(3)), m.group(1), m.group(4)),
+        ),
+        (
+            r"items with none available today at (.+?) from this list:\s*(.+?)\? Answer",
+            lambda m: ("lt", 1, m.group(1), m.group(2)),
+        ),
+        (
+            r"How many of these products have no same-day availability in (.+?) today:\s*(.+?)\? Answer",
+            lambda m: ("lt", 1, m.group(1), m.group(2)),
+        ),
+        (
+            r"(.+?),\s*how many of these (?:just )?are not available today:\s*(.+?)\? Answer",
+            lambda m: ("lt", 1, m.group(1), m.group(2)),
+        ),
+    ]
+    for pattern, build in patterns:
+        m = re.search(pattern, task_text, re.I | re.S)
+        if m:
+            return build(m)
+    return None
+
+
 def _try_inventory_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
-    m = re.search(r"How many of these products have at least (\d+) items available in (.+?) today:\s*(.+?)\? Answer", task_text, re.I | re.S)
-    if not m:
+    parsed = _parse_inventory_count_request(task_text)
+    if not parsed:
         return None
-    threshold = int(m.group(1))
-    store = _find_store(vm, m.group(2))
-    specs = _extract_product_specs(m.group(3))
+    op, threshold, store_phrase, list_text = parsed
+    store = _find_store(vm, store_phrase)
+    specs = _extract_product_specs(list_text)
     if not store or not specs:
         return None
     products = []
@@ -1831,9 +1873,14 @@ WHERE store_id={_sql_quote(store['id'])}
 """
     rows = _csv_dicts(_exec_sql_stdout(vm, q))
     avail_by_sku = {r.get("sku", ""): int(r.get("available_today") or 0) for r in rows}
-    available = [p for p in uniq_products if avail_by_sku.get(p["sku"], 0) >= threshold]
-    n = len(available)
-    refs = [store["path"]] + [p["path"] for p in available]
+    if op == "ge":
+        qualifying = [p for p in uniq_products if avail_by_sku.get(p["sku"], 0) >= threshold]
+        ref_products = qualifying
+    else:
+        qualifying = [p for p in uniq_products if avail_by_sku.get(p["sku"], 0) < threshold]
+        ref_products = [p for p in qualifying if avail_by_sku.get(p["sku"], 0) > 0]
+    n = len(qualifying)
+    refs = [store["path"]] + [p["path"] for p in ref_products]
     return ReportTaskCompletion(
         tool="report_completion",
         completed_steps_laconic=["deterministic store inventory count via SQL"],

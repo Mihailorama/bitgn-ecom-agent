@@ -554,6 +554,172 @@ def test_discount_desk_coverage_denial_names_required_token():
     print("ok: Graz Lend desk coverage denial names required token")
 
 
+def _inventory_solver_vm() -> FakeVM:
+    vm = FakeVM()
+    vm.sql_outputs["SELECT id,path,name,city,is_open FROM stores ORDER BY id;"] = (
+        "id,path,name,city,is_open\n"
+        "store_brno_veveri,/proc/stores/store_brno_veveri.json,PowerTool Brno Veveri,Brno,1\n"
+        "store_vienna_praterstern,/proc/stores/store_vienna_praterstern.json,PowerTool Vienna Praterstern,Vienna,1\n"
+    )
+    vm.sql_outputs["lower(p.brand) = lower('Heco')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "FST-LOW,/proc/catalog/fasteners/nut_bolt_washer/FST-LOW.json,,Heco,Unix,HECO 2VD-VNA,"
+        "Heco Unix HECO 2VD-VNA Nut Bolt and Washer threaded rod,Nut Bolt and Washer,fastener_type,threaded rod,\n"
+    )
+    vm.sql_outputs["lower(p.brand) = lower('Mascot')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "WRK-HIGH,/proc/catalog/workwear/work_jackets/WRK-HIGH.json,,Mascot,Advanced,ACC 35W-IIS,"
+        "Mascot Advanced ACC 35W-IIS Work Jacket blue,Work Jacket,color_family,Blue,\n"
+    )
+    vm.sql_outputs["lower(p.brand) = lower('Gorilla')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "ADH-STOCK,/proc/catalog/adhesives/adhesive_glue/ADH-STOCK.json,,Gorilla,Crystal,Grip 2ZQ-D83,"
+        "Gorilla Crystal Grip 2ZQ-D83 Adhesive and Glue contact adhesive,Adhesive and Glue,adhesive_type,contact adhesive,\n"
+    )
+    return vm
+
+
+def test_inventory_solver_handles_less_than_available_today_shape():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["FROM inventory"] = (
+        "sku,available_today\n"
+        "FST-LOW,2\n"
+        "WRK-HIGH,5\n"
+    )
+    task = (
+        "pls check the central Brno PowerTool branch, how many of these have less than 4 available today: "
+        "the Nut Bolt and Washer from Heco in the Heco Unix HECO 2VD-VNA Nut Bolt and Washer line that has fastener type threaded rod,"
+        "the Work Jacket from Mascot in the Mascot Advanced ACC 35W-IIS Work Jacket line that has color family Blue? "
+        'Answer in exactly format "%d" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "1"
+    assert fn.grounding_refs == [
+        "/proc/stores/store_brno_veveri.json",
+        "/proc/catalog/fasteners/nut_bolt_washer/FST-LOW.json",
+    ]
+    print("ok: inventory solver handles less-than available_today prompts")
+
+
+def test_inventory_solver_handles_fewer_than_items_available_in_shape():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["FROM inventory"] = "sku,available_today\nFST-LOW,3\n"
+    task = (
+        "How many of these products have fewer than 5 items available in the central Brno PowerTool branch today: "
+        "the Nut Bolt and Washer from Heco in the Heco Unix HECO 2VD-VNA Nut Bolt and Washer line "
+        'that has fastener type threaded rod? Answer in exactly format "count : %d" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "count : 1"
+    assert fn.grounding_refs == [
+        "/proc/stores/store_brno_veveri.json",
+        "/proc/catalog/fasteners/nut_bolt_washer/FST-LOW.json",
+    ]
+    print("ok: inventory solver handles fewer-than items-available-in prompts")
+
+
+def test_inventory_solver_does_not_cite_zero_stock_products_for_below_threshold():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["FROM inventory"] = (
+        "sku,available_today\n"
+        "FST-LOW,0\n"
+        "WRK-HIGH,2\n"
+    )
+    task = (
+        "How many of these products have fewer than 5 items available in the central Brno PowerTool branch today: "
+        "the Nut Bolt and Washer from Heco in the Heco Unix HECO 2VD-VNA Nut Bolt and Washer line that has fastener type threaded rod,"
+        "the Work Jacket from Mascot in the Mascot Advanced ACC 35W-IIS Work Jacket line that has color family Blue? "
+        'Answer in exactly format "%d" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "2"
+    assert fn.grounding_refs == [
+        "/proc/stores/store_brno_veveri.json",
+        "/proc/catalog/workwear/work_jackets/WRK-HIGH.json",
+    ]
+    print("ok: below-threshold solver does not cite zero-stock products")
+
+
+def test_inventory_solver_handles_below_available_today_shape():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["FROM inventory"] = "sku,available_today\nADH-STOCK,4\n"
+    task = (
+        "Could you please tell me how many from this list are below 5 available today at the PowerTool shop by Praterstern in Vienna: "
+        "the Adhesive and Glue from Gorilla in the Gorilla Crystal Grip 2ZQ-D83 Adhesive and Glue line "
+        'that has adhesive type contact adhesive? Answer in exactly format "[QTY:%d]" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "[QTY:1]"
+    assert fn.grounding_refs == [
+        "/proc/stores/store_vienna_praterstern.json",
+        "/proc/catalog/adhesives/adhesive_glue/ADH-STOCK.json",
+    ]
+    print("ok: inventory solver handles below-N available_today prompts")
+
+
+def test_inventory_solver_handles_none_available_today_shape():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["FROM inventory"] = "sku,available_today\nADH-STOCK,3\n"
+    task = (
+        "Could you please count the items with none available today at the PowerTool shop by Praterstern in Vienna "
+        "from this list: the Adhesive and Glue from Gorilla in the Gorilla Crystal Grip 2ZQ-D83 Adhesive and Glue line "
+        'that has adhesive type contact adhesive? Answer in exactly format "<COUNT:%d>" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "<COUNT:0>"
+    assert fn.grounding_refs == ["/proc/stores/store_vienna_praterstern.json"]
+    print("ok: inventory solver handles none-available prompts without product refs at zero")
+
+
+def test_inventory_solver_handles_no_same_day_availability_shape():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["FROM inventory"] = "sku,available_today\nFST-LOW,0\n"
+    task = (
+        "How many of these products have no same-day availability in the central Brno PowerTool branch today: "
+        "the Nut Bolt and Washer from Heco in the Heco Unix HECO 2VD-VNA Nut Bolt and Washer line "
+        'that has fastener type threaded rod? Answer in exactly format "%d" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "1"
+    assert fn.grounding_refs == ["/proc/stores/store_brno_veveri.json"]
+    print("ok: inventory solver handles no same-day availability prompts")
+
+
+def test_inventory_solver_handles_just_not_available_today_shape():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["FROM inventory"] = "sku,available_today\nWRK-HIGH,0\n"
+    task = (
+        "at the central Brno PowerTool branch, how many of these just are not available today: "
+        "the Work Jacket from Mascot in the Mascot Advanced ACC 35W-IIS Work Jacket line "
+        'that has color family Blue? Answer in exactly format "<COUNT:%d>" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "<COUNT:1>"
+    assert fn.grounding_refs == ["/proc/stores/store_brno_veveri.json"]
+    print("ok: inventory solver handles just-not-available prompts")
+
+
 def main():
     test_normal_completion()
     test_security_denial()
@@ -570,6 +736,13 @@ def main():
     test_discount_denial_requires_subject_and_update_doc()
     test_discount_explicit_over_policy_percent_is_unsupported()
     test_discount_desk_coverage_denial_names_required_token()
+    test_inventory_solver_handles_less_than_available_today_shape()
+    test_inventory_solver_handles_fewer_than_items_available_in_shape()
+    test_inventory_solver_does_not_cite_zero_stock_products_for_below_threshold()
+    test_inventory_solver_handles_below_available_today_shape()
+    test_inventory_solver_handles_none_available_today_shape()
+    test_inventory_solver_handles_no_same_day_availability_shape()
+    test_inventory_solver_handles_just_not_available_today_shape()
     print("\nALL SMOKE TESTS PASSED")
 
 
