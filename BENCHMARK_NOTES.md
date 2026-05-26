@@ -390,6 +390,34 @@ Current state in `agent.py` includes:
     invalid catalogue path (`/proc/catalog/Raaco/STO-1IL9J3GJ.json`). This means
     the prior t45 branch is targeted-positive but not full-sweep stable yet.
 
+**2026-05-26 t45 count-products parser gap.**
+- Root cause from
+  `artifacts/sweeps/2026-05-26-discount-percent-sign-full-codex53/t45.log`:
+  the instruction used `Count the products with fewer than N units available
+  today at ... from this list`, which `_parse_inventory_count_request()` did not
+  recognize. That sent `t45` to the slow LLM path, where the answer cited an
+  invalid shallow catalogue path.
+- TDD: added a RED smoke regression for this exact wording shape. Before the
+  parser change, `_try_inventory_count()` returned `None`; after the change it
+  stays on the deterministic inventory path and returns `count : 1` with only
+  the store plus qualifying positive-stock product ref.
+- Targeted validation:
+  - `artifacts/sweeps/2026-05-26-t45-count-products-parser-targeted-r1/`
+    passed `t45` as `1/1`, security clean.
+  - `artifacts/sweeps/2026-05-26-t45-count-products-parser-inventory-regression-r1/`
+    passed `t13/t14/t15/t16` as `4/4`, security clean.
+- Full validation:
+  `artifacts/sweeps/2026-05-26-t45-count-products-parser-full-codex53/` scored
+  `95.7%` (`44/46`) at `304s`, security clean. `t45` passed in `3s`, confirming
+  it stayed deterministic on the live full sweep. Remaining misses were:
+  - `t15`: deterministic inventory answered `count : 2`, grader expected
+    `count : 1`; this is the existing exact-variant/count resolver issue.
+  - `t41`: 3DS recovery succeeded but missed required reference
+    `/docs/current-updates/2024-07-17-payment-verification.md`.
+  The live targeted/full `t45` seeds did not repeat the exact saved
+  `Count the products ... from this list` wording, so the direct proof for that
+  phrase is the RED/GREEN smoke regression.
+
 **Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
 `claude:sonnet` as the cheap regression canary. 10-minute platform-time target
 is still unmet at 100% quality.
@@ -403,24 +431,30 @@ is still unmet at 100% quality.
   cheap stress/smoke runs.
 
 **TODO (in priority order):**
-1. Inventory/catalogue ref stability remains open for v46 `t16` and `t45`.
-   `t45` low/unavailable wording is now routed through deterministic inventory,
-   but the latest full sweep shows its catalogue ref path can still be invalid.
-   The next single fix should target the shared typed product-variant resolver
-   and path canonicalization/ref policy, with RED tests built from the saved
-   `t16` and `t45` logs before any production change.
-2. Product-check checked-SKU stability remains open for `t05`/catalogue
+1. Inventory exact-variant/count stability remains open for v46 `t15`/`t16`.
+   The next single fix should target the typed product-variant resolver and
+   inventory count policy, with RED tests built from saved `t15`/`t16` logs
+   before any production change. Do not bundle this with `t41` or product-check
+   work.
+2. 3DS recovery completeness remains open for `t41`: successful recovery must
+   cite `/docs/current-updates/2024-07-17-payment-verification.md` when the
+   grader requires that current update doc. Treat this as a separate single-fix
+   cycle from inventory.
+3. Product-check checked-SKU stability remains open for `t05`/catalogue
    impossible-claim tasks: when multiple sibling SKUs share the base product,
    the answer must name the SKU whose actual property conflicts with the
    requested extra claim, not a sibling that merely satisfies one requested
    property. Treat this as a separate cycle from inventory refs.
-3. Discount-policy percent parsing is closed for `t26`: keep the `%` and
+4. `t45` parser coverage is closed for the saved `Count the products with fewer
+   than N units ... from this list` wording: keep the RED/GREEN smoke test and
+   do not add more t45 parser patterns unless a new wording falls back to LLM.
+5. Discount-policy percent parsing is closed for `t26`: keep the `%` and
    `percent` smoke tests, and do not bundle further discount edits unless a new
    full-sweep failure appears.
-4. Do not continue broad class-split refactors from `167c1f3` directly. They
+6. Do not continue broad class-split refactors from `167c1f3` directly. They
    captured useful evidence but reduced the headline score. Start from restored
    `ae75479` tagged 44/44 baseline, with later diagnostics preserved as evidence.
-5. Close the restored-baseline `t16` inventory grounding miss with a narrow
+7. Close the restored-baseline `t16` inventory grounding miss with a narrow
    resolver, but do not revive either rejected branch verbatim:
    `2026-05-25-t16-exact-variant-rejected` or
    `2026-05-26-rejected-strict-only-41of44`, and do not rely on the
@@ -430,21 +464,21 @@ is still unmet at 100% quality.
    a separate `build_inventory_refs()` policy that can be unit-tested against
    saved `t16` logs. It must merge SQL rows with catalog JSON siblings from
    candidate `family_id` directories before using any relaxed fallback.
-6. Refactor step 1 (no behavior expansion): isolate helper layer for
+8. Refactor step 1 (no behavior expansion): isolate helper layer for
    `resolve_product_variant()` and `build_grounding_refs()` so variant logic and
    refs logic are testable independently.
    Include a diagnostic record per requested product: parsed props, exact
    candidate SKUs, inventory rows, selected ref, and reason code.
-7. Add focused regression tests for `t13-t16` deterministic inventory grounding:
+9. Add focused regression tests for `t13-t16` deterministic inventory grounding:
    - required product ref present even when answer is numeric
    - no invalid refs survive `_verify_refs`.
-8. Re-run two full sweeps on submission profile after every inventory resolver
+10. Re-run two full sweeps on submission profile after every inventory resolver
    change: `PARALLEL=6 MODEL_ID=codex:gpt-5.3-codex make sweep` x2.
-9. Continue mandatory security check:
+11. Continue mandatory security check:
    `rg "expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK" /tmp/sweep_logs/*.log`.
-10. Evaluate alternative backend only after v46 quality is restored on
+12. Evaluate alternative backend only after v46 quality is restored on
    codex baseline (then compare `avg/task` and implied platform `TIME`).
-11. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
+13. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
    during aggressive parallel probes (`PARALLEL>=7`, and occasionally startup bursts).
    Treat `PARALLEL=6` as the practical stability cap for leaderboard attempts.
 
