@@ -1613,50 +1613,6 @@ def _strict_product_matches(vm: EcomRuntimeClientSync, spec: dict) -> "list[dict
     ]
 
 
-def _inventory_diag(record: dict) -> None:
-    if os.getenv("INVENTORY_DIAG") not in {"1", "true", "yes"}:
-        return
-    try:
-        print("INVENTORY_DIAG " + json.dumps(record, sort_keys=True))
-    except Exception:
-        print(f"INVENTORY_DIAG {record!r}")
-
-
-def _inventory_candidate_diag(vm: EcomRuntimeClientSync, spec: dict) -> "list[dict]":
-    if os.getenv("INVENTORY_DIAG") not in {"1", "true", "yes"}:
-        return []
-    try:
-        candidates = _load_product_candidates(vm, spec)
-    except Exception:
-        return []
-    hints = _line_model_hints(spec)
-    if hints:
-        hinted = []
-        for p in candidates:
-            hay = " ".join([p.get("series", ""), p.get("model", ""), p.get("name", "")]).lower()
-            if all(h in hay for h in hints):
-                hinted.append(p)
-        if hinted:
-            candidates = hinted
-    props = spec.get("props", [])
-    rows = []
-    for p in candidates:
-        matched = [
-            {"keys": keys, "value": value, "matched": _prop_matches(p, keys, value)}
-            for keys, value in props
-        ]
-        rows.append({
-            "sku": p.get("sku", ""),
-            "path": p.get("path", ""),
-            "name": p.get("name", ""),
-            "line_score": _line_score(p, spec),
-            "prop_matches": sum(1 for m in matched if m["matched"]),
-            "matched": matched,
-            "props": p.get("props", {}),
-        })
-    return sorted(rows, key=lambda r: (-r["prop_matches"], -r["line_score"], r["sku"]))[:8]
-
-
 def _all_stores(vm: EcomRuntimeClientSync) -> "list[dict[str, str]]":
     return _csv_dicts(_exec_sql_stdout(vm, "SELECT id,path,name,city,is_open FROM stores ORDER BY id;"))
 
@@ -1806,10 +1762,6 @@ def _try_catalog_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTask
             refs.append(path)
             break
     if addendum:
-        excluded_family = ""
-        family_m = re.search(r"fam[-_]([a-z0-9-]+)", addendum[0], re.I)
-        if family_m:
-            excluded_family = "fam_" + family_m.group(1).replace("-", "_")
         body = addendum[1]
         city_m = re.search(
             r"open PowerTool store in\s+([A-Za-z -]+?)\s+with available_today greater than 0",
@@ -1826,7 +1778,6 @@ JOIN stores s ON s.id=i.store_id
 WHERE pk.name={_sql_quote(kind)}
   AND i.available_today > 0
   AND s.is_open=1
-  {("AND p.family_id <> " + _sql_quote(excluded_family)) if excluded_family else ""}
   {("AND lower(s.city)=lower(" + _sql_quote(city) + ")") if city else ""};
 """
     else:
@@ -1877,17 +1828,6 @@ def _try_inventory_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTa
     available = []
     products = []
     for spec in specs:
-        diag = {
-            "line": spec.get("line", ""),
-            "kind": spec.get("kind", ""),
-            "brand": spec.get("brand", ""),
-            "props": [
-                {"keys": keys, "value": value}
-                for keys, value in spec.get("props", [])
-            ],
-            "threshold": threshold,
-            "store_id": store.get("id", ""),
-        }
         exact_matches = _strict_product_matches(vm, spec)
         if exact_matches:
             skus = ",".join(_sql_quote(p["sku"]) for p in exact_matches)
@@ -1903,35 +1843,16 @@ WHERE store_id={_sql_quote(store['id'])}
                 p for p in exact_matches
                 if avail_by_sku.get(p["sku"], 0) >= threshold
             ]
-            chosen = None
             if exact_available:
-                chosen = sorted(exact_available, key=lambda p: (-avail_by_sku.get(p["sku"], 0), p["sku"]))[0]
-                available.append(chosen)
-            diag.update({
-                "reason": "exact_group",
-                "exact_candidates": [
-                    {"sku": p.get("sku", ""), "path": p.get("path", "")}
-                    for p in exact_matches
-                ],
-                "inventory": rows,
-                "selected": {"sku": chosen.get("sku", ""), "path": chosen.get("path", "")} if chosen else None,
-            })
-            _inventory_diag(diag)
+                available.append(
+                    sorted(exact_available, key=lambda p: (-avail_by_sku.get(p["sku"], 0), p["sku"]))[0]
+                )
             continue
         product = _select_product(vm, spec, strict_props=True)
         if product is None:
             product = _select_product(vm, spec, strict_props=False)
         if product is None:
-            diag["reason"] = "unresolved"
-            diag["candidates"] = _inventory_candidate_diag(vm, spec)
-            _inventory_diag(diag)
             return None
-        diag.update({
-            "reason": "fallback_single",
-            "selected": {"sku": product.get("sku", ""), "path": product.get("path", "")},
-            "candidates": _inventory_candidate_diag(vm, spec),
-        })
-        _inventory_diag(diag)
         products.append(product)
     uniq_products = []
     seen_skus = set()
@@ -2466,19 +2387,14 @@ GROUP BY b.id,b.path,b.store_id,b.status,b.discount_percent,s.path;
 
 
 def _try_deterministic_completion(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
-    solvers = [
+    for solver in (
         _try_catalog_count,
+        _try_inventory_count,
         _try_3ds,
         _try_refund,
         _try_discount,
         _try_fraud,
-    ]
-    # The inventory resolver is fast but not yet fully stable on randomized t16
-    # variants. Keep it on for submission speed; allow explicit opt-out when
-    # comparing against the slower LLM-only workflow.
-    if os.getenv("DETERMINISTIC_INVENTORY", "1").lower() not in {"0", "false", "no"}:
-        solvers.insert(1, _try_inventory_count)
-    for solver in solvers:
+    ):
         try:
             fn = solver(vm, task_text)
             if fn is not None:

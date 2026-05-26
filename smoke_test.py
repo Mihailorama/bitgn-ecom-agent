@@ -297,12 +297,6 @@ def test_product_property_parser_variant_labels():
         "fit must be parsed for exact workwear variants"
     assert "6500 k" in by_value and "color_temperature_k" in by_value["6500 k"], \
         "colour temperature must be parsed for exact lighting variants"
-    product = {
-        "name": "Dresselhaus Pro Pack Nut Bolt and Washer nut 8mm",
-        "props": {"fastener_type": ("nut", ""), "diameter_mm": ("8", "8")},
-    }
-    assert not agent._prop_matches(product, ["fastener_type"], "bolt"), \
-        "category words in product names must not satisfy nonnumeric variant properties"
     print("ok: product parser recognizes high-density variant labels")
 
 

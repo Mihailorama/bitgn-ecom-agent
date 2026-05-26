@@ -1,0 +1,255 @@
+# BitGN ECOM Agent Architecture
+
+This document captures the current submission architecture, the observed
+degradation pattern, and the risk points to use before the next round of tuning.
+It is intentionally operational: every proposed change should map to one box in
+these diagrams and one validation gate in the risk table.
+
+## Current Rollback Point
+
+As of 2026-05-26, code is rolled back to the last code point with a recorded
+44/44 run in `RESULTS.md`:
+
+- Code source for `agent.py` and `smoke_test.py`: `10c2e71` (`Add exact inventory
+  candidate grouping`).
+- Best recorded run after that code point: `2026-05-25 21:49`,
+  `codex:gpt-5.3-codex`, `100.0%`, `44/44`, `226s`, `PARALLEL=6`.
+- Newer diagnostic rows and sweep logs are preserved so rejected experiments can
+  still inform the next design.
+
+The later experimental family JSON augmentation and conflict-product solver were
+not promoted. Their logs are useful evidence, but the behavior was not globally
+stable.
+
+## Control Plane
+
+```mermaid
+flowchart TD
+    Make[make sweep / run_parallel.py] --> Status[BitGN status + get_benchmark]
+    Status --> StartRun[StartRun name @ai_nuts_and_bolts]
+    StartRun --> Pool[ProcessPoolExecutor spawn]
+    Pool --> StartTrial[StartTrial per trial_id]
+    StartTrial --> Agent[run_agent model + harness_url + instruction]
+    Agent --> EndTrial[EndTrial score + details]
+    EndTrial --> Summary[Console summary + per-task log]
+    Summary --> Results{Full sweep?}
+    Results -->|yes| Append[Append RESULTS.md row]
+    Results -->|no| NoAppend[No RESULTS.md row]
+    Pool --> Submit[SubmitRun force=true]
+```
+
+Key properties:
+
+- Trials are independent; `PARALLEL=6` is the current quality envelope.
+- Worker crashes become score rows instead of killing the whole sweep.
+- Full sweeps append to `RESULTS.md`; partial sweeps only write logs.
+- Platform-reported time is not the same as local wall time. Use local wall time
+  for iteration speed, but trust BitGN platform time for leaderboard speed.
+
+## Agent Loop
+
+```mermaid
+flowchart TD
+    Prompt[System prompt + task + runtime preamble] --> Step[LLM NextStep]
+    Step --> Schema[Structured schema validation]
+    Schema --> Dispatch[Tool dispatch]
+    Dispatch --> Harvest[EvidenceLedger harvests paths and SQL]
+    Harvest --> Done{report_completion?}
+    Done -->|no| Step
+    Done -->|yes| Gates[Completion gates]
+    Gates --> Correction{Needs correction?}
+    Correction -->|yes, budget left| Step
+    Correction -->|no| Submit[_submit_completion]
+```
+
+The loop is schema-guided, but the schema is not enough. The model can still
+miscount, cite unobserved paths, or make a yes/no polarity error. Code gates are
+the protection layer.
+
+## Completion Gates
+
+```mermaid
+flowchart LR
+    Completion[ReportTaskCompletion] --> Normalize[_normalize_refs]
+    Normalize --> Verify[_verify_refs]
+    Verify --> Grounding[_grounding_correction]
+    Grounding --> Claim[_claim_check_correction]
+    Claim --> Format[_required_format / _enforce_format_inplace]
+    Format --> Subject[_subject_paths]
+    Subject --> Submit[_submit_completion]
+```
+
+Gate responsibilities:
+
+- `EvidenceLedger` records confirmed `/proc` refs from SQL `path` columns and
+  file-system tools.
+- `_grounding_correction` rejects OK completions with unobserved `/proc` refs.
+- `_claim_check_correction` re-runs numeric aggregation queries before submit.
+- `_required_format` enforces exact answer formats without inventing polarity.
+- `_subject_paths` makes named baskets/payments/returns explicit when already
+  observed.
+- `_submit_completion` performs final normalization and auto-cites required
+  policy docs for known workflows.
+
+Risk boundary: correction budget is shared. A new correction gate can starve a
+later, more important gate if it fires too broadly.
+
+## Task Family Routing
+
+```mermaid
+flowchart TD
+    Task[Task instruction] --> Classifier[Prompt-level task-family behavior]
+    Task --> Deterministic{Deterministic solver matches?}
+    Deterministic -->|catalog count| Cat[_try_catalog_count]
+    Deterministic -->|inventory count| Inv[_try_inventory_count]
+    Deterministic -->|3DS| ThreeDS[_try_3ds]
+    Deterministic -->|refund| Refund[_try_refund]
+    Deterministic -->|discount| Discount[_try_discount]
+    Deterministic -->|fraud| Fraud[_try_fraud]
+    Deterministic -->|no match| SGR[General SGR loop]
+    Cat --> Completion
+    Inv --> Completion
+    ThreeDS --> Completion
+    Refund --> Completion
+    Discount --> Completion
+    Fraud --> Completion
+    SGR --> Completion
+```
+
+Current lesson: broad deterministic branches are high-risk. The rejected
+conflicting-product solver fixed one `t05` seed but regressed `t08` by treating a
+valid multi-valued product requirement as impossible. New solvers should be
+task-family gated and shadow-tested before they are allowed to submit answers.
+
+## Data Plane
+
+```mermaid
+flowchart LR
+    Runtime[BitGN VM runtime] --> FS[/proc and /docs files]
+    Runtime --> SQL[/bin/sql projection]
+    Runtime --> Tools[/bin checkout, discount, payments, id, date]
+    FS --> Ledger[EvidenceLedger]
+    SQL --> Ledger
+    Tools --> Ledger
+    Ledger --> Gates[Completion gates]
+```
+
+Important mismatch:
+
+- SQL is fast and complete for many tasks, especially counts and inventory.
+- Product JSON siblings can contain candidate paths not surfaced by the current
+  SQL candidate query shape.
+- Docs can encode policy exceptions that raw SQL counts do not capture.
+
+This mismatch is the core source of recent instability: single-source fixes
+improve targeted tasks and then fail on another family that needs a different
+source of truth.
+
+## Inventory Resolver
+
+```mermaid
+flowchart TD
+    Text[Inventory/count task text] --> Parse[Extract store, threshold, product specs]
+    Parse --> Store[Resolve exact store]
+    Parse --> Candidates[SQL product candidates]
+    Candidates --> Exact[Filter exact property matches]
+    Exact --> Group{Any exact candidates?}
+    Group -->|yes| InvSQL[Query inventory for exact candidate set]
+    InvSQL --> Pick[Pick available SKU and cite product + store]
+    Group -->|no| Fallback[Relaxed single-product fallback]
+    Fallback --> Pick
+    Pick --> Answer[COUNT/QTY with refs]
+```
+
+Rejected experiment:
+
+```mermaid
+flowchart TD
+    SQLCandidates[SQL candidate family] --> ListFamily[List family directory]
+    ListFamily --> ReadJSON[Read JSON siblings]
+    ReadJSON --> Augment[Augment candidate pool]
+    Augment --> ExactProps[Exact props again]
+    ExactProps --> Result{Targeted result}
+    Result -->|t16 improved| Positive[4/4 targeted t16 passed]
+    Result -->|full sweep| Negative[Full sweep still 43/44 then 42/44]
+```
+
+The family JSON idea is promising, but it must be isolated behind a typed
+resolver contract. Adding it directly to all resolver paths made it harder to
+reason about cross-task drift and increased runtime.
+
+## Degradation Analysis
+
+Recent full sweeps after the last recorded 44/44:
+
+- `2026-05-26 07:59`: `41/44`
+- `2026-05-26 08:09`: `41/44`
+- `2026-05-26 08:22`: `42/44`
+- `2026-05-26 08:32`: `43/44`
+- `2026-05-26 09:01`: `42/44`
+- `2026-05-26 09:26`: `41/44`
+- `2026-05-26 09:46`: `43/44`
+- `2026-05-26 09:52`: `42/44`
+
+No local `RESULTS.md` row in the last two hours of the 2026-05-26 11:54 CEST
+audit was 44/44. The last recorded 44/44 row remains `2026-05-25 21:49`.
+
+Observed causes:
+
+1. Targeted fixes were promoted before they had enough full-sweep evidence.
+2. Deterministic product-check logic confused "one item has two incompatible
+   values" with "a valid item has multiple required values".
+3. Catalogue count logic oscillated between raw SQL truth and policy-note truth.
+4. Inventory resolution uses mixed evidence sources without a typed confidence
+   model.
+5. More prompt/gate complexity increases runtime and consumes correction budget.
+6. Higher parallelism improves local wall time only until quality drops; beyond
+   `PARALLEL=6`, it is mostly stress testing.
+
+## Risk Register
+
+| Area | Failure mode | Evidence | Guardrail |
+|---|---|---|---|
+| Product checks | False `<NO>` for valid multi-property SKU | `t08` failed in `2026-05-26-family-json-conflict-solver-full-codex53` | Keep product-check on SGR path until a typed resolver exists |
+| Catalogue counts | Raw SQL count ignores policy addendum | `t12` failed with `[QTY:264]`, expected `[QTY:252]` | Treat docs as first-class inputs; claim-check must replay the same adjusted query |
+| Inventory | SQL candidates miss JSON siblings | `t16` diagnostics show required sibling refs outside exposed candidate set | Build shadow-mode `resolve_product_variant()` before behavior change |
+| Grounding refs | Correct answer with missing required citation | Historical `t15/t16/t36` misses | Continue ledger-backed grounding gate; do not fabricate refs |
+| Security | OK answer on security-denial task | No current miss in latest sweeps | Security grep is a hard reject gate |
+| Speed | Local wall time underestimates platform time | Platform showed ~18-23 min for local ~226-236s runs | Optimize platform-visible task duration, not only local wall |
+| Parallelism | Rate/quality collapse above 6 | `PARALLEL=7/10/12` rows degraded | Use `PARALLEL=6` for scoring, higher only for diagnostics |
+| Prompt bloat | Slower steps and correction starvation | Runtime grew with extra rules | Prefer typed code gates over broad prose when invariant is precise |
+
+## Growth Points
+
+Recommended order:
+
+1. Build a typed `resolve_product_variant(task_spec)` helper in shadow mode.
+   It should return candidates, evidence source, confidence, and rejected
+   alternatives without changing submitted answers.
+2. Create per-task diagnostic JSON directories beside logs: prompt snapshot,
+   tool trace summary, final answer, score detail, and gate decisions.
+3. Split deterministic solvers into narrow task-family contracts. A solver must
+   declare which format, family, refs, and policy docs it owns.
+4. Make catalogue-count claim-check replay the exact adjusted query used for the
+   answer, including policy-note exclusions.
+5. Add a stability gate before promotion: at least two full `codex:gpt-5.3-codex`
+   sweeps or one full 44/44 plus targeted repeats for every task family touched.
+6. Only after quality is stable, optimize platform time: task ordering,
+   cheaper deterministic preflight, and fewer full LLM turns on known policy
+   families.
+
+## Promotion Contract
+
+A change can be promoted only if all are true:
+
+- Smoke gate passes:
+  `uv run python -m py_compile agent.py llm.py && uv run python smoke_test.py`.
+- Target tasks pass with saved logs.
+- Full sweep is security-clean:
+  `rg "expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK" <logs>`.
+- The full-sweep result improves or preserves the stable target without moving
+  failures into a more serious family.
+- `RESULTS.md` and `BENCHMARK_NOTES.md` explain what changed and why.
+
+If a change improves targeted tasks but regresses a different family in a full
+sweep, keep the logs, document the signal, and revert the behavior.

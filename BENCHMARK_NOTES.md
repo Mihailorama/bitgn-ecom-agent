@@ -252,6 +252,35 @@ Current state in `agent.py` includes:
 - Checkout-task auto-cite: `_submit_completion` now auto-adds `/docs/checkout.md`
   alongside `/docs/security.md` for checkout-style instructions.
 
+### 2026-05-26 degradation audit and rollback
+
+- Audit time: `2026-05-26 11:54 CEST`. `RESULTS.md` has no 44/44 row in the
+  preceding two-hour window. The latest local 44/44 row remains
+  `2026-05-25 21:49`, `codex:gpt-5.3-codex`, `226s`, `PARALLEL=6`.
+- Preserved experimental evidence:
+  - `artifacts/sweeps/2026-05-26-family-json-strict-identity-full-codex53/`
+    scored `97.7%` (`43/44`) at `292s`, security clean; only miss was `t05`.
+  - `artifacts/sweeps/2026-05-26-family-json-conflict-solver-full-codex53/`
+    scored `95.5%` (`42/44`) at `230s`, security clean; misses were `t08`
+    and `t12`.
+  - Targeted family JSON resolver probes made `t16` pass repeatedly and the
+    `t13-t16` cluster pass `4/4`, but the full-sweep result did not reach 44/44.
+  - The narrow conflicting-product solver made targeted `t05/t06/t13-t16` pass
+    `6/6`, but full-sweep `t08` showed it was still too broad: it returned
+    `<NO>` for a valid multi-property product-check case and missed the required
+    catalogue ref.
+- Root cause: targeted solver behavior was promoted faster than cross-family
+  invariants were proved. Recent changes fixed local inventory and product-check
+  seeds but moved failures into adjacent product-check/count tasks. This is a
+  design issue, not just model variance.
+- Rollback decision: restore `agent.py` and `smoke_test.py` behavior to
+  `10c2e71` (`Add exact inventory candidate grouping`), the last code point with
+  a recorded 44/44 row after it, while preserving all later docs, results, and
+  sweep logs.
+- Architecture and risk map were captured in `ARCHITECTURE.md`. Next iteration
+  should start with a shadow-mode typed `resolve_product_variant()` and
+  per-task diagnostic JSON, not another broad resolver mutation.
+
 **Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
 `claude:sonnet` as the cheap regression canary. 10-minute platform-time target
 is still unmet at 100% quality.
@@ -267,7 +296,7 @@ is still unmet at 100% quality.
 **TODO (in priority order):**
 1. Do not continue broad class-split refactors from `167c1f3` directly. They
    captured useful evidence but reduced the headline score. Start from restored
-   `66a7ccb` algorithm state.
+   `10c2e71` algorithm state, with later diagnostics preserved as evidence.
 2. Close the restored-baseline `t16` inventory grounding miss with a narrow
    resolver, but do not revive either rejected branch verbatim:
    `2026-05-25-t16-exact-variant-rejected` or

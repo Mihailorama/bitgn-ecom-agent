@@ -1,0 +1,410 @@
+TASK t04 (model codex:gpt-5.3-codex)
+INSTRUCTION: Do you have the Anchor and Wall Plug from Heco in the Heco Unix HECO NP7-DBM Anchor and Wall Plug line that has anchor type wall plug, diameter 5 mm, length 40 mm, and pack count 25 pcs in catalogue?
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query SQL for candidate Heco Unix HECO NP7-DBM products and join product_properties to verify anchor_type, diameter_mm, length_mm, and pack_count. (18601 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind,\n       pp1.value_text AS anchor_type,\n       pp2.value_number AS diameter_mm,\n       pp3.value_number AS length_mm,\n       pp4.value_number AS pack_count\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp1 ON pp1.sku = p.sku AND pp1.key = 'anchor_type'\nLEFT JOIN product_properties pp2 ON pp2.sku = p.sku AND pp2.key = 'diameter_mm'\nLEFT JOIN product_properties pp3 ON pp3.sku = p.sku AND pp3.key = 'length_mm'\nLEFT JOIN product_properties pp4 ON pp4.sku = p.sku AND pp4.key = 'pack_count'\nWHERE p.brand = 'Heco'\n  AND p.series = 'Heco Unix'\n  AND p.model = 'HECO NP7-DBM'\n  AND pk.name = 'Anchor and Wall Plug';"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind,
+       pp1.value_text AS anchor_type,
+       pp2.value_number AS diameter_mm,
+       pp3.value_number AS length_mm,
+       pp4.value_number AS pack_count
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp1 ON pp1.sku = p.sku AND pp1.key = 'anchor_type'
+LEFT JOIN product_properties pp2 ON pp2.sku = p.sku AND pp2.key = 'diameter_mm'
+LEFT JOIN product_properties pp3 ON pp3.sku = p.sku AND pp3.key = 'length_mm'
+LEFT JOIN product_properties pp4 ON pp4.sku = p.sku AND pp4.key = 'pack_count'
+WHERE p.brand = 'Heco'
+  AND p.series = 'Heco Unix'
+  AND p.model = 'HECO NP7-DBM'
+  AND pk.name = 'Anchor and Wall Plug';
+SQL
+sku,path,brand,series,model,name,kind,anchor_type,diameter_mm,length_mm,pack_count
+Next step_2... Run a broader SQL query to list Heco-like products and their kind names. (20618 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nWHERE lower(p.brand) LIKE '%heco%'\n   OR lower(p.series) LIKE '%heco%'\n   OR lower(p.model) LIKE '%np7%'\n   OR lower(p.name) LIKE '%anchor%'\nORDER BY p.brand, p.series, p.model, p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+WHERE lower(p.brand) LIKE '%heco%'
+   OR lower(p.series) LIKE '%heco%'
+   OR lower(p.model) LIKE '%np7%'
+   OR lower(p.name) LIKE '%anchor%'
+ORDER BY p.brand, p.series, p.model, p.sku;
+SQL
+sku,path,brand,series,model,name,kind
+FST-196PW7DZ,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-196PW7DZ.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug frame fixing 8mm 120mm 200pc,Anchor and Wall Plug
+FST-1PMJ2Z2K,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-1PMJ2Z2K.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug concrete anchor 5mm 30mm 200pc,Anchor and Wall Plug
+FST-1R54J4A7,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-1R54J4A7.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug wall plug 6mm 80mm 50pc,Anchor and Wall Plug
+FST-1SEJO29O,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-1SEJO29O.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug frame fixing 10mm 40mm 25pc,Anchor and Wall Plug
+FST-1TTOH473,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-1TTOH473.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug concrete anchor 6mm 50mm 25pc,Anchor and Wall Plug
+FST-1U7K8DHQ,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-1U7K8DHQ.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug cavity fixing 5mm 100mm 200pc,Anchor and Wall Plug
+FST-1XACPMWT,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-1XACPMWT.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug concrete anchor 10mm 80mm 100pc,Anchor and Wall Plug
+FST-1YOIS9XA,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-1YOIS9XA.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug wall plug 6mm 40mm 25pc,Anchor and Wall Plug
+FST-20XYEX5W,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-20XYEX5W.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug frame fixing 5mm 80mm 10pc,Anchor and Wall Plug
+FST-238Q5HYH,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-238Q5HYH.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug cavity fixing 5mm 40mm 25pc,Anchor and Wall Plug
+FST-2GALT1GU,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-2GALT1GU.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug cavity fixing 8mm 120mm 50pc,Anchor and Wall Plug
+FST-3F4KUUHK,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-3F4KUUHK.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug wall plug 6mm 80mm 10pc,Anchor and Wall Plug
+FST-3JIPXBMO,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-3JIPXBMO.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug frame fixing 6mm 30mm 50pc,Anchor and Wall Plug
+FST-3KL4IYSJ,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-3KL4IYSJ.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug frame fixing 8mm 40mm 100pc,Anchor and Wall Plug
+FST-3OA0D1V3,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-3OA0D1V3.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug wall plug 12mm 120mm 25pc,Anchor and Wall Plug
+FST-3OFTV45N,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-3OFTV45N.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug frame fixing 5mm 100mm 25pc,Anchor and Wall Plug
+FST-3P6ORM1E,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-3P6ORM1E.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug cavity fixing 8mm 40mm 100pc,Anchor and Wall Plug
+FST-3VN3CZUL,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-3VN3CZUL.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug wall plug 6mm 50mm 100pc,Anchor and Wall Plug
+FST-4MHX31J5,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-4MHX31J5.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug frame fixing 12mm 30mm 10pc,Anchor and Wall Plug
+FST-88FID617,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-88FID617.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug concrete anchor 6mm 30mm 10pc,Anchor and Wall Plug
+FST-O5046DC9,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-O5046DC9.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug frame fixing 12mm 30mm 50pc,Anchor and Wall Plug
+FST-TM33WAXK,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-TM33WAXK.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug wall plug 5mm 60mm 50pc,Anchor and Wall Plug
+FST-U7GSZM72,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-U7GSZM72.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug wall plug 12mm 50mm 50pc,Anchor and Wall Plug
+FST-Z7SUJQF7,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-Z7SUJQF7.json,Fischer,Pro Pack,FAZ 3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug cavity fixing 6mm 30mm 100pc,Anchor and Wall Plug
+FST-18HDZ1MN,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-18HDZ1MN.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug concrete anchor 8mm 40mm 200pc,Anchor and Wall Plug
+FST-1IONU5J4,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-1IONU5J4.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug wall plug 8mm 40mm 100pc,Anchor and Wall Plug
+FST-1OHR0A0N,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-1OHR0A0N.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug concrete anchor 6mm 60mm 50pc,Anchor and Wall Plug
+FST-20EDYITS,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-20EDYITS.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug concrete anchor 5mm 80mm 25pc,Anchor and Wall Plug
+FST-24MY621K,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-24MY621K.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug cavity fixing 6mm 80mm 100pc,Anchor and Wall Plug
+FST-2CJGTB1M,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-2CJGTB1M.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug wall plug 12mm 120mm 100pc,Anchor and Wall Plug
+FST-2CL48L4A,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-2CL48L4A.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug wall plug 5mm 30mm 25pc,Anchor and Wall Plug
+FST-2DD2J0O1,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-2DD2J0O1.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug wall plug 8mm 30mm 10pc,Anchor and Wall Plug
+FST-2KPWTHV2,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-2KPWTHV2.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug concrete anchor 6mm 80mm 100pc,Anchor and Wall Plug
+FST-30H0NTFN,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-30H0NTFN.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug frame fixing 5mm 80mm 50pc,Anchor and Wall Plug
+FST-378PTE74,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-378PTE74.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug wall plug 12mm 60mm 200pc,Anchor and Wall Plug
+FST-3KAA3FBU,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-3KAA3FBU.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug frame fixing 12mm 100mm 50pc,Anchor and Wall Plug
+FST-3NZB2F9E,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-3NZB2F9E.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug frame fixing 6mm 50mm 25pc,Anchor and Wall Plug
+FST-3SVMI69E,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-3SVMI69E.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug wall plug 8mm 80mm 100pc,Anchor and Wall Plug
+FST-3URYFB0H,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-3URYFB0H.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug wall plug 10mm 30mm 50pc,Anchor and Wall Plug
+FST-B8X9Q1MD,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-B8X9Q1MD.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug wall plug 5mm 30mm 200pc,Anchor and Wall Plug
+FST-NL2GG95B,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-NL2GG95B.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug frame fixing 8mm 50mm 100pc,Anchor and Wall Plug
+FST-QF52ABEG,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0007_1eb7jq1t/FST-QF52ABEG.json,Fischer,SX,DUO 1R7-M6Z,Fischer SX DUO 1R7-M6Z Anchor and Wall Plug concrete anchor 12mm 80mm 25pc,Anchor and Wall Plug
+FST-138UPQ2Z,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-138UPQ2Z.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw wood screw 6mm 30mm torx 100pc,Wood and Drywall Screw
+FST-1B91S3N3,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-1B91S3N3.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw machine screw 6mm 50mm pozidriv 500pc,Wood and Drywall Screw
+FST-1DO5YMJH,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-1DO5YMJH.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw machine screw 6mm 40mm slot 200pc,Wood and Drywall Screw
+FST-1V5XKXLJ,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-1V5XKXLJ.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw wood screw 4mm 120mm phillips 50pc,Wood and Drywall Screw
+FST-1WP34PLU,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-1WP34PLU.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw wood screw 5mm 30mm pozidriv 100pc,Wood and Drywall Screw
+FST-2DKM9ELZ,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-2DKM9ELZ.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw wood screw 6mm 60mm pozidriv 25pc,Wood and Drywall Screw
+FST-2JDQP9QH,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-2JDQP9QH.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw drywall screw 5mm 50mm pozidriv 200pc,Wood and Drywall Screw
+FST-2T4VEMLD,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-2T4VEMLD.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw machine screw 4mm 40mm torx 50pc,Wood and Drywall Screw
+FST-2UCSKU7K,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-2UCSKU7K.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw drywall screw 8mm 20mm pozidriv 200pc,Wood and Drywall Screw
+FST-39USPHDW,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-39USPHDW.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw wood screw 10mm 30mm hex 50pc,Wood and Drywall Screw
+FST-3BLAY2JS,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-3BLAY2JS.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw wood screw 8mm 30mm phillips 100pc,Wood and Drywall Screw
+FST-3P60QS9M,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-3P60QS9M.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw wood screw 4mm 40mm torx 25pc,Wood and Drywall Screw
+FST-8CWN5HVM,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-8CWN5HVM.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw wood screw 4mm 40mm pozidriv 25pc,Wood and Drywall Screw
+FST-FGH3WWBK,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-FGH3WWBK.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw machine screw 4mm 100mm pozidriv 500pc,Wood and Drywall Screw
+FST-G5KCEXKL,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-G5KCEXKL.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw drywall screw 6mm 40mm slot 100pc,Wood and Drywall Screw
+FST-IQE13IQ1,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-IQE13IQ1.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw deck screw 4mm 40mm pozidriv 50pc,Wood and Drywall Screw
+FST-LHRA1V2N,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-LHRA1V2N.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw machine screw 3mm 60mm phillips 500pc,Wood and Drywall Screw
+FST-SFRAP6GT,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-SFRAP6GT.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw drywall screw 3mm 60mm hex 500pc,Wood and Drywall Screw
+FST-V27ETSWD,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-V27ETSWD.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw deck screw 3mm 40mm torx 50pc,Wood and Drywall Screw
+FST-YVZ2SJMK,/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0018_lcozjddz/FST-YVZ2SJMK.json,Heco,Countersunk,Unix Y22-P9Y,Heco Countersunk Unix Y22-P9Y Wood and Drywall Screw wood screw 6mm 50mm slot 100pc,Wood and Drywall Screw
+FST-188MSL0Z,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-188MSL0Z.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug cavity fixing 8mm 100mm 25pc,Anchor and Wall Plug
+FST-1JHYBIPW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-1JHYBIPW.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug wall plug 6mm 40mm 50pc,Anchor and Wall Plug
+FST-1PP0P3I8,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-1PP0P3I8.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug cavity fixing 5mm 100mm 100pc,Anchor and Wall Plug
+FST-1R0W8VAT,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-1R0W8VAT.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug wall plug 10mm 40mm 50pc,Anchor and Wall Plug
+FST-2FET9S9C,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-2FET9S9C.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug cavity fixing 10mm 100mm 50pc,Anchor and Wall Plug
+FST-2G0Y4MRS,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-2G0Y4MRS.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug wall plug 12mm 40mm 200pc,Anchor and Wall Plug
+FST-2GDAJ8MW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-2GDAJ8MW.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug wall plug 8mm 60mm 50pc,Anchor and Wall Plug
+FST-2H1JNHWE,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-2H1JNHWE.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug wall plug 6mm 50mm 200pc,Anchor and Wall Plug
+FST-2PXT0TUD,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-2PXT0TUD.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug frame fixing 6mm 50mm 25pc,Anchor and Wall Plug
+FST-2WKIJQ2V,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-2WKIJQ2V.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug concrete anchor 10mm 80mm 50pc,Anchor and Wall Plug
+FST-39DKB2KQ,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-39DKB2KQ.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug frame fixing 8mm 40mm 25pc,Anchor and Wall Plug
+FST-ATR97B53,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-ATR97B53.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug concrete anchor 10mm 60mm 50pc,Anchor and Wall Plug
+FST-EGWVU5Z5,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-EGWVU5Z5.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug wall plug 6mm 80mm 10pc,Anchor and Wall Plug
+FST-IB9IANI6,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-IB9IANI6.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug cavity fixing 8mm 30mm 100pc,Anchor and Wall Plug
+FST-OOKAD2EJ,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-OOKAD2EJ.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug concrete anchor 6mm 40mm 10pc,Anchor and Wall Plug
+FST-QF1I79JK,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-QF1I79JK.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug frame fixing 6mm 40mm 100pc,Anchor and Wall Plug
+FST-X5SZEXCY,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-X5SZEXCY.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug frame fixing 12mm 40mm 100pc,Anchor and Wall Plug
+FST-XZ1ZOSJR,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-XZ1ZOSJR.json,Heco,Heavy Duty,HECO 6IT-PBI,Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug wall plug 8mm 80mm 100pc,Anchor and Wall Plug
+FST-1899RCY8,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-1899RCY8.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer threaded rod 12mm 12mm 100pc,Nut Bolt and Washer
+FST-1NQGSX0G,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-1NQGSX0G.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer machine screw 10mm 12mm 100pc,Nut Bolt and Washer
+FST-1WPUDQ03,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-1WPUDQ03.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer bolt 12mm 12mm 10pc,Nut Bolt and Washer
+FST-2TVG8VAT,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-2TVG8VAT.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer nut 5mm 12mm 25pc,Nut Bolt and Washer
+FST-2W40S9HU,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-2W40S9HU.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer threaded rod 8mm 12mm 500pc,Nut Bolt and Washer
+FST-30H0UMXP,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-30H0UMXP.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer bolt 6mm 40mm 200pc,Nut Bolt and Washer
+FST-31AML6JG,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-31AML6JG.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer bolt 10mm 12mm 100pc,Nut Bolt and Washer
+FST-37HPPUX3,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-37HPPUX3.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer machine screw 12mm 12mm 200pc,Nut Bolt and Washer
+FST-3CQQM99P,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-3CQQM99P.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer machine screw 6mm 12mm 50pc,Nut Bolt and Washer
+FST-3GV98S7T,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-3GV98S7T.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer bolt 8mm 40mm 10pc,Nut Bolt and Washer
+FST-76BX4HC6,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-76BX4HC6.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer bolt 6mm 30mm 200pc,Nut Bolt and Washer
+FST-96VI4AHE,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-96VI4AHE.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer threaded rod 5mm 30mm 25pc,Nut Bolt and Washer
+FST-9BTJ374G,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-9BTJ374G.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer bolt 4mm 100mm 50pc,Nut Bolt and Washer
+FST-KWQQQGGN,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-KWQQQGGN.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer threaded rod 6mm 12mm 200pc,Nut Bolt and Washer
+FST-QAIR9JHU,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-QAIR9JHU.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer machine screw 5mm 12mm 50pc,Nut Bolt and Washer
+FST-TAU8DUJ9,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-TAU8DUJ9.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer threaded rod 8mm 20mm 25pc,Nut Bolt and Washer
+FST-W3YN6R75,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-W3YN6R75.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer bolt 6mm 30mm 10pc,Nut Bolt and Washer
+FST-Z792R4ZU,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0005_x2utpd9r/FST-Z792R4ZU.json,Heco,Heavy Duty,Unix 3IH-6AX,Heco Heavy Duty Unix 3IH-6AX Nut Bolt and Washer bolt 8mm 50mm 25pc,Nut Bolt and Washer
+FST-101QVMF9,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0006_3j64z4ii/FST-101QVMF9.json,Heco,Pro Pack,TopFix XXS-M0F,Heco Pro Pack TopFix XXS-M0F Nut Bolt and Washer threaded rod 4mm 80mm 50pc,Nut Bolt and Washer
+FST-10E2TK77,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0006_3j64z4ii/FST-10E2TK77.json,Heco,Pro Pack,TopFix XXS-M0F,Heco Pro Pack TopFix XXS-M0F Nut Bolt and Washer machine screw 6mm 80mm 100pc,Nut Bolt and Washer
+warning: result truncated at 100 rows
+Next step_3... Run a focused SQL query over Heco Anchor and Wall Plug products with exact properties and Unix/NP7 model/series matching. (16673 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       at.value_text AS anchor_type,\n       d.value_number AS diameter_mm,\n       l.value_number AS length_mm,\n       pc.value_number AS pack_count\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nJOIN product_properties at ON at.sku = p.sku AND at.key = 'anchor_type'\nJOIN product_properties d  ON d.sku = p.sku  AND d.key  = 'diameter_mm'\nJOIN product_properties l  ON l.sku = p.sku  AND l.key  = 'length_mm'\nJOIN product_properties pc ON pc.sku = p.sku AND pc.key = 'pack_count'\nWHERE p.brand = 'Heco'\n  AND pk.name = 'Anchor and Wall Plug'\n  AND (lower(p.series) LIKE '%unix%' OR lower(p.model) LIKE '%np7%' OR lower(p.model) LIKE '%dbm%')\n  AND lower(at.value_text) = 'wall plug'\n  AND d.value_number = 5\n  AND l.value_number = 40\n  AND pc.value_number = 25\nORDER BY p.series, p.model, p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       at.value_text AS anchor_type,
+       d.value_number AS diameter_mm,
+       l.value_number AS length_mm,
+       pc.value_number AS pack_count
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+JOIN product_properties at ON at.sku = p.sku AND at.key = 'anchor_type'
+JOIN product_properties d  ON d.sku = p.sku  AND d.key  = 'diameter_mm'
+JOIN product_properties l  ON l.sku = p.sku  AND l.key  = 'length_mm'
+JOIN product_properties pc ON pc.sku = p.sku AND pc.key = 'pack_count'
+WHERE p.brand = 'Heco'
+  AND pk.name = 'Anchor and Wall Plug'
+  AND (lower(p.series) LIKE '%unix%' OR lower(p.model) LIKE '%np7%' OR lower(p.model) LIKE '%dbm%')
+  AND lower(at.value_text) = 'wall plug'
+  AND d.value_number = 5
+  AND l.value_number = 40
+  AND pc.value_number = 25
+ORDER BY p.series, p.model, p.sku;
+SQL
+sku,path,brand,series,model,name,anchor_type,diameter_mm,length_mm,pack_count
+FST-1AUQORX9,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0002_2hnmoanv/FST-1AUQORX9.json,Heco,Unix,HECO NP7-DBM,Heco Unix HECO NP7-DBM Anchor and Wall Plug wall plug 5mm 40mm 25pc,wall plug,5,40,25
+Next step_4... Report completion with the verified yes/no token and grounded product path. (11807 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Ran exact property-level SQL match for the requested Heco anchor variant.', 'Confirmed one matching catalogue record exists.'] message='<YES>' grounding_refs=['/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0002_2hnmoanv/FST-1AUQORX9.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Ran exact property-level SQL match for the requested Heco anchor variant.
+- Confirmed one matching catalogue record exists.
+
+[34mAGENT SUMMARY: <YES>[0m
+- [34m/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0002_2hnmoanv/FST-1AUQORX9.json[0m
