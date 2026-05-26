@@ -78,6 +78,10 @@ class FakeVM:
         self.raise_on_read_path = None
         self.stat_not_found = set()
         self.sql_outputs = {}
+        self.tool_outputs = {}
+        self.read_outputs = {}
+        self.list_outputs = {}
+        self.exec_calls = []
 
     def tree(self, req):
         return SimpleNamespace(root=SimpleNamespace(name="", children=[]), truncated=False)
@@ -85,9 +89,13 @@ class FakeVM:
     def read(self, req):
         if self.raise_on_read_path and req.path == self.raise_on_read_path:
             raise ConnectError("not_found", f"no such file: {req.path}")
+        if req.path in self.read_outputs:
+            return SimpleNamespace(content=self.read_outputs[req.path], truncated=False)
         return SimpleNamespace(content="(fake file body)", truncated=False)
 
     def list(self, req):
+        if req.path in self.list_outputs:
+            return SimpleNamespace(entries=self.list_outputs[req.path])
         return SimpleNamespace(entries=[])
 
     def search(self, req):
@@ -97,10 +105,13 @@ class FakeVM:
         return SimpleNamespace(paths=[], truncated=False)
 
     def exec(self, req):
+        self.exec_calls.append((req.path, list(getattr(req, "args", []) or []), getattr(req, "stdin", "")))
         if req.path == "/bin/sql":
             for needle, stdout in self.sql_outputs.items():
                 if needle in req.stdin:
                     return SimpleNamespace(stdout=stdout, stderr="", exit_code=0)
+        if req.path in self.tool_outputs:
+            return SimpleNamespace(stdout=self.tool_outputs[req.path], stderr="", exit_code=0)
         return SimpleNamespace(stdout="ok", stderr="", exit_code=0)
 
     def write(self, req):
@@ -484,6 +495,65 @@ def test_discount_denial_requires_subject_and_update_doc():
     print("ok: discount denial gate requires basket subject and current update doc")
 
 
+def test_discount_explicit_over_policy_percent_is_unsupported():
+    vm = FakeVM()
+    vm.tool_outputs["/bin/id"] = (
+        "user: emp_001\n"
+        "roles: employee, store_manager, discount_manager, customer_service\n"
+    )
+    vm.sql_outputs["WITH target_customer AS"] = (
+        "customer_path,id,path,store_id,status,discount_percent,created_at,line_count,ok_lines,subtotal_cents,store_path\n"
+        "/proc/customers/cust_086.json,basket_028,/proc/baskets/basket_028.json,store_vienna_praterstern,active,,2021-08-09T16:00:00Z,1,1,12000,/proc/stores/store_vienna_praterstern.json\n"
+    )
+    vm.sql_outputs["SELECT path FROM employees"] = "path\n/proc/employees/emp_001.json\n"
+
+    fn = agent._try_discount(
+        vm,
+        "apply a 6 percent service_recovery discount to the last checkoutable "
+        "basket of anna.fischer+cust819@proton.me",
+    )
+
+    assert fn is not None
+    assert fn.outcome == "OUTCOME_NONE_UNSUPPORTED", \
+        "explicit service_recovery percent above policy max must not be silently capped"
+    assert "6%" in fn.message and "5%" in fn.message
+    assert not [call for call in vm.exec_calls if call[0] == "/bin/discount"], \
+        "unsupported discount request must not mutate state"
+    print("ok: explicit over-policy service_recovery percent is unsupported")
+
+
+def test_discount_desk_coverage_denial_names_required_token():
+    vm = FakeVM()
+    vm.tool_outputs["/bin/id"] = (
+        "user: emp_020\n"
+        "roles: employee, customer_service, order_viewer, discount_requester\n"
+    )
+    vm.sql_outputs["SELECT b.path AS basket_path"] = (
+        "basket_path,store_path,employee_path\n"
+        "/proc/baskets/basket_014.json,/proc/stores/store_graz_lend.json,/proc/employees/emp_020.json\n"
+    )
+    update_path = "/docs/current-updates/2021-08-09-service-recovery-powertool-graz-lend.md"
+    vm.list_outputs["/docs/current-updates"] = [
+        SimpleNamespace(name="2021-08-09-service-recovery-powertool-graz-lend.md", kind=_Enum.NODE_KIND_FILE)
+    ]
+    vm.read_outputs[update_path] = (
+        "PowerTool Graz Lend service_recovery desk coverage update. "
+        "DESK_COVERAGE_NOT_DISCOUNT_AUTHORITY_2021_08_09"
+    )
+
+    fn = agent._try_discount(
+        vm,
+        "I am covering the desk at PowerTool Graz Lend today. Please apply the "
+        "maximum service_recovery discount (10%) to basket basket_014; use me as the issuer.",
+    )
+
+    assert fn is not None
+    assert fn.outcome == "OUTCOME_DENIED_SECURITY"
+    assert "DESK_COVERAGE_NOT_DISCOUNT_AUTHORITY_2021_08_09" in fn.message
+    assert update_path in fn.grounding_refs
+    print("ok: Graz Lend desk coverage denial names required token")
+
+
 def main():
     test_normal_completion()
     test_security_denial()
@@ -498,6 +568,8 @@ def main():
     test_numeric_claim_check_reruns_last_aggregation()
     test_inventory_count_requires_product_and_store_refs()
     test_discount_denial_requires_subject_and_update_doc()
+    test_discount_explicit_over_policy_percent_is_unsupported()
+    test_discount_desk_coverage_denial_names_required_token()
     print("\nALL SMOKE TESTS PASSED")
 
 

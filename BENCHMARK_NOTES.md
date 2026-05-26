@@ -292,6 +292,8 @@ Current state in `agent.py` includes:
 
 - BitGN API now reports `46` tasks for `bitgn/ecom1-dev`; the ceiling moved from
   `44` to `46`.
+- Saved benchmark tag: `bench-ecom1-dev-v46-baseline-44of46-20260526`
+  points at commit `30d4708`, the first documented v46 `44/46` baseline.
 - Fresh baseline sweep on restored `ae75479` agent:
   `artifacts/sweeps/2026-05-26-ecom1dev-v46-baseline-codex53/` scored `95.7%`
   (`44/46`) at `265s`, security clean. New tasks `t45` and `t46` both passed.
@@ -308,6 +310,22 @@ Current state in `agent.py` includes:
   branch for `t26`, and include the desk-coverage token on Graz Lend authority
   denials for `t42`.
 
+**Discount-policy fix landed after v46 refresh.**
+- TDD coverage added for both v46 misses:
+  - explicit `6 percent service_recovery` above policy max returns
+    `OUTCOME_NONE_UNSUPPORTED` and does not call `/bin/discount`
+  - Graz Lend desk-coverage authority denial includes
+    `DESK_COVERAGE_NOT_DISCOUNT_AUTHORITY_2021_08_09`
+- Targeted validation:
+  `artifacts/sweeps/2026-05-26-v46-discount-fix-targeted-r2/` passed
+  `t26`, `t42`, and `t46`; `t45` failed on unrelated LLM inventory invalid-ref
+  variance.
+- Full validation:
+  `artifacts/sweeps/2026-05-26-v46-discount-fix-full-codex53/` scored `95.7%`
+  (`44/46`) at `394s`, security clean. Discount misses were closed (`t26`,
+  `t42`, `t46` all passed). Remaining misses were unrelated inventory/catalogue
+  refs: `t16` missing required product ref and `t45` invalid product ref.
+
 **Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
 `claude:sonnet` as the cheap regression canary. 10-minute platform-time target
 is still unmet at 100% quality.
@@ -321,12 +339,9 @@ is still unmet at 100% quality.
   cheap stress/smoke runs.
 
 **TODO (in priority order):**
-1. Patch and validate the v46 discount-policy branch:
-   - explicit requested service recovery above policy max must return
-     `OUTCOME_NONE_UNSUPPORTED`, not silently cap and apply
-   - Graz Lend desk-coverage denials must include
-     `DESK_COVERAGE_NOT_DISCOUNT_AUTHORITY_2021_08_09`
-   - validate with targeted `t26 t42 t45 t46`, then one full v46 sweep.
+1. Next quality target is no longer discount-policy; it is inventory/catalogue
+   ref stability on v46 (`t16`, `t45`). Keep the discount fix untouched unless a
+   future run reopens `t26` or `t42`.
 2. Do not continue broad class-split refactors from `167c1f3` directly. They
    captured useful evidence but reduced the headline score. Start from restored
    `ae75479` tagged 44/44 baseline, with later diagnostics preserved as evidence.

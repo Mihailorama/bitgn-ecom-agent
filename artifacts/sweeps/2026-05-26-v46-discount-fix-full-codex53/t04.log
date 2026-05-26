@@ -1,0 +1,427 @@
+TASK t04 (model codex:gpt-5.3-codex)
+INSTRUCTION: metabo cordless 125 grinder, kit or flat head in catalogue?
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query products + product_properties for Metabo cordless 125 grinder candidates, returning sku/path and relevant properties. (15835 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       pp.key, pp.value_text, pp.value_number\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE (LOWER(p.brand) = 'metabo' OR LOWER(p.name) LIKE '%metabo%')\n  AND (LOWER(p.name) LIKE '%grinder%' OR LOWER(p.model) LIKE '%grinder%' OR LOWER(p.series) LIKE '%grinder%')\n  AND (LOWER(p.name) LIKE '%125%' OR LOWER(p.model) LIKE '%125%' OR LOWER(pp.value_text) LIKE '%125%')\n  AND (LOWER(p.name) LIKE '%cordless%' OR LOWER(p.model) LIKE '%cordless%' OR LOWER(pp.value_text) LIKE '%cordless%')\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       pp.key, pp.value_text, pp.value_number
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE (LOWER(p.brand) = 'metabo' OR LOWER(p.name) LIKE '%metabo%')
+  AND (LOWER(p.name) LIKE '%grinder%' OR LOWER(p.model) LIKE '%grinder%' OR LOWER(p.series) LIKE '%grinder%')
+  AND (LOWER(p.name) LIKE '%125%' OR LOWER(p.model) LIKE '%125%' OR LOWER(pp.value_text) LIKE '%125%')
+  AND (LOWER(p.name) LIKE '%cordless%' OR LOWER(p.model) LIKE '%cordless%' OR LOWER(pp.value_text) LIKE '%cordless%')
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,key,value_text,value_number
+Next step_2... Run a broader SQL query for Metabo products containing grinder-related terms and return sku/path plus core fields. (14937 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       pp.key, pp.value_text, pp.value_number\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE LOWER(p.brand) = 'metabo'\n  AND (\n    LOWER(p.name) LIKE '%grinder%'\n    OR LOWER(p.name) LIKE '%angle%'\n    OR LOWER(p.kind_id) LIKE '%grinder%'\n    OR LOWER(pp.value_text) LIKE '%grinder%'\n    OR LOWER(pp.value_text) LIKE '%flat head%'\n    OR LOWER(pp.value_text) LIKE '%flat-head%'\n    OR LOWER(pp.value_text) LIKE '%kit%'\n    OR LOWER(pp.value_text) LIKE '%125%'\n    OR LOWER(pp.value_text) LIKE '%cordless%'\n  )\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       pp.key, pp.value_text, pp.value_number
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE LOWER(p.brand) = 'metabo'
+  AND (
+    LOWER(p.name) LIKE '%grinder%'
+    OR LOWER(p.name) LIKE '%angle%'
+    OR LOWER(p.kind_id) LIKE '%grinder%'
+    OR LOWER(pp.value_text) LIKE '%grinder%'
+    OR LOWER(pp.value_text) LIKE '%flat head%'
+    OR LOWER(pp.value_text) LIKE '%flat-head%'
+    OR LOWER(pp.value_text) LIKE '%kit%'
+    OR LOWER(pp.value_text) LIKE '%125%'
+    OR LOWER(pp.value_text) LIKE '%cordless%'
+  )
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,key,value_text,value_number
+MAC-11FI2TR6,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-11FI2TR6.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander drill press 750W bench,machine_type,drill press,
+MAC-11FI2TR6,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-11FI2TR6.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander drill press 750W bench,mount_type,bench,
+MAC-11FI2TR6,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-11FI2TR6.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander drill press 750W bench,power_w,750,750
+MAC-11FI2TR6,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-11FI2TR6.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander drill press 750W bench,voltage_v,400,400
+MAC-11FI2TR6,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-11FI2TR6.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander drill press 750W bench,working_width_mm,400,400
+MAC-1BMJX9P5,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-1BMJX9P5.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander drill press 1100W cabinet,machine_type,drill press,
+MAC-1BMJX9P5,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-1BMJX9P5.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander drill press 1100W cabinet,mount_type,cabinet,
+MAC-1BMJX9P5,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-1BMJX9P5.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander drill press 1100W cabinet,power_w,1100,1100
+MAC-1BMJX9P5,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-1BMJX9P5.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander drill press 1100W cabinet,voltage_v,400,400
+MAC-1BMJX9P5,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-1BMJX9P5.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander drill press 1100W cabinet,working_width_mm,300,300
+MAC-1D4G66QN,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1D4G66QN.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander belt sander 250W portable,machine_type,belt sander,
+MAC-1D4G66QN,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1D4G66QN.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander belt sander 250W portable,mount_type,portable,
+MAC-1D4G66QN,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1D4G66QN.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander belt sander 250W portable,power_w,250,250
+MAC-1D4G66QN,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1D4G66QN.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander belt sander 250W portable,voltage_v,230,230
+MAC-1D4G66QN,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1D4G66QN.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander belt sander 250W portable,working_width_mm,100,100
+MAC-1EMMZUVF,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1EMMZUVF.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander drill press 2200W portable,machine_type,drill press,
+MAC-1EMMZUVF,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1EMMZUVF.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander drill press 2200W portable,mount_type,portable,
+MAC-1EMMZUVF,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1EMMZUVF.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander drill press 2200W portable,power_w,2200,2200
+MAC-1EMMZUVF,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1EMMZUVF.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander drill press 2200W portable,voltage_v,230,230
+MAC-1EMMZUVF,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1EMMZUVF.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander drill press 2200W portable,working_width_mm,150,150
+MAC-1HQ34KCY,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-1HQ34KCY.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander belt sander 750W cabinet,machine_type,belt sander,
+MAC-1HQ34KCY,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-1HQ34KCY.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander belt sander 750W cabinet,mount_type,cabinet,
+MAC-1HQ34KCY,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-1HQ34KCY.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander belt sander 750W cabinet,power_w,750,750
+MAC-1HQ34KCY,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-1HQ34KCY.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander belt sander 750W cabinet,voltage_v,230,230
+MAC-1HQ34KCY,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-1HQ34KCY.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander belt sander 750W cabinet,working_width_mm,150,150
+MAC-1JNDWZBV,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-1JNDWZBV.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander belt sander 1500W cabinet,machine_type,belt sander,
+MAC-1JNDWZBV,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-1JNDWZBV.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander belt sander 1500W cabinet,mount_type,cabinet,
+MAC-1JNDWZBV,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-1JNDWZBV.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander belt sander 1500W cabinet,power_w,1500,1500
+MAC-1JNDWZBV,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-1JNDWZBV.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander belt sander 1500W cabinet,voltage_v,230,230
+MAC-1JNDWZBV,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-1JNDWZBV.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander belt sander 1500W cabinet,working_width_mm,250,250
+MAC-1QPWB5W7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-1QPWB5W7.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander lathe 750W cabinet,machine_type,lathe,
+MAC-1QPWB5W7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-1QPWB5W7.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander lathe 750W cabinet,mount_type,cabinet,
+MAC-1QPWB5W7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-1QPWB5W7.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander lathe 750W cabinet,power_w,750,750
+MAC-1QPWB5W7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-1QPWB5W7.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander lathe 750W cabinet,voltage_v,230,230
+MAC-1QPWB5W7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-1QPWB5W7.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander lathe 750W cabinet,working_width_mm,250,250
+MAC-1T0XI4OO,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1T0XI4OO.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander drill press 750W portable,machine_type,drill press,
+MAC-1T0XI4OO,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1T0XI4OO.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander drill press 750W portable,mount_type,portable,
+MAC-1T0XI4OO,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1T0XI4OO.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander drill press 750W portable,power_w,750,750
+MAC-1T0XI4OO,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1T0XI4OO.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander drill press 750W portable,voltage_v,230,230
+MAC-1T0XI4OO,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1T0XI4OO.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander drill press 750W portable,working_width_mm,300,300
+MAC-1U2UISW7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-1U2UISW7.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander bench grinder 250W bench,machine_type,bench grinder,
+MAC-1U2UISW7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-1U2UISW7.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander bench grinder 250W bench,mount_type,bench,
+MAC-1U2UISW7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-1U2UISW7.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander bench grinder 250W bench,power_w,250,250
+MAC-1U2UISW7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-1U2UISW7.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander bench grinder 250W bench,voltage_v,230,230
+MAC-1U2UISW7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-1U2UISW7.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander bench grinder 250W bench,working_width_mm,250,250
+MAC-1WO9C7AM,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1WO9C7AM.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander planer thicknesser 500W portable,machine_type,planer thicknesser,
+MAC-1WO9C7AM,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1WO9C7AM.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander planer thicknesser 500W portable,mount_type,portable,
+MAC-1WO9C7AM,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1WO9C7AM.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander planer thicknesser 500W portable,power_w,500,500
+MAC-1WO9C7AM,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1WO9C7AM.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander planer thicknesser 500W portable,voltage_v,400,400
+MAC-1WO9C7AM,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1WO9C7AM.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander planer thicknesser 500W portable,working_width_mm,200,200
+MAC-1Y6KJNY1,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1Y6KJNY1.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander lathe 750W portable,machine_type,lathe,
+MAC-1Y6KJNY1,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1Y6KJNY1.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander lathe 750W portable,mount_type,portable,
+MAC-1Y6KJNY1,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1Y6KJNY1.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander lathe 750W portable,power_w,750,750
+MAC-1Y6KJNY1,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1Y6KJNY1.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander lathe 750W portable,voltage_v,230,230
+MAC-1Y6KJNY1,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1Y6KJNY1.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander lathe 750W portable,working_width_mm,150,150
+MAC-1YUYIX67,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1YUYIX67.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander lathe 250W portable,machine_type,lathe,
+MAC-1YUYIX67,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1YUYIX67.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander lathe 250W portable,mount_type,portable,
+MAC-1YUYIX67,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1YUYIX67.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander lathe 250W portable,power_w,250,250
+MAC-1YUYIX67,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1YUYIX67.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander lathe 250W portable,voltage_v,400,400
+MAC-1YUYIX67,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-1YUYIX67.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander lathe 250W portable,working_width_mm,200,200
+MAC-2009S5PH,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-2009S5PH.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander planer thicknesser 1500W portable,machine_type,planer thicknesser,
+MAC-2009S5PH,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-2009S5PH.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander planer thicknesser 1500W portable,mount_type,portable,
+MAC-2009S5PH,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-2009S5PH.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander planer thicknesser 1500W portable,power_w,1500,1500
+MAC-2009S5PH,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-2009S5PH.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander planer thicknesser 1500W portable,voltage_v,230,230
+MAC-2009S5PH,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-2009S5PH.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander planer thicknesser 1500W portable,working_width_mm,150,150
+MAC-21K4UZPK,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-21K4UZPK.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander belt sander 500W cabinet,machine_type,belt sander,
+MAC-21K4UZPK,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-21K4UZPK.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander belt sander 500W cabinet,mount_type,cabinet,
+MAC-21K4UZPK,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-21K4UZPK.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander belt sander 500W cabinet,power_w,500,500
+MAC-21K4UZPK,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-21K4UZPK.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander belt sander 500W cabinet,voltage_v,400,400
+MAC-21K4UZPK,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-21K4UZPK.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander belt sander 500W cabinet,working_width_mm,150,150
+MAC-233Q9XKU,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-233Q9XKU.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander belt sander 500W portable,machine_type,belt sander,
+MAC-233Q9XKU,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-233Q9XKU.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander belt sander 500W portable,mount_type,portable,
+MAC-233Q9XKU,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-233Q9XKU.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander belt sander 500W portable,power_w,500,500
+MAC-233Q9XKU,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-233Q9XKU.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander belt sander 500W portable,voltage_v,230,230
+MAC-233Q9XKU,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0008_1n15vtel/MAC-233Q9XKU.json,Metabo,LiHD,KGS 1ZU-JMD,Metabo LiHD KGS 1ZU-JMD Workshop Drill Grinder and Sander belt sander 500W portable,working_width_mm,150,150
+MAC-28FQFE32,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-28FQFE32.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander drill press 2200W cabinet,machine_type,drill press,
+MAC-28FQFE32,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-28FQFE32.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander drill press 2200W cabinet,mount_type,cabinet,
+MAC-28FQFE32,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-28FQFE32.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander drill press 2200W cabinet,power_w,2200,2200
+MAC-28FQFE32,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-28FQFE32.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander drill press 2200W cabinet,voltage_v,400,400
+MAC-28FQFE32,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0006_24jtrnll/MAC-28FQFE32.json,Metabo,Workshop,KGS 33X-O4H,Metabo Workshop KGS 33X-O4H Workshop Drill Grinder and Sander drill press 2200W cabinet,working_width_mm,150,150
+MAC-2CKZYWE6,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-2CKZYWE6.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander planer thicknesser 250W cabinet,machine_type,planer thicknesser,
+MAC-2CKZYWE6,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-2CKZYWE6.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander planer thicknesser 250W cabinet,mount_type,cabinet,
+MAC-2CKZYWE6,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-2CKZYWE6.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander planer thicknesser 250W cabinet,power_w,250,250
+MAC-2CKZYWE6,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-2CKZYWE6.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander planer thicknesser 250W cabinet,voltage_v,400,400
+MAC-2CKZYWE6,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-2CKZYWE6.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander planer thicknesser 250W cabinet,working_width_mm,200,200
+MAC-2P7C3ZZ0,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-2P7C3ZZ0.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander drill press 2200W cabinet,machine_type,drill press,
+MAC-2P7C3ZZ0,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-2P7C3ZZ0.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander drill press 2200W cabinet,mount_type,cabinet,
+MAC-2P7C3ZZ0,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-2P7C3ZZ0.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander drill press 2200W cabinet,power_w,2200,2200
+MAC-2P7C3ZZ0,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-2P7C3ZZ0.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander drill press 2200W cabinet,voltage_v,230,230
+MAC-2P7C3ZZ0,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0018_2bgs7fvc/MAC-2P7C3ZZ0.json,Metabo,Compact,HWW 2XB-JHU,Metabo Compact HWW 2XB-JHU Workshop Drill Grinder and Sander drill press 2200W cabinet,working_width_mm,150,150
+MAC-2RTQNZK8,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-2RTQNZK8.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander drill press 1500W bench,machine_type,drill press,
+MAC-2RTQNZK8,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-2RTQNZK8.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander drill press 1500W bench,mount_type,bench,
+MAC-2RTQNZK8,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-2RTQNZK8.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander drill press 1500W bench,power_w,1500,1500
+MAC-2RTQNZK8,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-2RTQNZK8.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander drill press 1500W bench,voltage_v,230,230
+MAC-2RTQNZK8,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-2RTQNZK8.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander drill press 1500W bench,working_width_mm,250,250
+MAC-2S4GYPUF,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-2S4GYPUF.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander drill press 750W bench,machine_type,drill press,
+MAC-2S4GYPUF,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-2S4GYPUF.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander drill press 750W bench,mount_type,bench,
+MAC-2S4GYPUF,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-2S4GYPUF.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander drill press 750W bench,power_w,750,750
+MAC-2S4GYPUF,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-2S4GYPUF.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander drill press 750W bench,voltage_v,230,230
+MAC-2S4GYPUF,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0015_2pob64q5/MAC-2S4GYPUF.json,Metabo,Bench,SBE 1UT-LHR,Metabo Bench SBE 1UT-LHR Workshop Drill Grinder and Sander drill press 750W bench,working_width_mm,250,250
+warning: result truncated at 100 rows
+Next step_3... Query only Metabo grinder-like products with targeted property/name matching for 125 and cordless plus kit/flat-head markers. (17942 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       GROUP_CONCAT(pp.key || '=' || COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)), '; ') AS props\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE LOWER(p.brand) = 'metabo'\n  AND (\n    LOWER(p.name) LIKE '%grinder%'\n    OR EXISTS (\n      SELECT 1 FROM product_properties pp2\n      WHERE pp2.sku = p.sku\n        AND (\n          LOWER(pp2.value_text) LIKE '%grinder%'\n          OR LOWER(pp2.value_text) LIKE '%angle%'\n        )\n    )\n  )\n  AND (\n    LOWER(p.name) LIKE '%cordless%'\n    OR EXISTS (\n      SELECT 1 FROM product_properties pp3\n      WHERE pp3.sku = p.sku AND LOWER(pp3.value_text) LIKE '%cordless%'\n    )\n  )\n  AND (\n    LOWER(p.name) LIKE '%125%'\n    OR EXISTS (\n      SELECT 1 FROM product_properties pp4\n      WHERE pp4.sku = p.sku\n        AND (LOWER(pp4.value_text) LIKE '%125%' OR pp4.value_number = 125)\n    )\n  )\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name\nORDER BY p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       GROUP_CONCAT(pp.key || '=' || COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)), '; ') AS props
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE LOWER(p.brand) = 'metabo'
+  AND (
+    LOWER(p.name) LIKE '%grinder%'
+    OR EXISTS (
+      SELECT 1 FROM product_properties pp2
+      WHERE pp2.sku = p.sku
+        AND (
+          LOWER(pp2.value_text) LIKE '%grinder%'
+          OR LOWER(pp2.value_text) LIKE '%angle%'
+        )
+    )
+  )
+  AND (
+    LOWER(p.name) LIKE '%cordless%'
+    OR EXISTS (
+      SELECT 1 FROM product_properties pp3
+      WHERE pp3.sku = p.sku AND LOWER(pp3.value_text) LIKE '%cordless%'
+    )
+  )
+  AND (
+    LOWER(p.name) LIKE '%125%'
+    OR EXISTS (
+      SELECT 1 FROM product_properties pp4
+      WHERE pp4.sku = p.sku
+        AND (LOWER(pp4.value_text) LIKE '%125%' OR pp4.value_number = 125)
+    )
+  )
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name
+ORDER BY p.sku;
+SQL
+sku,path,brand,series,model,name,props
+Next step_4... Return final result token. (11906 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Checked schema and catalog tables via SQL', 'Ran focused Metabo cordless+125 grinder query', 'Observed zero matching rows'] message='<NO>' grounding_refs=['/AGENTS.MD'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Checked schema and catalog tables via SQL
+- Ran focused Metabo cordless+125 grinder query
+- Observed zero matching rows
+
+[34mAGENT SUMMARY: <NO>[0m
+- [34m/AGENTS.MD[0m

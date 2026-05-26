@@ -1,0 +1,398 @@
+TASK t32 (model codex:gpt-5.3-codex)
+INSTRUCTION: A support note claims we stock the Engine Oil from Mobil in the Mobil Delvac Delvac 2Z0-IKM Engine Oil line that has volume 5000 ml and viscosity 10W-40 and has Bluetooth control. Check the actual catalogue item, cite the exact product record, and if the base product exists but that extra capability is absent, answer with <NO> and include the checked SKU.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query SQL for the Mobil Delvac 2Z0-IKM Engine Oil base product and all returned properties (including volume/viscosity/capability fields). (16014 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, pk.name AS kind_name, p.name AS product_name, pp.key, pp.value_text, pp.value_number\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE lower(p.brand) = 'mobil'\n  AND lower(p.series) LIKE '%delvac%'\n  AND lower(p.model) = '2z0-ikm'\n  AND lower(pk.name) = 'engine oil'\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, pk.name AS kind_name, p.name AS product_name, pp.key, pp.value_text, pp.value_number
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE lower(p.brand) = 'mobil'
+  AND lower(p.series) LIKE '%delvac%'
+  AND lower(p.model) = '2z0-ikm'
+  AND lower(pk.name) = 'engine oil'
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,kind_name,product_name,key,value_text,value_number
+Next step_2... Run a broader SQL lookup for Mobil Engine Oil products using name/series/model text matches around 'delvac' and '2z0-ikm'. (12520 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, pk.name AS kind_name, p.name AS product_name, pp.key, pp.value_text, pp.value_number\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE lower(p.brand) = 'mobil'\n  AND lower(pk.name) = 'engine oil'\n  AND (\n    lower(p.series) LIKE '%delvac%'\n    OR lower(p.model) LIKE '%2z0-ikm%'\n    OR lower(p.name) LIKE '%delvac%'\n    OR lower(p.name) LIKE '%2z0-ikm%'\n  )\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, pk.name AS kind_name, p.name AS product_name, pp.key, pp.value_text, pp.value_number
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE lower(p.brand) = 'mobil'
+  AND lower(pk.name) = 'engine oil'
+  AND (
+    lower(p.series) LIKE '%delvac%'
+    OR lower(p.model) LIKE '%2z0-ikm%'
+    OR lower(p.name) LIKE '%delvac%'
+    OR lower(p.name) LIKE '%2z0-ikm%'
+  )
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,kind_name,product_name,key,value_text,value_number
+AUT-1B36R8I3,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1B36R8I3.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 10W-40 250ml car,season,all season,
+AUT-1B36R8I3,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1B36R8I3.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 10W-40 250ml car,vehicle_type,car,
+AUT-1B36R8I3,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1B36R8I3.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 10W-40 250ml car,viscosity,10W-40,
+AUT-1B36R8I3,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1B36R8I3.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 10W-40 250ml car,volume_ml,250,250
+AUT-1CGH9K9K,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-1CGH9K9K.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 0W-20 4000ml van,season,winter,
+AUT-1CGH9K9K,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-1CGH9K9K.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 0W-20 4000ml van,vehicle_type,van,
+AUT-1CGH9K9K,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-1CGH9K9K.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 0W-20 4000ml van,viscosity,0W-20,
+AUT-1CGH9K9K,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-1CGH9K9K.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 0W-20 4000ml van,volume_ml,4000,4000
+AUT-1FPY2TZV,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0021_354col62/AUT-1FPY2TZV.json,Mobil,Premium,Delvac DDA-2VG,Engine Oil,Mobil Premium Delvac DDA-2VG Engine Oil 5W-30 5000ml van,season,all season,
+AUT-1FPY2TZV,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0021_354col62/AUT-1FPY2TZV.json,Mobil,Premium,Delvac DDA-2VG,Engine Oil,Mobil Premium Delvac DDA-2VG Engine Oil 5W-30 5000ml van,vehicle_type,van,
+AUT-1FPY2TZV,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0021_354col62/AUT-1FPY2TZV.json,Mobil,Premium,Delvac DDA-2VG,Engine Oil,Mobil Premium Delvac DDA-2VG Engine Oil 5W-30 5000ml van,viscosity,5W-30,
+AUT-1FPY2TZV,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0021_354col62/AUT-1FPY2TZV.json,Mobil,Premium,Delvac DDA-2VG,Engine Oil,Mobil Premium Delvac DDA-2VG Engine Oil 5W-30 5000ml van,volume_ml,5000,5000
+AUT-1GY33RML,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-1GY33RML.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 5W-40 5000ml van,season,all season,
+AUT-1GY33RML,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-1GY33RML.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 5W-40 5000ml van,vehicle_type,van,
+AUT-1GY33RML,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-1GY33RML.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 5W-40 5000ml van,viscosity,5W-40,
+AUT-1GY33RML,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-1GY33RML.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 5W-40 5000ml van,volume_ml,5000,5000
+AUT-1HPG3KWK,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-1HPG3KWK.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 5W-30 4000ml motorcycle,season,winter,
+AUT-1HPG3KWK,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-1HPG3KWK.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 5W-30 4000ml motorcycle,vehicle_type,motorcycle,
+AUT-1HPG3KWK,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-1HPG3KWK.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 5W-30 4000ml motorcycle,viscosity,5W-30,
+AUT-1HPG3KWK,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-1HPG3KWK.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 5W-30 4000ml motorcycle,volume_ml,4000,4000
+AUT-1Q27XKMK,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1Q27XKMK.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 5W-40 500ml universal,season,all season,
+AUT-1Q27XKMK,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1Q27XKMK.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 5W-40 500ml universal,vehicle_type,universal,
+AUT-1Q27XKMK,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1Q27XKMK.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 5W-40 500ml universal,viscosity,5W-40,
+AUT-1Q27XKMK,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1Q27XKMK.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 5W-40 500ml universal,volume_ml,500,500
+AUT-1Q47AXQI,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1Q47AXQI.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 15W-40 1000ml van,season,all season,
+AUT-1Q47AXQI,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1Q47AXQI.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 15W-40 1000ml van,vehicle_type,van,
+AUT-1Q47AXQI,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1Q47AXQI.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 15W-40 1000ml van,viscosity,15W-40,
+AUT-1Q47AXQI,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1Q47AXQI.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 15W-40 1000ml van,volume_ml,1000,1000
+AUT-1R2WA1OX,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1R2WA1OX.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 5W-40 5000ml van,season,all season,
+AUT-1R2WA1OX,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1R2WA1OX.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 5W-40 5000ml van,vehicle_type,van,
+AUT-1R2WA1OX,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1R2WA1OX.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 5W-40 5000ml van,viscosity,5W-40,
+AUT-1R2WA1OX,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1R2WA1OX.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 5W-40 5000ml van,volume_ml,5000,5000
+AUT-1R7N7XPE,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-1R7N7XPE.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 5W-40 500ml truck,season,winter,
+AUT-1R7N7XPE,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-1R7N7XPE.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 5W-40 500ml truck,vehicle_type,truck,
+AUT-1R7N7XPE,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-1R7N7XPE.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 5W-40 500ml truck,viscosity,5W-40,
+AUT-1R7N7XPE,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-1R7N7XPE.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 5W-40 500ml truck,volume_ml,500,500
+AUT-1STEH2I3,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-1STEH2I3.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 250ml universal,season,summer,
+AUT-1STEH2I3,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-1STEH2I3.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 250ml universal,vehicle_type,universal,
+AUT-1STEH2I3,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-1STEH2I3.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 250ml universal,viscosity,10W-40,
+AUT-1STEH2I3,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-1STEH2I3.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 250ml universal,volume_ml,250,250
+AUT-1TPCJC6J,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-1TPCJC6J.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 4000ml truck,season,summer,
+AUT-1TPCJC6J,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-1TPCJC6J.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 4000ml truck,vehicle_type,truck,
+AUT-1TPCJC6J,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-1TPCJC6J.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 4000ml truck,viscosity,10W-40,
+AUT-1TPCJC6J,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-1TPCJC6J.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 4000ml truck,volume_ml,4000,4000
+AUT-1TW2JFKX,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1TW2JFKX.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 10W-40 5000ml universal,season,all season,
+AUT-1TW2JFKX,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1TW2JFKX.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 10W-40 5000ml universal,vehicle_type,universal,
+AUT-1TW2JFKX,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1TW2JFKX.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 10W-40 5000ml universal,viscosity,10W-40,
+AUT-1TW2JFKX,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1TW2JFKX.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 10W-40 5000ml universal,volume_ml,5000,5000
+AUT-1V9DDZGO,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-1V9DDZGO.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 5W-40 500ml truck,season,all season,
+AUT-1V9DDZGO,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-1V9DDZGO.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 5W-40 500ml truck,vehicle_type,truck,
+AUT-1V9DDZGO,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-1V9DDZGO.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 5W-40 500ml truck,viscosity,5W-40,
+AUT-1V9DDZGO,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-1V9DDZGO.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 5W-40 500ml truck,volume_ml,500,500
+AUT-1VEV8G38,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-1VEV8G38.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 0W-20 5000ml motorcycle,season,all season,
+AUT-1VEV8G38,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-1VEV8G38.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 0W-20 5000ml motorcycle,vehicle_type,motorcycle,
+AUT-1VEV8G38,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-1VEV8G38.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 0W-20 5000ml motorcycle,viscosity,0W-20,
+AUT-1VEV8G38,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-1VEV8G38.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 0W-20 5000ml motorcycle,volume_ml,5000,5000
+AUT-2350141B,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-2350141B.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 1000ml truck,season,summer,
+AUT-2350141B,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-2350141B.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 1000ml truck,vehicle_type,truck,
+AUT-2350141B,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-2350141B.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 1000ml truck,viscosity,10W-40,
+AUT-2350141B,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-2350141B.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 1000ml truck,volume_ml,1000,1000
+AUT-25Q94VXA,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-25Q94VXA.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 5W-40 5000ml car,season,all season,
+AUT-25Q94VXA,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-25Q94VXA.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 5W-40 5000ml car,vehicle_type,car,
+AUT-25Q94VXA,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-25Q94VXA.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 5W-40 5000ml car,viscosity,5W-40,
+AUT-25Q94VXA,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-25Q94VXA.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 5W-40 5000ml car,volume_ml,5000,5000
+AUT-268ZJ7CH,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0021_354col62/AUT-268ZJ7CH.json,Mobil,Premium,Delvac DDA-2VG,Engine Oil,Mobil Premium Delvac DDA-2VG Engine Oil 5W-30 5000ml car,season,all season,
+AUT-268ZJ7CH,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0021_354col62/AUT-268ZJ7CH.json,Mobil,Premium,Delvac DDA-2VG,Engine Oil,Mobil Premium Delvac DDA-2VG Engine Oil 5W-30 5000ml car,vehicle_type,car,
+AUT-268ZJ7CH,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0021_354col62/AUT-268ZJ7CH.json,Mobil,Premium,Delvac DDA-2VG,Engine Oil,Mobil Premium Delvac DDA-2VG Engine Oil 5W-30 5000ml car,viscosity,5W-30,
+AUT-268ZJ7CH,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0021_354col62/AUT-268ZJ7CH.json,Mobil,Premium,Delvac DDA-2VG,Engine Oil,Mobil Premium Delvac DDA-2VG Engine Oil 5W-30 5000ml car,volume_ml,5000,5000
+AUT-2H476JUV,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-2H476JUV.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 10W-40 5000ml car,season,winter,
+AUT-2H476JUV,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-2H476JUV.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 10W-40 5000ml car,vehicle_type,car,
+AUT-2H476JUV,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-2H476JUV.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 10W-40 5000ml car,viscosity,10W-40,
+AUT-2H476JUV,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-2H476JUV.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 10W-40 5000ml car,volume_ml,5000,5000
+AUT-2ILSHUWK,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-2ILSHUWK.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 4000ml car,season,summer,
+AUT-2ILSHUWK,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-2ILSHUWK.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 4000ml car,vehicle_type,car,
+AUT-2ILSHUWK,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-2ILSHUWK.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 4000ml car,viscosity,10W-40,
+AUT-2ILSHUWK,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-2ILSHUWK.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 4000ml car,volume_ml,4000,4000
+AUT-2MRPA398,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-2MRPA398.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 5W-30 5000ml truck,season,winter,
+AUT-2MRPA398,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-2MRPA398.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 5W-30 5000ml truck,vehicle_type,truck,
+AUT-2MRPA398,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-2MRPA398.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 5W-30 5000ml truck,viscosity,5W-30,
+AUT-2MRPA398,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-2MRPA398.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 5W-30 5000ml truck,volume_ml,5000,5000
+AUT-2N8H0LIX,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-2N8H0LIX.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 0W-20 4000ml truck,season,winter,
+AUT-2N8H0LIX,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-2N8H0LIX.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 0W-20 4000ml truck,vehicle_type,truck,
+AUT-2N8H0LIX,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-2N8H0LIX.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 0W-20 4000ml truck,viscosity,0W-20,
+AUT-2N8H0LIX,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0025_2tfcaeln/AUT-2N8H0LIX.json,Mobil,Delvac,Super 2UY-028,Engine Oil,Mobil Delvac Super 2UY-028 Engine Oil 0W-20 4000ml truck,volume_ml,4000,4000
+AUT-2OIPJ69K,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-2OIPJ69K.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 5000ml van,season,summer,
+AUT-2OIPJ69K,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-2OIPJ69K.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 5000ml van,vehicle_type,van,
+AUT-2OIPJ69K,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-2OIPJ69K.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 5000ml van,viscosity,10W-40,
+AUT-2OIPJ69K,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-2OIPJ69K.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 10W-40 5000ml van,volume_ml,5000,5000
+AUT-2S58QJPL,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-2S58QJPL.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 0W-20 4000ml motorcycle,season,summer,
+AUT-2S58QJPL,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-2S58QJPL.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 0W-20 4000ml motorcycle,vehicle_type,motorcycle,
+AUT-2S58QJPL,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-2S58QJPL.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 0W-20 4000ml motorcycle,viscosity,0W-20,
+AUT-2S58QJPL,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0017_2x35y9pw/AUT-2S58QJPL.json,Mobil,Mobil 1,Delvac 1B5-M95,Engine Oil,Mobil Mobil 1 Delvac 1B5-M95 Engine Oil 0W-20 4000ml motorcycle,volume_ml,4000,4000
+AUT-2WE3JQ3B,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-2WE3JQ3B.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 0W-20 4000ml universal,season,all season,
+AUT-2WE3JQ3B,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-2WE3JQ3B.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 0W-20 4000ml universal,vehicle_type,universal,
+AUT-2WE3JQ3B,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-2WE3JQ3B.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 0W-20 4000ml universal,viscosity,0W-20,
+AUT-2WE3JQ3B,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0007_23czmouz/AUT-2WE3JQ3B.json,Mobil,Delvac,Delvac 3D5-7XK,Engine Oil,Mobil Delvac Delvac 3D5-7XK Engine Oil 0W-20 4000ml universal,volume_ml,4000,4000
+AUT-2X1K5ATJ,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-2X1K5ATJ.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 5W-40 4000ml van,season,all season,
+AUT-2X1K5ATJ,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-2X1K5ATJ.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 5W-40 4000ml van,vehicle_type,van,
+AUT-2X1K5ATJ,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-2X1K5ATJ.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 5W-40 4000ml van,viscosity,5W-40,
+AUT-2X1K5ATJ,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-2X1K5ATJ.json,Mobil,Delvac,Delvac 2Z0-IKM,Engine Oil,Mobil Delvac Delvac 2Z0-IKM Engine Oil 5W-40 4000ml van,volume_ml,4000,4000
+warning: result truncated at 100 rows
+Next step_3... Query all product_properties for SKU AUT-1TW2JFKX without truncation risk. (19144 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, pp.key, pp.value_text, pp.value_number\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.sku = 'AUT-1TW2JFKX'\nORDER BY pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, pp.key, pp.value_text, pp.value_number
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.sku = 'AUT-1TW2JFKX'
+ORDER BY pp.key;
+SQL
+sku,path,key,value_text,value_number
+AUT-1TW2JFKX,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1TW2JFKX.json,season,all season,
+AUT-1TW2JFKX,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1TW2JFKX.json,vehicle_type,universal,
+AUT-1TW2JFKX,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1TW2JFKX.json,viscosity,10W-40,
+AUT-1TW2JFKX,/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1TW2JFKX.json,volume_ml,5000,5000
+Next step_4... Report completion with required <NO> token and checked SKU. (20898 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved the exact matching SKU for brand/series/model/viscosity/volume.', 'Verified that SKU properties do not include Bluetooth control.'] message='<NO> SKU AUT-1TW2JFKX' grounding_refs=['/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1TW2JFKX.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved the exact matching SKU for brand/series/model/viscosity/volume.
+- Verified that SKU properties do not include Bluetooth control.
+
+[34mAGENT SUMMARY: <NO> SKU AUT-1TW2JFKX[0m
+- [34m/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0015_27j98ib5/AUT-1TW2JFKX.json[0m

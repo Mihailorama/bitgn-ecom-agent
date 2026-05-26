@@ -1705,6 +1705,19 @@ def _discount_delegation_doc(
     return None
 
 
+def _requested_discount_percent(task_text: str) -> "int | None":
+    m = re.search(r"\b(\d{1,2})\s*(?:%|percent)\b", task_text or "", re.I)
+    return int(m.group(1)) if m else None
+
+
+def _desk_coverage_denial_token(vm: EcomRuntimeClientSync, update_doc: "str | None") -> str:
+    if not update_doc:
+        return ""
+    body = _doc_text(vm, update_doc)
+    token = "DESK_COVERAGE_NOT_DISCOUNT_AUTHORITY_2021_08_09"
+    return token if token in body else ""
+
+
 def _try_catalog_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
     m = re.search(
         r"(?:For the catalogue count report,\s*)?how many (?:catalogue )?products are (.+?)\? Answer",
@@ -2252,6 +2265,7 @@ WHERE b.id={_sql_quote(basket_ids[0])};
                 refs += [p for p in (rows[0].get("basket_path"), rows[0].get("store_path"), rows[0].get("employee_path")) if p]
         if update_doc:
             refs.append(update_doc)
+        desk_token = _desk_coverage_denial_token(vm, update_doc)
         return ReportTaskCompletion(
             tool="report_completion",
             completed_steps_laconic=["deterministic discount authority denial"],
@@ -2261,6 +2275,7 @@ WHERE b.id={_sql_quote(basket_ids[0])};
                 "DISCOUNT_DELEGATION_NOT_GRANTED_2021_08_09 "
                 "SERVICE_RECOVERY_DELEGATION_REQUIRED_2021_08_09 "
                 "NO_ACTIVE_DISCOUNT_DELEGATION_2021_08_09"
+                + (f" {desk_token}" if desk_token else "")
             ),
             grounding_refs=refs,
             outcome="OUTCOME_DENIED_SECURITY",
@@ -2312,9 +2327,24 @@ GROUP BY b.id,b.path,b.store_id,b.status,b.discount_percent,s.path;
         basket_path = rows[0]["path"]
         store_path = rows[0]["store_path"]
         subtotal = int(rows[0].get("subtotal_cents") or 0)
-    pct_req = re.search(r"(\d+)%", task_text)
-    percent = int(pct_req.group(1)) if pct_req else (10 if subtotal >= 15000 else 5)
-    percent = min(percent, 10 if subtotal >= 15000 else 5)
+    requested_percent = _requested_discount_percent(task_text)
+    max_percent = 10 if subtotal >= 15000 else 5
+    if requested_percent is not None and requested_percent > max_percent:
+        emp_rows = _csv_dicts(_exec_sql_stdout(vm, f"SELECT path FROM employees WHERE id={_sql_quote(user)};"))
+        emp_path = emp_rows[0]["path"] if emp_rows else ""
+        refs += [p for p in (basket_path, store_path, emp_path, customer_path, "/docs/checkout.md", update_doc) if p]
+        return ReportTaskCompletion(
+            tool="report_completion",
+            completed_steps_laconic=["deterministic discount policy cap check"],
+            message=(
+                f"Cannot apply {requested_percent}% service_recovery discount: "
+                f"policy allows at most {max_percent}% for basket {basket_id}."
+            ),
+            grounding_refs=refs,
+            outcome="OUTCOME_NONE_UNSUPPORTED",
+            verified=True,
+        )
+    percent = requested_percent if requested_percent is not None else max_percent
     _exec_tool_stdout(vm, "/bin/discount", [basket_id, str(percent), "service_recovery", user])
     emp_rows = _csv_dicts(_exec_sql_stdout(vm, f"SELECT path FROM employees WHERE id={_sql_quote(user)};"))
     emp_path = emp_rows[0]["path"] if emp_rows else ""

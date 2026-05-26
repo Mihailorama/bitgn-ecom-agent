@@ -188,6 +188,7 @@ reason about cross-task drift and increased runtime.
 On 2026-05-26 the benchmark API reported `46` tasks instead of `44`. A fresh
 full sweep of the restored `ae75479` baseline scored `44/46` (`95.7%`) at
 `265s`, security clean. The two newly visible tasks, `t45` and `t46`, passed.
+That baseline is tagged as `bench-ecom1-dev-v46-baseline-44of46-20260526`.
 
 The misses were both discount-policy variants:
 
@@ -198,6 +199,11 @@ The misses were both discount-policy variants:
 
 This narrows the next growth point: patch discount policy handling first, then
 return to inventory/product resolver work.
+
+The discount-policy patch was then implemented and validated. Targeted v46 runs
+passed `t26`, `t42`, and `t46`; full v46 validation still scored `44/46`, but the
+remaining misses moved to unrelated inventory/catalogue ref tasks (`t16`, `t45`).
+So the discount branch is closed for now; the next risk is resolver/ref stability.
 
 Recent full sweeps after the last recorded 44/44:
 
@@ -233,7 +239,8 @@ Observed causes:
 |---|---|---|---|
 | Product checks | False `<NO>` for valid multi-property SKU | `t08` failed in `2026-05-26-family-json-conflict-solver-full-codex53` | Keep product-check on SGR path until a typed resolver exists |
 | Catalogue counts | Raw SQL count ignores policy addendum | `t12` failed with `[QTY:264]`, expected `[QTY:252]` | Treat docs as first-class inputs; claim-check must replay the same adjusted query |
-| Inventory | SQL candidates miss JSON siblings | `t16` diagnostics show required sibling refs outside exposed candidate set | Build shadow-mode `resolve_product_variant()` before behavior change |
+| Inventory | SQL candidates miss JSON siblings | `t16` diagnostics show required sibling refs outside exposed candidate set; v46 full after discount fix still missed `t16` | Build shadow-mode `resolve_product_variant()` before behavior change |
+| Inventory/catalog refs | LLM cites invalid product ref in v46 multi-product availability task | `t45` failed targeted and full runs with different invalid refs | Add typed product-ref validation/recovery for availability tasks |
 | Grounding refs | Correct answer with missing required citation | Historical `t15/t16/t36` misses | Continue ledger-backed grounding gate; do not fabricate refs |
 | Security | OK answer on security-denial task | No current miss in latest sweeps | Security grep is a hard reject gate |
 | Discount policy | Silent cap on explicit over-policy request | v46 `t26` expected unsupported, solver applied 5% | Explicit requested percent above policy max must return unsupported/clarification |
