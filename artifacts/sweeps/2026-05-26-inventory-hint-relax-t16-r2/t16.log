@@ -1,0 +1,255 @@
+TASK t16 (model codex:gpt-5.3-codex)
+INSTRUCTION: How many of these products have at least 4 items available in the PowerTool shop by Praterstern in Vienna today: the Cordless Drill Driver from DeWalt in the DeWalt Brushless DW 1IR-DN0 Cordless Drill Driver line that has voltage 18 V, battery platform 18v-system, and kit contents two battery kit,the Nut Bolt and Washer from Dresselhaus in the Dresselhaus Pro Pack DRE 320-E3I Nut Bolt and Washer line that has fastener type bolt, diameter 10 mm, and length 80 mm,the Screwdriver and Hex Key Set from Stanley in the Stanley Comfort Grip STA 3HK-NVY Screwdriver and Hex Key Set line that has tool profile mixed, piece count 12 pcs, and grip type insulated,the Workshop Saw and Cutter from Bosch in the Bosch Industrial GSR 3DM-V4M Workshop Saw and Cutter line that has machine type band saw and voltage 400 V,the Safety Eyewear from 3M in the 3M Peltor Aura 115-80Y Safety Eyewear line that has lens color Gray and size one size,the Pipe Fitting from Giacomini in the Giacomini R Series G Z0Y-FXR Pipe Fitting line that has fitting type compression coupler, diameter 25 mm, and connection type press? Answer in exactly format "[QTY:%d]" (no quotes)
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+INVENTORY_DIAG {"brand": "DeWalt", "candidates": [{"line_score": 8, "matched": [{"keys": ["voltage", "voltage_v"], "matched": true, "value": "18 v"}, {"keys": ["battery_platform", "battery_system", "battery_voltage", "battery_platform_v"], "matched": true, "value": "18v-system"}, {"keys": ["kit_contents"], "matched": false, "value": "two battery kit"}], "name": "DeWalt Brushless DW 1IR-DN0 Cordless Drill Driver 18V starter kit", "path": "/proc/catalog/power_tools/cordless_drill_driver/fam_power_tools_cordless_drill_driver_0027_1mg8tlif/PWR-1CGL4ZRQ.json", "prop_matches": 2, "props": {"battery_platform": ["18v-system", ""], "kit_contents": ["starter kit", ""], "max_torque_nm": ["70", "70"], "power_source": ["battery", ""], "voltage_v": ["18", "18"]}, "sku": "PWR-1CGL4ZRQ"}, {"line_score": 8, "matched": [{"keys": ["voltage", "voltage_v"], "matched": true, "value": "18 v"}, {"keys": ["battery_platform", "battery_system", "battery_voltage", "battery_platform_v"], "matched": true, "value": "18v-system"}, {"keys": ["kit_contents"], "matched": false, "value": "two battery kit"}], "name": "DeWalt Brushless DW 1IR-DN0 Cordless Drill Driver 18V case", "path": "/proc/catalog/power_tools/cordless_drill_driver/fam_power_tools_cordless_drill_driver_0027_1mg8tlif/PWR-229XOA2J.json", "prop_matches": 2, "props": {"battery_platform": ["18v-system", ""], "kit_contents": ["case", ""], "max_torque_nm": ["70", "70"], "power_source": ["battery", ""], "voltage_v": ["18", "18"]}, "sku": "PWR-229XOA2J"}, {"line_score": 8, "matched": [{"keys": ["voltage", "voltage_v"], "matched": false, "value": "18 v"}, {"keys": ["battery_platform", "battery_system", "battery_voltage", "battery_platform_v"], "matched": false, "value": "18v-system"}, {"keys": ["kit_contents"], "matched": true, "value": "two battery kit"}], "name": "DeWalt Brushless DW 1IR-DN0 Cordless Drill Driver 36V two battery kit", "path": "/proc/catalog/power_tools/cordless_drill_driver/fam_power_tools_cordless_drill_driver_0027_1mg8tlif/PWR-27KW41M7.json", "prop_matches": 1, "props": {"battery_platform": ["xl-system", ""], "kit_contents": ["two battery kit", ""], "max_torque_nm": ["70", "70"], "power_source": ["battery", ""], "voltage_v": ["36", "36"]}, "sku": "PWR-27KW41M7"}, {"line_score": 8, "matched": [{"keys": ["voltage", "voltage_v"], "matched": false, "value": "18 v"}, {"keys": ["battery_platform", "battery_system", "battery_voltage", "battery_platform_v"], "matched": false, "value": "18v-system"}, {"keys": ["kit_contents"], "matched": false, "value": "two battery kit"}], "name": "DeWalt Brushless DW 1IR-DN0 Cordless Drill Driver 12V bare tool", "path": "/proc/catalog/power_tools/cordless_drill_driver/fam_power_tools_cordless_drill_driver_0027_1mg8tlif/PWR-1SUC1Z3O.json", "prop_matches": 0, "props": {"battery_platform": ["12v-system", ""], "kit_contents": ["bare tool", ""], "max_torque_nm": ["70", "70"], "power_source": ["battery", ""], "voltage_v": ["12", "12"]}, "sku": "PWR-1SUC1Z3O"}], "kind": "Cordless Drill Driver", "line": "DeWalt Brushless DW 1IR-DN0 Cordless Drill Driver", "props": [{"keys": ["voltage", "voltage_v"], "value": "18 v"}, {"keys": ["battery_platform", "battery_system", "battery_voltage", "battery_platform_v"], "value": "18v-system"}, {"keys": ["kit_contents"], "value": "two battery kit"}], "reason": "fallback_single", "selected": {"path": "/proc/catalog/power_tools/cordless_drill_driver/fam_power_tools_cordless_drill_driver_0027_1mg8tlif/PWR-1CGL4ZRQ.json", "sku": "PWR-1CGL4ZRQ"}, "store_id": "store_vienna_praterstern", "threshold": 4}
+INVENTORY_DIAG {"brand": "Dresselhaus", "exact_candidates": [{"path": "/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0014_22xnnom1/FST-11EWGVOW.json", "sku": "FST-11EWGVOW"}], "inventory": [{"available_today": "0", "sku": "FST-11EWGVOW"}], "kind": "Nut Bolt and Washer", "line": "Dresselhaus Pro Pack DRE 320-E3I Nut Bolt and Washer", "props": [{"keys": ["fastener_type"], "value": "bolt"}, {"keys": ["diameter", "diameter_mm"], "value": "10 mm"}, {"keys": ["length", "length_mm"], "value": "80 mm"}], "reason": "exact_group", "selected": null, "store_id": "store_vienna_praterstern", "threshold": 4}
+INVENTORY_DIAG {"brand": "Stanley", "candidates": [{"line_score": 11, "matched": [{"keys": ["tool_profile"], "matched": false, "value": "mixed"}, {"keys": ["piece_count"], "matched": false, "value": "12 pcs"}, {"keys": ["grip_type"], "matched": true, "value": "insulated"}], "name": "Stanley Comfort Grip STA 3HK-NVY Screwdriver and Hex Key Set phillips 8pc insulated", "path": "/proc/catalog/hand_tools/screwdriver_hex_sets/fam_hand_tools_screwdriver_hex_sets_0004_2ik94tzz/HND-1DU7AYG1.json", "prop_matches": 1, "props": {"grip_type": ["insulated", ""], "material": ["stainless steel", ""], "piece_count": ["8", "8"], "tool_profile": ["phillips", ""]}, "sku": "HND-1DU7AYG1"}, {"line_score": 11, "matched": [{"keys": ["tool_profile"], "matched": false, "value": "mixed"}, {"keys": ["piece_count"], "matched": false, "value": "12 pcs"}, {"keys": ["grip_type"], "matched": false, "value": "insulated"}], "name": "Stanley Comfort Grip STA 3HK-NVY Screwdriver and Hex Key Set pozidriv 18pc ergonomic", "path": "/proc/catalog/hand_tools/screwdriver_hex_sets/fam_hand_tools_screwdriver_hex_sets_0004_2ik94tzz/HND-188UVOSH.json", "prop_matches": 0, "props": {"grip_type": ["ergonomic", ""], "material": ["stainless steel", ""], "piece_count": ["18", "18"], "tool_profile": ["pozidriv", ""]}, "sku": "HND-188UVOSH"}, {"line_score": 11, "matched": [{"keys": ["tool_profile"], "matched": false, "value": "mixed"}, {"keys": ["piece_count"], "matched": false, "value": "12 pcs"}, {"keys": ["grip_type"], "matched": false, "value": "insulated"}], "name": "Stanley Comfort Grip STA 3HK-NVY Screwdriver and Hex Key Set hex 18pc soft grip", "path": "/proc/catalog/hand_tools/screwdriver_hex_sets/fam_hand_tools_screwdriver_hex_sets_0004_2ik94tzz/HND-1X2HQ325.json", "prop_matches": 0, "props": {"grip_type": ["soft grip", ""], "material": ["stainless steel", ""], "piece_count": ["18", "18"], "tool_profile": ["hex", ""]}, "sku": "HND-1X2HQ325"}], "kind": "Screwdriver and Hex Key Set", "line": "Stanley Comfort Grip STA 3HK-NVY Screwdriver and Hex Key Set", "props": [{"keys": ["tool_profile"], "value": "mixed"}, {"keys": ["piece_count"], "value": "12 pcs"}, {"keys": ["grip_type"], "value": "insulated"}], "reason": "fallback_single", "selected": {"path": "/proc/catalog/hand_tools/screwdriver_hex_sets/fam_hand_tools_screwdriver_hex_sets_0004_2ik94tzz/HND-1DU7AYG1.json", "sku": "HND-1DU7AYG1"}, "store_id": "store_vienna_praterstern", "threshold": 4}
+INVENTORY_DIAG {"brand": "Bosch", "exact_candidates": [{"path": "/proc/catalog/workshop_machines/saws_cutters/fam_workshop_machines_saws_cutters_0001_1xyaedmv/MAC-3LMNAB8T.json", "sku": "MAC-3LMNAB8T"}], "inventory": [{"available_today": "0", "sku": "MAC-3LMNAB8T"}], "kind": "Workshop Saw and Cutter", "line": "Bosch Industrial GSR 3DM-V4M Workshop Saw and Cutter", "props": [{"keys": ["machine_type"], "value": "band saw"}, {"keys": ["voltage", "voltage_v"], "value": "400 v"}], "reason": "exact_group", "selected": null, "store_id": "store_vienna_praterstern", "threshold": 4}
+INVENTORY_DIAG {"brand": "3M", "exact_candidates": [{"path": "/proc/catalog/safety_gear/safety_eyewear/fam_safety_gear_safety_eyewear_0003_3n9mor98/SFE-3CH04G2K.json", "sku": "SFE-3CH04G2K"}], "inventory": [{"available_today": "0", "sku": "SFE-3CH04G2K"}], "kind": "Safety Eyewear", "line": "3M Peltor Aura 115-80Y Safety Eyewear", "props": [{"keys": ["lens_color"], "value": "gray"}, {"keys": ["size"], "value": "one size"}], "reason": "exact_group", "selected": null, "store_id": "store_vienna_praterstern", "threshold": 4}
+INVENTORY_DIAG {"brand": "Giacomini", "exact_candidates": [{"path": "/proc/catalog/plumbing/pipe_fittings/fam_plumbing_pipe_fittings_0009_2r9roh3w/PLB-1B728Q0W.json", "sku": "PLB-1B728Q0W"}], "inventory": [{"available_today": "0", "sku": "PLB-1B728Q0W"}], "kind": "Pipe Fitting", "line": "Giacomini R Series G Z0Y-FXR Pipe Fitting", "props": [{"keys": ["fitting_type"], "value": "compression coupler"}, {"keys": ["diameter", "diameter_mm"], "value": "25 mm"}, {"keys": ["connection_type"], "value": "press"}], "reason": "exact_group", "selected": null, "store_id": "store_vienna_praterstern", "threshold": 4}
+[32mdeterministic solver[0m: _try_inventory_count
+[32magent OUTCOME_OK[0m. Summary:
+- deterministic store inventory count via SQL
+
+[34mAGENT SUMMARY: [QTY:0][0m
+- [34m/proc/stores/store_vienna_praterstern.json[0m

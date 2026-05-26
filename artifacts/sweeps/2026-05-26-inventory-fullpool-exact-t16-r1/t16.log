@@ -1,0 +1,256 @@
+TASK t16 (model codex:gpt-5.3-codex)
+INSTRUCTION: How many of these products have at least 4 items available in the central Graz PowerTool shop today: the Automotive Charger and Bulb from Osram in the Osram Classic OS K0I-SX5 Automotive Charger and Bulb line that has product type battery charger, voltage 12 V, and current 6 A,the Anchor and Wall Plug from Tox in the Tox Universal TOX 1HZ-MZK Anchor and Wall Plug line that has anchor type frame fixing, diameter 6 mm, and length 120 mm,the Cordless Saw and Sander from Ryobi in the Ryobi Max Power RCS 3FX-QDI Cordless Saw and Sander line that has tool type planer,the Wall Paint from Sikkens in the Sikkens Premium Cetol 3SV-3N2 Wall Paint line that has color family White,the Cordless Drill Driver from Bosch in the Bosch Compact BBS 3SA-YG3 Cordless Drill Driver line that has voltage 12 V, battery platform 12v-system, and kit contents case,the Shelving and Cabinet from Allit in the Allit Modular ALI 2VR-120 Shelving and Cabinet line that has storage type workshop cart, color family Red, and volume 25 l? Answer in exactly format "count : %d" (no quotes)
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+INVENTORY_DIAG {"brand": "Osram", "exact_candidates": [{"path": "/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0012_2dqsst0f/AUT-3H95P7AO.json", "sku": "AUT-3H95P7AO"}, {"path": "/proc/catalog/automotive/chargers_bulbs/fam_automotive_chargers_bulbs_0012_2dqsst0f/AUT-3JICBZY2.json", "sku": "AUT-3JICBZY2"}], "inventory": [], "kind": "Automotive Charger and Bulb", "line": "Osram Classic OS K0I-SX5 Automotive Charger and Bulb", "props": [{"keys": ["product_type"], "value": "battery charger"}, {"keys": ["voltage", "voltage_v"], "value": "12 v"}, {"keys": ["current", "current_a"], "value": "6 a"}], "reason": "exact_group", "selected": null, "store_id": "store_graz_jakomini", "threshold": 4}
+INVENTORY_DIAG {"brand": "Tox", "exact_candidates": [{"path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0004_x7g4qhql/FST-TV03QSPF.json", "sku": "FST-TV03QSPF"}], "inventory": [], "kind": "Anchor and Wall Plug", "line": "Tox Universal TOX 1HZ-MZK Anchor and Wall Plug", "props": [{"keys": ["anchor_type"], "value": "frame fixing"}, {"keys": ["diameter", "diameter_mm"], "value": "6 mm"}, {"keys": ["length", "length_mm"], "value": "120 mm"}], "reason": "exact_group", "selected": null, "store_id": "store_graz_jakomini", "threshold": 4}
+INVENTORY_DIAG {"brand": "Ryobi", "exact_candidates": [{"path": "/proc/catalog/power_tools/cordless_saw_sander/fam_power_tools_cordless_saw_sander_0012_1djyrg2i/PWR-36VXZAXL.json", "sku": "PWR-36VXZAXL"}], "inventory": [], "kind": "Cordless Saw and Sander", "line": "Ryobi Max Power RCS 3FX-QDI Cordless Saw and Sander", "props": [{"keys": ["tool_type"], "value": "planer"}], "reason": "exact_group", "selected": null, "store_id": "store_graz_jakomini", "threshold": 4}
+INVENTORY_DIAG {"brand": "Sikkens", "exact_candidates": [{"path": "/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0004_1f15bjf6/PNT-10A5POBG.json", "sku": "PNT-10A5POBG"}, {"path": "/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0011_22aommne/PNT-1QGKY4H0.json", "sku": "PNT-1QGKY4H0"}, {"path": "/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0011_22aommne/PNT-1SF04EZ9.json", "sku": "PNT-1SF04EZ9"}, {"path": "/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0002_33m7fvug/PNT-13E1KYHN.json", "sku": "PNT-13E1KYHN"}, {"path": "/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0002_33m7fvug/PNT-211Z6C91.json", "sku": "PNT-211Z6C91"}], "inventory": [{"available_today": "6", "sku": "PNT-1SF04EZ9"}], "kind": "Wall Paint", "line": "Sikkens Premium Cetol 3SV-3N2 Wall Paint", "props": [{"keys": ["color_family", "color", "colour_family", "colour"], "value": "white"}], "reason": "exact_group", "selected": {"path": "/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0011_22aommne/PNT-1SF04EZ9.json", "sku": "PNT-1SF04EZ9"}, "store_id": "store_graz_jakomini", "threshold": 4}
+INVENTORY_DIAG {"brand": "Bosch", "candidates": [{"line_score": 5, "matched": [{"keys": ["voltage", "voltage_v"], "matched": true, "value": "12 v"}, {"keys": ["battery_platform", "battery_system", "battery_voltage", "battery_platform_v"], "matched": true, "value": "12v-system"}, {"keys": ["kit_contents"], "matched": false, "value": "case"}], "name": "Bosch Compact IXO G9T-QOS Cordless Drill Driver 12V bare tool", "path": "/proc/catalog/power_tools/cordless_drill_driver/fam_power_tools_cordless_drill_driver_0008_298iporg/PWR-29NSBIEN.json", "prop_matches": 2, "props": {"battery_platform": ["12v-system", ""], "kit_contents": ["bare tool", ""], "max_torque_nm": ["28", "28"], "power_source": ["battery", ""], "voltage_v": ["12", "12"]}, "sku": "PWR-29NSBIEN"}, {"line_score": 4, "matched": [{"keys": ["voltage", "voltage_v"], "matched": true, "value": "12 v"}, {"keys": ["battery_platform", "battery_system", "battery_voltage", "battery_platform_v"], "matched": true, "value": "12v-system"}, {"keys": ["kit_contents"], "matched": false, "value": "case"}], "name": "Bosch Universal GWS 1SQ-AWH Cordless Drill Driver 12V bare tool", "path": "/proc/catalog/power_tools/cordless_drill_driver/fam_power_tools_cordless_drill_driver_0002_1q68crtw/PWR-2IYIBUB4.json", "prop_matches": 2, "props": {"battery_platform": ["12v-system", ""], "kit_contents": ["bare tool", ""], "max_torque_nm": ["120", "120"], "power_source": ["battery", ""], "voltage_v": ["12", "12"]}, "sku": "PWR-2IYIBUB4"}, {"line_score": 5, "matched": [{"keys": ["voltage", "voltage_v"], "matched": false, "value": "12 v"}, {"keys": ["battery_platform", "battery_system", "battery_voltage", "battery_platform_v"], "matched": false, "value": "12v-system"}, {"keys": ["kit_contents"], "matched": true, "value": "case"}], "name": "Bosch Compact IXO G9T-QOS Cordless Drill Driver 36V case", "path": "/proc/catalog/power_tools/cordless_drill_driver/fam_power_tools_cordless_drill_driver_0008_298iporg/PWR-16GU4PCN.json", "prop_matches": 1, "props": {"battery_platform": ["xl-system", ""], "kit_contents": ["case", ""], "max_torque_nm": ["28", "28"], "power_source": ["battery", ""], "voltage_v": ["36", "36"]}, "sku": "PWR-16GU4PCN"}, {"line_score": 5, "matched": [{"keys": ["voltage", "voltage_v"], "matched": false, "value": "12 v"}, {"keys": ["battery_platform", "battery_system", "battery_voltage", "battery_platform_v"], "matched": false, "value": "12v-system"}, {"keys": ["kit_contents"], "matched": true, "value": "case"}], "name": "Bosch Compact IXO G9T-QOS Cordless Drill Driver 20V case", "path": "/proc/catalog/power_tools/cordless_drill_driver/fam_power_tools_cordless_drill_driver_0008_298iporg/PWR-2KVK7O4O.json", "prop_matches": 1, "props": {"battery_platform": ["20v-system", ""], "kit_contents": ["case", ""], "max_torque_nm": ["28", "28"], "power_source": ["battery", ""], "voltage_v": ["20", "20"]}, "sku": "PWR-2KVK7O4O"}, {"line_score": 4, "matched": [{"keys": ["voltage", "voltage_v"], "matched": false, "value": "12 v"}, {"keys": ["battery_platform", "battery_system", "battery_voltage", "battery_platform_v"], "matched": false, "value": "12v-system"}, {"keys": ["kit_contents"], "matched": true, "value": "case"}], "name": "Bosch Universal GWS 1PI-EVK Cordless Drill Driver 18V case", "path": "/proc/catalog/power_tools/cordless_drill_driver/fam_power_tools_cordless_drill_driver_0023_3gjvud6q/PWR-199G2FQ8.json", "prop_matches": 1, "props": {"battery_platform": ["18v-system", ""], "kit_contents": ["case", ""], "max_torque_nm": ["120", "120"], "power_source": ["battery", ""], "voltage_v": ["18", "18"]}, "sku": "PWR-199G2FQ8"}, {"line_score": 4, "matched": [{"keys": ["voltage", "voltage_v"], "matched": false, "value": "12 v"}, {"keys": ["battery_platform", "battery_system", "battery_voltage", "battery_platform_v"], "matched": false, "value": "12v-system"}, {"keys": ["kit_contents"], "matched": true, "value": "case"}], "name": "Bosch Universal GWS 1SQ-AWH Cordless Drill Driver 18V case", "path": "/proc/catalog/power_tools/cordless_drill_driver/fam_power_tools_cordless_drill_driver_0002_1q68crtw/PWR-2GR0PAQ5.json", "prop_matches": 1, "props": {"battery_platform": ["18v-system", ""], "kit_contents": ["case", ""], "max_torque_nm": ["120", "120"], "power_source": ["battery", ""], "voltage_v": ["18", "18"]}, "sku": "PWR-2GR0PAQ5"}, {"line_score": 5, "matched": [{"keys": ["voltage", "voltage_v"], "matched": false, "value": "12 v"}, {"keys": ["battery_platform", "battery_system", "battery_voltage", "battery_platform_v"], "matched": false, "value": "12v-system"}, {"keys": ["kit_contents"], "matched": false, "value": "case"}], "name": "Bosch Compact IXO G9T-QOS Cordless Drill Driver 20V bare tool", "path": "/proc/catalog/power_tools/cordless_drill_driver/fam_power_tools_cordless_drill_driver_0008_298iporg/PWR-14S7474E.json", "prop_matches": 0, "props": {"battery_platform": ["20v-system", ""], "kit_contents": ["bare tool", ""], "max_torque_nm": ["28", "28"], "power_source": ["battery", ""], "voltage_v": ["20", "20"]}, "sku": "PWR-14S7474E"}, {"line_score": 5, "matched": [{"keys": ["voltage", "voltage_v"], "matched": false, "value": "12 v"}, {"keys": ["battery_platform", "battery_system", "battery_voltage", "battery_platform_v"], "matched": false, "value": "12v-system"}, {"keys": ["kit_contents"], "matched": false, "value": "case"}], "name": "Bosch Compact IXO G9T-QOS Cordless Drill Driver 20V starter kit", "path": "/proc/catalog/power_tools/cordless_drill_driver/fam_power_tools_cordless_drill_driver_0008_298iporg/PWR-16O4G94R.json", "prop_matches": 0, "props": {"battery_platform": ["20v-system", ""], "kit_contents": ["starter kit", ""], "max_torque_nm": ["28", "28"], "power_source": ["battery", ""], "voltage_v": ["20", "20"]}, "sku": "PWR-16O4G94R"}], "kind": "Cordless Drill Driver", "line": "Bosch Compact BBS 3SA-YG3 Cordless Drill Driver", "props": [{"keys": ["voltage", "voltage_v"], "value": "12 v"}, {"keys": ["battery_platform", "battery_system", "battery_voltage", "battery_platform_v"], "value": "12v-system"}, {"keys": ["kit_contents"], "value": "case"}], "reason": "fallback_single", "selected": {"path": "/proc/catalog/power_tools/cordless_drill_driver/fam_power_tools_cordless_drill_driver_0008_298iporg/PWR-29NSBIEN.json", "sku": "PWR-29NSBIEN"}, "store_id": "store_graz_jakomini", "threshold": 4}
+INVENTORY_DIAG {"brand": "Allit", "candidates": [{"line_score": 8, "matched": [{"keys": ["storage_type"], "matched": false, "value": "workshop cart"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "red"}, {"keys": ["volume", "volume_l"], "matched": true, "value": "25 l"}], "name": "Allit Modular ALI 2VR-120 Shelving and Cabinet shelving unit 25l Black", "path": "/proc/catalog/storage/shelving_cabinets/fam_storage_shelving_cabinets_0007_p99sp1an/STO-1XDRU1UC.json", "prop_matches": 1, "props": {"color_family": ["black", ""], "material": ["plastic", ""], "stackable": ["no", ""], "storage_type": ["shelving unit", ""], "volume_l": ["25", "25"]}, "sku": "STO-1XDRU1UC"}, {"line_score": 8, "matched": [{"keys": ["storage_type"], "matched": true, "value": "workshop cart"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "red"}, {"keys": ["volume", "volume_l"], "matched": false, "value": "25 l"}], "name": "Allit Modular ALI 2VR-120 Shelving and Cabinet workshop cart 120l Black", "path": "/proc/catalog/storage/shelving_cabinets/fam_storage_shelving_cabinets_0007_p99sp1an/STO-272AX8JW.json", "prop_matches": 1, "props": {"color_family": ["black", ""], "material": ["plastic", ""], "stackable": ["system only", ""], "storage_type": ["workshop cart", ""], "volume_l": ["120", "120"]}, "sku": "STO-272AX8JW"}, {"line_score": 8, "matched": [{"keys": ["storage_type"], "matched": false, "value": "workshop cart"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": true, "value": "red"}, {"keys": ["volume", "volume_l"], "matched": false, "value": "25 l"}], "name": "Allit Modular ALI 2VR-120 Shelving and Cabinet shelving unit 80l Red", "path": "/proc/catalog/storage/shelving_cabinets/fam_storage_shelving_cabinets_0007_p99sp1an/STO-2C0JUVN5.json", "prop_matches": 1, "props": {"color_family": ["red", ""], "material": ["plastic", ""], "stackable": ["yes", ""], "storage_type": ["shelving unit", ""], "volume_l": ["80", "80"]}, "sku": "STO-2C0JUVN5"}, {"line_score": 8, "matched": [{"keys": ["storage_type"], "matched": false, "value": "workshop cart"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "red"}, {"keys": ["volume", "volume_l"], "matched": false, "value": "25 l"}], "name": "Allit Modular ALI 2VR-120 Shelving and Cabinet stacking box 40l Gray", "path": "/proc/catalog/storage/shelving_cabinets/fam_storage_shelving_cabinets_0007_p99sp1an/STO-1KXQZ93I.json", "prop_matches": 0, "props": {"color_family": ["gray", ""], "material": ["plastic", ""], "stackable": ["no", ""], "storage_type": ["stacking box", ""], "volume_l": ["40", "40"]}, "sku": "STO-1KXQZ93I"}, {"line_score": 8, "matched": [{"keys": ["storage_type"], "matched": false, "value": "workshop cart"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "red"}, {"keys": ["volume", "volume_l"], "matched": false, "value": "25 l"}], "name": "Allit Modular ALI 2VR-120 Shelving and Cabinet stacking box 120l Clear", "path": "/proc/catalog/storage/shelving_cabinets/fam_storage_shelving_cabinets_0007_p99sp1an/STO-1Q57KID3.json", "prop_matches": 0, "props": {"color_family": ["clear", ""], "material": ["plastic", ""], "stackable": ["no", ""], "storage_type": ["stacking box", ""], "volume_l": ["120", "120"]}, "sku": "STO-1Q57KID3"}, {"line_score": 8, "matched": [{"keys": ["storage_type"], "matched": false, "value": "workshop cart"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "red"}, {"keys": ["volume", "volume_l"], "matched": false, "value": "25 l"}], "name": "Allit Modular ALI 2VR-120 Shelving and Cabinet drawer cabinet 60l Black", "path": "/proc/catalog/storage/shelving_cabinets/fam_storage_shelving_cabinets_0007_p99sp1an/STO-1YZLVBSK.json", "prop_matches": 0, "props": {"color_family": ["black", ""], "material": ["plastic", ""], "stackable": ["system only", ""], "storage_type": ["drawer cabinet", ""], "volume_l": ["60", "60"]}, "sku": "STO-1YZLVBSK"}, {"line_score": 8, "matched": [{"keys": ["storage_type"], "matched": false, "value": "workshop cart"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "red"}, {"keys": ["volume", "volume_l"], "matched": false, "value": "25 l"}], "name": "Allit Modular ALI 2VR-120 Shelving and Cabinet shelving unit 60l Gray", "path": "/proc/catalog/storage/shelving_cabinets/fam_storage_shelving_cabinets_0007_p99sp1an/STO-22L1H4U1.json", "prop_matches": 0, "props": {"color_family": ["gray", ""], "material": ["plastic", ""], "stackable": ["yes", ""], "storage_type": ["shelving unit", ""], "volume_l": ["60", "60"]}, "sku": "STO-22L1H4U1"}, {"line_score": 8, "matched": [{"keys": ["storage_type"], "matched": false, "value": "workshop cart"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "red"}, {"keys": ["volume", "volume_l"], "matched": false, "value": "25 l"}], "name": "Allit Modular ALI 2VR-120 Shelving and Cabinet drawer cabinet 80l Black", "path": "/proc/catalog/storage/shelving_cabinets/fam_storage_shelving_cabinets_0007_p99sp1an/STO-2D6E5I4D.json", "prop_matches": 0, "props": {"color_family": ["black", ""], "material": ["plastic", ""], "stackable": ["yes", ""], "storage_type": ["drawer cabinet", ""], "volume_l": ["80", "80"]}, "sku": "STO-2D6E5I4D"}], "kind": "Shelving and Cabinet", "line": "Allit Modular ALI 2VR-120 Shelving and Cabinet", "props": [{"keys": ["storage_type"], "value": "workshop cart"}, {"keys": ["color_family", "color", "colour_family", "colour"], "value": "red"}, {"keys": ["volume", "volume_l"], "value": "25 l"}], "reason": "fallback_single", "selected": {"path": "/proc/catalog/storage/shelving_cabinets/fam_storage_shelving_cabinets_0007_p99sp1an/STO-1XDRU1UC.json", "sku": "STO-1XDRU1UC"}, "store_id": "store_graz_jakomini", "threshold": 4}
+[32mdeterministic solver[0m: _try_inventory_count
+[32magent OUTCOME_OK[0m. Summary:
+- deterministic store inventory count via SQL
+
+[34mAGENT SUMMARY: count : 1[0m
+- [34m/proc/stores/store_graz_jakomini.json[0m
+- [34m/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0011_22aommne/PNT-1SF04EZ9.json[0m

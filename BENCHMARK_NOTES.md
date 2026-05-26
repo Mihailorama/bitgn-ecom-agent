@@ -187,6 +187,51 @@ latest stability runs are mostly `43/44`:
     real resolver diagnostic layer that records exact candidate sets, inventory
     rows, chosen ref, and reason code per requested product.
 
+### 2026-05-26 resumed baseline and t16 diagnostics
+
+- Re-checked historical 44/44 tag `ae75479` in an isolated worktree. Fresh full
+  sweep scored `95.5%` (`42/44`) at `217s`, security clean; misses were:
+  - `t12`: catalogue count returned `264`, grader expected `255`.
+  - `t16`: inventory answer missed required product ref
+    `/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-3JE8LRY8.json`.
+  Logs: `artifacts/sweeps/2026-05-26-ae75479-full-1/`.
+- `t12` root cause: catalogue policy-update filenames can encode a family to
+  exclude (`fam-...`). Counting all `product_kinds.name` rows overcounts by that
+  family. Current fix excludes that family id when the reporting addendum path
+  contains one.
+- `t16` rejected experiment: disabling deterministic inventory and forcing the
+  LLM path was slower and still missed refs:
+  `artifacts/sweeps/2026-05-26-disable-inventory-solver-t12-t16/` and
+  `artifacts/sweeps/2026-05-26-llm-inventory-store-sql-shape-t16/`.
+  The LLM repeatedly used over-strict `series/model` filters and sometimes
+  compared `products.name` to bare kind names.
+- `t16` rejected experiment: opt-in deterministic inventory with expanded
+  candidate diagnostics and full-pool exact retries still scored only `2/6`
+  targeted `t16` seeds. Logs:
+  `artifacts/sweeps/2026-05-26-inventory-fullpool-exact-t16-r*/`.
+- Current decision: keep deterministic inventory enabled for speed until the
+  resolver is replaced. Use `DETERMINISTIC_INVENTORY=0` only for diagnostics;
+  it is not a submission profile.
+- Current submission-shape check after isolating the `t12` fix:
+  `artifacts/sweeps/2026-05-26-t12-fix-full-codex53/` scored `93.2%`
+  (`41/44`) at `236s`, security clean. `t12` passed, but misses were `t06`
+  model variance plus deterministic inventory misses on `t15/t16`. Do not treat
+  the current code diff as a leaderboard improvement until the inventory resolver
+  is closed.
+- Rejected product-check solver probe:
+  `artifacts/sweeps/2026-05-26-product-check-solver-targeted/` showed wiring
+  `_try_product_check` into deterministic solvers fixes one `t06` seed, but
+  immediately regresses `t05` and `t32` with wrong/missing catalogue refs. Keep
+  product-check resolution on the LLM path until it has the same typed resolver
+  and ref-policy layer as inventory.
+- New `t16` diagnostic signal:
+  `artifacts/sweeps/2026-05-26-inventory-diag-after-t12-fix/` shows missing
+  required refs can be siblings in the same `family_id` as SQL candidates, while
+  the SQL `products`/`product_properties` candidate set does not expose the
+  required SKU. The next resolver should augment SQL candidates with listed/read
+  JSON siblings from the candidate family directory before declaring a variant
+  unresolved or falling back to a partial sibling.
+
 Current state in `agent.py` includes:
 - EvidenceLedger + `_harvest`: tracks every confirmed `/proc` path (SQL `path` col,
   read/stat/find/search/list).
@@ -226,11 +271,13 @@ is still unmet at 100% quality.
 2. Close the restored-baseline `t16` inventory grounding miss with a narrow
    resolver, but do not revive either rejected branch verbatim:
    `2026-05-25-t16-exact-variant-rejected` or
-   `2026-05-26-rejected-strict-only-41of44`.
+   `2026-05-26-rejected-strict-only-41of44`, and do not rely on the
+   `DETERMINISTIC_INVENTORY=0` LLM-only path.
    Required shape: structured `resolve_product_variant()` returning exact
    candidate groups plus reason codes (`exact`, `ambiguous`, `unresolved`), then
    a separate `build_inventory_refs()` policy that can be unit-tested against
-   saved `t16` logs.
+   saved `t16` logs. It must merge SQL rows with catalog JSON siblings from
+   candidate `family_id` directories before using any relaxed fallback.
 3. Refactor step 1 (no behavior expansion): isolate helper layer for
    `resolve_product_variant()` and `build_grounding_refs()` so variant logic and
    refs logic are testable independently.

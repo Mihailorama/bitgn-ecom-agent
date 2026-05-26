@@ -1,0 +1,695 @@
+TASK t20 (model codex:gpt-5.3-codex)
+INSTRUCTION: I can visit any PowerTool branch in Graz today. Across every Graz branch, including branches with 0 availability, how many units of product (the Wiper Blade from Valeo in the Valeo Winter VF 1JR-UBR Wiper Blade line that has length 550 mm and adapter type multi adapter) are available today? Answer exactly as "count : %d" and cite every city store record plus the product record.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query SQL to uniquely identify the product SKU/path matching brand/series/model/name and required properties (length 550 mm, adapter type multi adapter). (15924 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       MAX(CASE WHEN pp.key='length_mm' THEN COALESCE(pp.value_number, CAST(pp.value_text AS REAL)) END) AS length_mm,\n       MAX(CASE WHEN pp.key='adapter_type' THEN pp.value_text END) AS adapter_type\nFROM products p\nJOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'Valeo'\n  AND p.series = 'Valeo Winter VF'\n  AND p.model = '1JR-UBR'\n  AND p.name = 'Wiper Blade'\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name\nHAVING length_mm = 550\n   AND adapter_type = 'multi adapter';"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       MAX(CASE WHEN pp.key='length_mm' THEN COALESCE(pp.value_number, CAST(pp.value_text AS REAL)) END) AS length_mm,
+       MAX(CASE WHEN pp.key='adapter_type' THEN pp.value_text END) AS adapter_type
+FROM products p
+JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'Valeo'
+  AND p.series = 'Valeo Winter VF'
+  AND p.model = '1JR-UBR'
+  AND p.name = 'Wiper Blade'
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name
+HAVING length_mm = 550
+   AND adapter_type = 'multi adapter';
+SQL
+sku,path,brand,series,model,name,length_mm,adapter_type
+Next step_2... Run a broader SQL lookup for Valeo Wiper Blade candidates and their property key/value rows. (22984 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       pp.key, pp.value_text, pp.value_number\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'Valeo'\n  AND p.name = 'Wiper Blade'\nORDER BY p.series, p.model, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       pp.key, pp.value_text, pp.value_number
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'Valeo'
+  AND p.name = 'Wiper Blade'
+ORDER BY p.series, p.model, p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,key,value_text,value_number
+Next step_3... Query candidate products using a wider text match on wiper/blade/valeo across brand/series/model/name. (12802 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       pp.key, pp.value_text, pp.value_number\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE lower(p.brand) LIKE '%valeo%'\n   OR lower(p.series) LIKE '%valeo%'\n   OR lower(p.name) LIKE '%wiper%'\n   OR lower(p.name) LIKE '%blade%'\n   OR lower(p.series) LIKE '%wiper%'\n   OR lower(p.model) LIKE '%ubr%'\nORDER BY p.brand, p.series, p.model, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       pp.key, pp.value_text, pp.value_number
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE lower(p.brand) LIKE '%valeo%'
+   OR lower(p.series) LIKE '%valeo%'
+   OR lower(p.name) LIKE '%wiper%'
+   OR lower(p.name) LIKE '%blade%'
+   OR lower(p.series) LIKE '%wiper%'
+   OR lower(p.model) LIKE '%ubr%'
+ORDER BY p.brand, p.series, p.model, p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,key,value_text,value_number
+AUT-16CXDMGI,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-16CXDMGI.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 550mm bayonet all season,adapter_type,bayonet,
+AUT-16CXDMGI,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-16CXDMGI.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 550mm bayonet all season,length_mm,550,550
+AUT-16CXDMGI,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-16CXDMGI.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 550mm bayonet all season,season,all season,
+AUT-16CXDMGI,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-16CXDMGI.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 550mm bayonet all season,vehicle_type,car,
+AUT-1HGIEBA6,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-1HGIEBA6.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 600mm hook all season,adapter_type,hook,
+AUT-1HGIEBA6,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-1HGIEBA6.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 600mm hook all season,length_mm,600,600
+AUT-1HGIEBA6,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-1HGIEBA6.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 600mm hook all season,season,all season,
+AUT-1HGIEBA6,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-1HGIEBA6.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 600mm hook all season,vehicle_type,van,
+AUT-2QUZPB04,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-2QUZPB04.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 700mm hook all season,adapter_type,hook,
+AUT-2QUZPB04,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-2QUZPB04.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 700mm hook all season,length_mm,700,700
+AUT-2QUZPB04,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-2QUZPB04.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 700mm hook all season,season,all season,
+AUT-2QUZPB04,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-2QUZPB04.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 700mm hook all season,vehicle_type,car,
+AUT-2Y670675,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-2Y670675.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 500mm pinch tab all season,adapter_type,pinch tab,
+AUT-2Y670675,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-2Y670675.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 500mm pinch tab all season,length_mm,500,500
+AUT-2Y670675,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-2Y670675.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 500mm pinch tab all season,season,all season,
+AUT-2Y670675,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-2Y670675.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 500mm pinch tab all season,vehicle_type,truck,
+AUT-37650P9Z,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-37650P9Z.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 350mm hook all season,adapter_type,hook,
+AUT-37650P9Z,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-37650P9Z.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 350mm hook all season,length_mm,350,350
+AUT-37650P9Z,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-37650P9Z.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 350mm hook all season,season,all season,
+AUT-37650P9Z,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-37650P9Z.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 350mm hook all season,vehicle_type,truck,
+AUT-3ITVPBHV,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-3ITVPBHV.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 400mm multi adapter all season,adapter_type,multi adapter,
+AUT-3ITVPBHV,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-3ITVPBHV.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 400mm multi adapter all season,length_mm,400,400
+AUT-3ITVPBHV,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-3ITVPBHV.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 400mm multi adapter all season,season,all season,
+AUT-3ITVPBHV,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-3ITVPBHV.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 400mm multi adapter all season,vehicle_type,universal,
+AUT-3KYH3919,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-3KYH3919.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 550mm hook all season,adapter_type,hook,
+AUT-3KYH3919,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-3KYH3919.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 550mm hook all season,length_mm,550,550
+AUT-3KYH3919,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-3KYH3919.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 550mm hook all season,season,all season,
+AUT-3KYH3919,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-3KYH3919.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 550mm hook all season,vehicle_type,car,
+AUT-74S178SF,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-74S178SF.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 550mm pinch tab all season,adapter_type,pinch tab,
+AUT-74S178SF,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-74S178SF.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 550mm pinch tab all season,length_mm,550,550
+AUT-74S178SF,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-74S178SF.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 550mm pinch tab all season,season,all season,
+AUT-74S178SF,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0004_2q7xuu30/AUT-74S178SF.json,Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 550mm pinch tab all season,vehicle_type,van,
+AUT-1COEEEH4,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-1COEEEH4.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 400mm multi adapter all season,adapter_type,multi adapter,
+AUT-1COEEEH4,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-1COEEEH4.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 400mm multi adapter all season,length_mm,400,400
+AUT-1COEEEH4,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-1COEEEH4.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 400mm multi adapter all season,season,all season,
+AUT-1COEEEH4,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-1COEEEH4.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 400mm multi adapter all season,vehicle_type,universal,
+AUT-2GD8GPRI,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-2GD8GPRI.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 500mm multi adapter all season,adapter_type,multi adapter,
+AUT-2GD8GPRI,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-2GD8GPRI.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 500mm multi adapter all season,length_mm,500,500
+AUT-2GD8GPRI,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-2GD8GPRI.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 500mm multi adapter all season,season,all season,
+AUT-2GD8GPRI,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-2GD8GPRI.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 500mm multi adapter all season,vehicle_type,universal,
+AUT-2NOWR3PN,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-2NOWR3PN.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 450mm multi adapter all season,adapter_type,multi adapter,
+AUT-2NOWR3PN,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-2NOWR3PN.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 450mm multi adapter all season,length_mm,450,450
+AUT-2NOWR3PN,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-2NOWR3PN.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 450mm multi adapter all season,season,all season,
+AUT-2NOWR3PN,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-2NOWR3PN.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 450mm multi adapter all season,vehicle_type,universal,
+AUT-33D30JVM,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-33D30JVM.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 600mm multi adapter all season,adapter_type,multi adapter,
+AUT-33D30JVM,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-33D30JVM.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 600mm multi adapter all season,length_mm,600,600
+AUT-33D30JVM,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-33D30JVM.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 600mm multi adapter all season,season,all season,
+AUT-33D30JVM,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-33D30JVM.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 600mm multi adapter all season,vehicle_type,universal,
+AUT-3B2LKBPS,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-3B2LKBPS.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 350mm hook all season,adapter_type,hook,
+AUT-3B2LKBPS,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-3B2LKBPS.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 350mm hook all season,length_mm,350,350
+AUT-3B2LKBPS,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-3B2LKBPS.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 350mm hook all season,season,all season,
+AUT-3B2LKBPS,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-3B2LKBPS.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 350mm hook all season,vehicle_type,universal,
+AUT-3EU9OBEB,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-3EU9OBEB.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 350mm hook all season,adapter_type,hook,
+AUT-3EU9OBEB,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-3EU9OBEB.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 350mm hook all season,length_mm,350,350
+AUT-3EU9OBEB,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-3EU9OBEB.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 350mm hook all season,season,all season,
+AUT-3EU9OBEB,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-3EU9OBEB.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 350mm hook all season,vehicle_type,truck,
+AUT-7E6PMV3C,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-7E6PMV3C.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 550mm multi adapter all season,adapter_type,multi adapter,
+AUT-7E6PMV3C,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-7E6PMV3C.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 550mm multi adapter all season,length_mm,550,550
+AUT-7E6PMV3C,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-7E6PMV3C.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 550mm multi adapter all season,season,all season,
+AUT-7E6PMV3C,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-7E6PMV3C.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 550mm multi adapter all season,vehicle_type,car,
+AUT-BUCNW93E,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-BUCNW93E.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 550mm side lock all season,adapter_type,side lock,
+AUT-BUCNW93E,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-BUCNW93E.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 550mm side lock all season,length_mm,550,550
+AUT-BUCNW93E,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-BUCNW93E.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 550mm side lock all season,season,all season,
+AUT-BUCNW93E,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-BUCNW93E.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 550mm side lock all season,vehicle_type,universal,
+AUT-FDJ0GH5Z,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-FDJ0GH5Z.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 350mm multi adapter all season,adapter_type,multi adapter,
+AUT-FDJ0GH5Z,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-FDJ0GH5Z.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 350mm multi adapter all season,length_mm,350,350
+AUT-FDJ0GH5Z,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-FDJ0GH5Z.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 350mm multi adapter all season,season,all season,
+AUT-FDJ0GH5Z,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-FDJ0GH5Z.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 350mm multi adapter all season,vehicle_type,van,
+AUT-NBMNKK0O,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-NBMNKK0O.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 550mm hook all season,adapter_type,hook,
+AUT-NBMNKK0O,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-NBMNKK0O.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 550mm hook all season,length_mm,550,550
+AUT-NBMNKK0O,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-NBMNKK0O.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 550mm hook all season,season,all season,
+AUT-NBMNKK0O,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-NBMNKK0O.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 550mm hook all season,vehicle_type,car,
+AUT-XUK43VU0,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-XUK43VU0.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 600mm pinch tab all season,adapter_type,pinch tab,
+AUT-XUK43VU0,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-XUK43VU0.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 600mm pinch tab all season,length_mm,600,600
+AUT-XUK43VU0,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-XUK43VU0.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 600mm pinch tab all season,season,all season,
+AUT-XUK43VU0,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-XUK43VU0.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 600mm pinch tab all season,vehicle_type,universal,
+AUT-ZJYSJO7J,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-ZJYSJO7J.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 600mm multi adapter all season,adapter_type,multi adapter,
+AUT-ZJYSJO7J,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-ZJYSJO7J.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 600mm multi adapter all season,length_mm,600,600
+AUT-ZJYSJO7J,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-ZJYSJO7J.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 600mm multi adapter all season,season,all season,
+AUT-ZJYSJO7J,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0017_2983iunt/AUT-ZJYSJO7J.json,Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 600mm multi adapter all season,vehicle_type,truck,
+AUT-13S9OD3T,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-13S9OD3T.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 500mm side lock all season,adapter_type,side lock,
+AUT-13S9OD3T,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-13S9OD3T.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 500mm side lock all season,length_mm,500,500
+AUT-13S9OD3T,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-13S9OD3T.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 500mm side lock all season,season,all season,
+AUT-13S9OD3T,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-13S9OD3T.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 500mm side lock all season,vehicle_type,car,
+AUT-14415OY9,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-14415OY9.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 450mm side lock all season,adapter_type,side lock,
+AUT-14415OY9,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-14415OY9.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 450mm side lock all season,length_mm,450,450
+AUT-14415OY9,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-14415OY9.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 450mm side lock all season,season,all season,
+AUT-14415OY9,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-14415OY9.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 450mm side lock all season,vehicle_type,car,
+AUT-16JZY6HC,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-16JZY6HC.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 700mm pinch tab all season,adapter_type,pinch tab,
+AUT-16JZY6HC,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-16JZY6HC.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 700mm pinch tab all season,length_mm,700,700
+AUT-16JZY6HC,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-16JZY6HC.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 700mm pinch tab all season,season,all season,
+AUT-16JZY6HC,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-16JZY6HC.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 700mm pinch tab all season,vehicle_type,universal,
+AUT-179I5JS4,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-179I5JS4.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 350mm side lock all season,adapter_type,side lock,
+AUT-179I5JS4,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-179I5JS4.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 350mm side lock all season,length_mm,350,350
+AUT-179I5JS4,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-179I5JS4.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 350mm side lock all season,season,all season,
+AUT-179I5JS4,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-179I5JS4.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 350mm side lock all season,vehicle_type,truck,
+AUT-1R3VKQ8G,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-1R3VKQ8G.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 450mm pinch tab all season,adapter_type,pinch tab,
+AUT-1R3VKQ8G,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-1R3VKQ8G.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 450mm pinch tab all season,length_mm,450,450
+AUT-1R3VKQ8G,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-1R3VKQ8G.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 450mm pinch tab all season,season,all season,
+AUT-1R3VKQ8G,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0011_31bxlemx/AUT-1R3VKQ8G.json,Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 450mm pinch tab all season,vehicle_type,car,
+warning: result truncated at 100 rows
+Next step_4... Query distinct wiper-blade product families (brand/series/model/name) to verify whether Valeo exists and get exact stored strings. (13631 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT DISTINCT p.brand, p.series, p.model, p.name\nFROM products p\nWHERE lower(p.name) LIKE '%wiper blade%'\nORDER BY p.brand, p.series, p.model, p.name;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT DISTINCT p.brand, p.series, p.model, p.name
+FROM products p
+WHERE lower(p.name) LIKE '%wiper blade%'
+ORDER BY p.brand, p.series, p.model, p.name;
+SQL
+brand,series,model,name
+Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 350mm hook all season
+Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 400mm multi adapter all season
+Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 500mm pinch tab all season
+Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 550mm bayonet all season
+Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 550mm hook all season
+Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 550mm pinch tab all season
+Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 600mm hook all season
+Bosch,Home & Garden,GWS 32B-E1O,Bosch Home & Garden GWS 32B-E1O Wiper Blade 700mm hook all season
+Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 350mm hook all season
+Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 350mm multi adapter all season
+Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 400mm multi adapter all season
+Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 450mm multi adapter all season
+Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 500mm multi adapter all season
+Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 550mm hook all season
+Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 550mm multi adapter all season
+Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 550mm side lock all season
+Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 600mm multi adapter all season
+Bosch,Premium,BBS 3IH-RIY,Bosch Premium BBS 3IH-RIY Wiper Blade 600mm pinch tab all season
+Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 350mm side lock all season
+Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 450mm hook all season
+Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 450mm pinch tab all season
+Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 450mm side lock all season
+Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 500mm pinch tab all season
+Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 500mm side lock all season
+Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 650mm side lock all season
+Bosch,Professional,BBS 2U1-AD9,Bosch Professional BBS 2U1-AD9 Wiper Blade 700mm pinch tab all season
+Bosch,Winter,GSR 25K-HNM,Bosch Winter GSR 25K-HNM Wiper Blade 350mm multi adapter summer
+Bosch,Winter,GSR 25K-HNM,Bosch Winter GSR 25K-HNM Wiper Blade 400mm pinch tab summer
+Bosch,Winter,GSR 25K-HNM,Bosch Winter GSR 25K-HNM Wiper Blade 450mm hook summer
+Bosch,Winter,GSR 25K-HNM,Bosch Winter GSR 25K-HNM Wiper Blade 450mm multi adapter summer
+Bosch,Winter,GSR 25K-HNM,Bosch Winter GSR 25K-HNM Wiper Blade 500mm bayonet summer
+Bosch,Winter,GSR 25K-HNM,Bosch Winter GSR 25K-HNM Wiper Blade 500mm multi adapter summer
+Bosch,Winter,GSR 25K-HNM,Bosch Winter GSR 25K-HNM Wiper Blade 550mm hook summer
+Bosch,Winter,GSR 25K-HNM,Bosch Winter GSR 25K-HNM Wiper Blade 600mm hook summer
+Bosch,Winter,GSR 25K-HNM,Bosch Winter GSR 25K-HNM Wiper Blade 650mm hook summer
+Bosch,Winter,GSR 25K-HNM,Bosch Winter GSR 25K-HNM Wiper Blade 700mm multi adapter summer
+Michelin,All Season,Radius 1QJ-A4K,Michelin All Season Radius 1QJ-A4K Wiper Blade 350mm multi adapter winter
+Michelin,All Season,Radius 1QJ-A4K,Michelin All Season Radius 1QJ-A4K Wiper Blade 350mm side lock winter
+Michelin,All Season,Radius 1QJ-A4K,Michelin All Season Radius 1QJ-A4K Wiper Blade 400mm pinch tab winter
+Michelin,All Season,Radius 1QJ-A4K,Michelin All Season Radius 1QJ-A4K Wiper Blade 450mm hook winter
+Michelin,All Season,Radius 1QJ-A4K,Michelin All Season Radius 1QJ-A4K Wiper Blade 550mm pinch tab winter
+Michelin,All Season,Radius 1QJ-A4K,Michelin All Season Radius 1QJ-A4K Wiper Blade 550mm side lock winter
+Michelin,All Season,Radius 1QJ-A4K,Michelin All Season Radius 1QJ-A4K Wiper Blade 600mm hook winter
+Michelin,All Season,Radius 1QJ-A4K,Michelin All Season Radius 1QJ-A4K Wiper Blade 600mm pinch tab winter
+Michelin,All Season,Radius 1QJ-A4K,Michelin All Season Radius 1QJ-A4K Wiper Blade 700mm hook winter
+Michelin,All Season,Radius 1QJ-A4K,Michelin All Season Radius 1QJ-A4K Wiper Blade 700mm pinch tab winter
+Michelin,All Season,Radius 1QJ-A4K,Michelin All Season Radius 1QJ-A4K Wiper Blade 700mm side lock winter
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 350mm bayonet all season
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 350mm hook all season
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 350mm side lock all season
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 400mm multi adapter all season
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 450mm multi adapter all season
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 500mm multi adapter all season
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 600mm multi adapter all season
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 600mm side lock all season
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 650mm hook all season
+Michelin,Premium,Stealth 1BY-4PX,Michelin Premium Stealth 1BY-4PX Wiper Blade 700mm hook all season
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 400mm hook all season
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 400mm multi adapter all season
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 450mm hook all season
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 450mm side lock all season
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 500mm multi adapter all season
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 550mm hook all season
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 550mm multi adapter all season
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 550mm side lock all season
+Michelin,Premium,Stealth 1T0-N2Q,Michelin Premium Stealth 1T0-N2Q Wiper Blade 600mm pinch tab all season
+Michelin,Stealth,MC 12N-18U,Michelin Stealth MC 12N-18U Wiper Blade 350mm multi adapter all season
+Michelin,Stealth,MC 12N-18U,Michelin Stealth MC 12N-18U Wiper Blade 500mm multi adapter all season
+Michelin,Stealth,MC 12N-18U,Michelin Stealth MC 12N-18U Wiper Blade 550mm hook all season
+Michelin,Stealth,MC 12N-18U,Michelin Stealth MC 12N-18U Wiper Blade 550mm multi adapter all season
+Michelin,Stealth,MC 12N-18U,Michelin Stealth MC 12N-18U Wiper Blade 600mm hook all season
+Michelin,Stealth,MC 12N-18U,Michelin Stealth MC 12N-18U Wiper Blade 650mm hook all season
+Michelin,Stealth,MC 12N-18U,Michelin Stealth MC 12N-18U Wiper Blade 700mm hook all season
+Michelin,Winter,Radius GJ4-374,Michelin Winter Radius GJ4-374 Wiper Blade 400mm multi adapter winter
+Michelin,Winter,Radius GJ4-374,Michelin Winter Radius GJ4-374 Wiper Blade 450mm bayonet winter
+Michelin,Winter,Radius GJ4-374,Michelin Winter Radius GJ4-374 Wiper Blade 450mm multi adapter winter
+Michelin,Winter,Radius GJ4-374,Michelin Winter Radius GJ4-374 Wiper Blade 500mm side lock winter
+Michelin,Winter,Radius GJ4-374,Michelin Winter Radius GJ4-374 Wiper Blade 550mm hook winter
+Michelin,Winter,Radius GJ4-374,Michelin Winter Radius GJ4-374 Wiper Blade 550mm side lock winter
+Michelin,Winter,Radius GJ4-374,Michelin Winter Radius GJ4-374 Wiper Blade 600mm bayonet winter
+Michelin,Winter,Radius GJ4-374,Michelin Winter Radius GJ4-374 Wiper Blade 600mm multi adapter winter
+Michelin,Winter,Radius GJ4-374,Michelin Winter Radius GJ4-374 Wiper Blade 600mm side lock winter
+Michelin,Winter,Radius GJ4-374,Michelin Winter Radius GJ4-374 Wiper Blade 650mm hook winter
+Sonax,PROFILINE,Gloss 167-791,Sonax PROFILINE Gloss 167-791 Wiper Blade 350mm hook all season
+Sonax,PROFILINE,Gloss 167-791,Sonax PROFILINE Gloss 167-791 Wiper Blade 350mm multi adapter all season
+Sonax,PROFILINE,Gloss 167-791,Sonax PROFILINE Gloss 167-791 Wiper Blade 400mm hook all season
+Sonax,PROFILINE,Gloss 167-791,Sonax PROFILINE Gloss 167-791 Wiper Blade 400mm multi adapter all season
+Sonax,PROFILINE,Gloss 167-791,Sonax PROFILINE Gloss 167-791 Wiper Blade 400mm side lock all season
+Sonax,PROFILINE,Gloss 167-791,Sonax PROFILINE Gloss 167-791 Wiper Blade 500mm side lock all season
+Sonax,PROFILINE,Gloss 167-791,Sonax PROFILINE Gloss 167-791 Wiper Blade 550mm multi adapter all season
+Sonax,PROFILINE,Gloss 167-791,Sonax PROFILINE Gloss 167-791 Wiper Blade 550mm side lock all season
+Sonax,PROFILINE,Gloss 167-791,Sonax PROFILINE Gloss 167-791 Wiper Blade 650mm hook all season
+Sonax,Premium,Gloss A0Q-MOK,Sonax Premium Gloss A0Q-MOK Wiper Blade 350mm pinch tab winter
+Sonax,Premium,Gloss A0Q-MOK,Sonax Premium Gloss A0Q-MOK Wiper Blade 400mm hook winter
+Sonax,Premium,Gloss A0Q-MOK,Sonax Premium Gloss A0Q-MOK Wiper Blade 450mm multi adapter winter
+Sonax,Premium,Gloss A0Q-MOK,Sonax Premium Gloss A0Q-MOK Wiper Blade 500mm hook winter
+Sonax,Premium,Gloss A0Q-MOK,Sonax Premium Gloss A0Q-MOK Wiper Blade 650mm bayonet winter
+Sonax,Premium,Gloss A0Q-MOK,Sonax Premium Gloss A0Q-MOK Wiper Blade 650mm hook winter
+Sonax,Professional,XTREME 300-EAF,Sonax Professional XTREME 300-EAF Wiper Blade 350mm hook all season
+Sonax,Professional,XTREME 300-EAF,Sonax Professional XTREME 300-EAF Wiper Blade 350mm side lock all season
+warning: result truncated at 100 rows
+Next step_5... Run a narrow Valeo-only product/properties query to confirm whether the requested 550mm multi-adapter Winter VF 1JR-UBR variant exists and get its sku/path. (20555 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       pp.key, pp.value_text, pp.value_number\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE lower(p.brand) = 'valeo'\n  AND lower(p.name) LIKE '%wiper blade%'\nORDER BY p.series, p.model, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       pp.key, pp.value_text, pp.value_number
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE lower(p.brand) = 'valeo'
+  AND lower(p.name) LIKE '%wiper blade%'
+ORDER BY p.series, p.model, p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,key,value_text,value_number
+AUT-1C0DF3Z7,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-1C0DF3Z7.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 550mm hook winter,adapter_type,hook,
+AUT-1C0DF3Z7,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-1C0DF3Z7.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 550mm hook winter,length_mm,550,550
+AUT-1C0DF3Z7,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-1C0DF3Z7.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 550mm hook winter,season,winter,
+AUT-1C0DF3Z7,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-1C0DF3Z7.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 550mm hook winter,vehicle_type,universal,
+AUT-1CA4GGIT,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-1CA4GGIT.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 650mm multi adapter winter,adapter_type,multi adapter,
+AUT-1CA4GGIT,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-1CA4GGIT.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 650mm multi adapter winter,length_mm,650,650
+AUT-1CA4GGIT,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-1CA4GGIT.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 650mm multi adapter winter,season,winter,
+AUT-1CA4GGIT,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-1CA4GGIT.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 650mm multi adapter winter,vehicle_type,universal,
+AUT-1WRGSBUO,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-1WRGSBUO.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 650mm bayonet winter,adapter_type,bayonet,
+AUT-1WRGSBUO,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-1WRGSBUO.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 650mm bayonet winter,length_mm,650,650
+AUT-1WRGSBUO,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-1WRGSBUO.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 650mm bayonet winter,season,winter,
+AUT-1WRGSBUO,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-1WRGSBUO.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 650mm bayonet winter,vehicle_type,car,
+AUT-21UR2DS9,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-21UR2DS9.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 650mm multi adapter winter,adapter_type,multi adapter,
+AUT-21UR2DS9,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-21UR2DS9.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 650mm multi adapter winter,length_mm,650,650
+AUT-21UR2DS9,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-21UR2DS9.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 650mm multi adapter winter,season,winter,
+AUT-21UR2DS9,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-21UR2DS9.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 650mm multi adapter winter,vehicle_type,van,
+AUT-27UOE146,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-27UOE146.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 550mm pinch tab winter,adapter_type,pinch tab,
+AUT-27UOE146,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-27UOE146.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 550mm pinch tab winter,length_mm,550,550
+AUT-27UOE146,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-27UOE146.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 550mm pinch tab winter,season,winter,
+AUT-27UOE146,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-27UOE146.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 550mm pinch tab winter,vehicle_type,car,
+AUT-2J2QW22G,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2J2QW22G.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 450mm pinch tab winter,adapter_type,pinch tab,
+AUT-2J2QW22G,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2J2QW22G.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 450mm pinch tab winter,length_mm,450,450
+AUT-2J2QW22G,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2J2QW22G.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 450mm pinch tab winter,season,winter,
+AUT-2J2QW22G,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2J2QW22G.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 450mm pinch tab winter,vehicle_type,universal,
+AUT-2MJMHBT8,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2MJMHBT8.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 550mm hook winter,adapter_type,hook,
+AUT-2MJMHBT8,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2MJMHBT8.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 550mm hook winter,length_mm,550,550
+AUT-2MJMHBT8,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2MJMHBT8.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 550mm hook winter,season,winter,
+AUT-2MJMHBT8,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2MJMHBT8.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 550mm hook winter,vehicle_type,van,
+AUT-2MXILVDV,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2MXILVDV.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 650mm multi adapter winter,adapter_type,multi adapter,
+AUT-2MXILVDV,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2MXILVDV.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 650mm multi adapter winter,length_mm,650,650
+AUT-2MXILVDV,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2MXILVDV.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 650mm multi adapter winter,season,winter,
+AUT-2MXILVDV,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2MXILVDV.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 650mm multi adapter winter,vehicle_type,truck,
+AUT-2SYHDTG9,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2SYHDTG9.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 400mm pinch tab winter,adapter_type,pinch tab,
+AUT-2SYHDTG9,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2SYHDTG9.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 400mm pinch tab winter,length_mm,400,400
+AUT-2SYHDTG9,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2SYHDTG9.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 400mm pinch tab winter,season,winter,
+AUT-2SYHDTG9,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2SYHDTG9.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 400mm pinch tab winter,vehicle_type,car,
+AUT-2X1CVQIU,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2X1CVQIU.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 500mm multi adapter winter,adapter_type,multi adapter,
+AUT-2X1CVQIU,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2X1CVQIU.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 500mm multi adapter winter,length_mm,500,500
+AUT-2X1CVQIU,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2X1CVQIU.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 500mm multi adapter winter,season,winter,
+AUT-2X1CVQIU,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-2X1CVQIU.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 500mm multi adapter winter,vehicle_type,universal,
+AUT-3KU007V6,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-3KU007V6.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 550mm hook winter,adapter_type,hook,
+AUT-3KU007V6,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-3KU007V6.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 550mm hook winter,length_mm,550,550
+AUT-3KU007V6,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-3KU007V6.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 550mm hook winter,season,winter,
+AUT-3KU007V6,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-3KU007V6.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 550mm hook winter,vehicle_type,truck,
+AUT-MEAV7EDB,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-MEAV7EDB.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 400mm side lock winter,adapter_type,side lock,
+AUT-MEAV7EDB,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-MEAV7EDB.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 400mm side lock winter,length_mm,400,400
+AUT-MEAV7EDB,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-MEAV7EDB.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 400mm side lock winter,season,winter,
+AUT-MEAV7EDB,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0009_2usj8pt9/AUT-MEAV7EDB.json,Valeo,Compact,First 2UZ-S3O,Valeo Compact First 2UZ-S3O Wiper Blade 400mm side lock winter,vehicle_type,car,
+AUT-18P2VAHG,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-18P2VAHG.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 700mm bayonet winter,adapter_type,bayonet,
+AUT-18P2VAHG,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-18P2VAHG.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 700mm bayonet winter,length_mm,700,700
+AUT-18P2VAHG,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-18P2VAHG.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 700mm bayonet winter,season,winter,
+AUT-18P2VAHG,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-18P2VAHG.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 700mm bayonet winter,vehicle_type,car,
+AUT-19UVXO5K,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-19UVXO5K.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 400mm multi adapter winter,adapter_type,multi adapter,
+AUT-19UVXO5K,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-19UVXO5K.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 400mm multi adapter winter,length_mm,400,400
+AUT-19UVXO5K,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-19UVXO5K.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 400mm multi adapter winter,season,winter,
+AUT-19UVXO5K,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-19UVXO5K.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 400mm multi adapter winter,vehicle_type,truck,
+AUT-1HVYH4V4,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-1HVYH4V4.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 600mm pinch tab winter,adapter_type,pinch tab,
+AUT-1HVYH4V4,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-1HVYH4V4.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 600mm pinch tab winter,length_mm,600,600
+AUT-1HVYH4V4,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-1HVYH4V4.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 600mm pinch tab winter,season,winter,
+AUT-1HVYH4V4,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-1HVYH4V4.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 600mm pinch tab winter,vehicle_type,car,
+AUT-353DWN8A,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-353DWN8A.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 500mm multi adapter winter,adapter_type,multi adapter,
+AUT-353DWN8A,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-353DWN8A.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 500mm multi adapter winter,length_mm,500,500
+AUT-353DWN8A,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-353DWN8A.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 500mm multi adapter winter,season,winter,
+AUT-353DWN8A,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-353DWN8A.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 500mm multi adapter winter,vehicle_type,car,
+AUT-3JE8LRY8,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-3JE8LRY8.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 500mm pinch tab winter,adapter_type,pinch tab,
+AUT-3JE8LRY8,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-3JE8LRY8.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 500mm pinch tab winter,length_mm,500,500
+AUT-3JE8LRY8,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-3JE8LRY8.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 500mm pinch tab winter,season,winter,
+AUT-3JE8LRY8,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-3JE8LRY8.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 500mm pinch tab winter,vehicle_type,car,
+AUT-HE4GHXTA,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-HE4GHXTA.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 450mm hook winter,adapter_type,hook,
+AUT-HE4GHXTA,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-HE4GHXTA.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 450mm hook winter,length_mm,450,450
+AUT-HE4GHXTA,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-HE4GHXTA.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 450mm hook winter,season,winter,
+AUT-HE4GHXTA,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-HE4GHXTA.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 450mm hook winter,vehicle_type,car,
+AUT-QNTQZEKB,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-QNTQZEKB.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 450mm pinch tab winter,adapter_type,pinch tab,
+AUT-QNTQZEKB,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-QNTQZEKB.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 450mm pinch tab winter,length_mm,450,450
+AUT-QNTQZEKB,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-QNTQZEKB.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 450mm pinch tab winter,season,winter,
+AUT-QNTQZEKB,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-QNTQZEKB.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 450mm pinch tab winter,vehicle_type,universal,
+AUT-ZH7648DA,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-ZH7648DA.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 350mm multi adapter winter,adapter_type,multi adapter,
+AUT-ZH7648DA,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-ZH7648DA.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 350mm multi adapter winter,length_mm,350,350
+AUT-ZH7648DA,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-ZH7648DA.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 350mm multi adapter winter,season,winter,
+AUT-ZH7648DA,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0002_1boovl32/AUT-ZH7648DA.json,Valeo,Premium,First 1FS-KKT,Valeo Premium First 1FS-KKT Wiper Blade 350mm multi adapter winter,vehicle_type,van,
+AUT-13OU3XPJ,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-13OU3XPJ.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 600mm hook summer,adapter_type,hook,
+AUT-13OU3XPJ,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-13OU3XPJ.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 600mm hook summer,length_mm,600,600
+AUT-13OU3XPJ,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-13OU3XPJ.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 600mm hook summer,season,summer,
+AUT-13OU3XPJ,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-13OU3XPJ.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 600mm hook summer,vehicle_type,van,
+AUT-1B3HAKLX,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-1B3HAKLX.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 700mm multi adapter summer,adapter_type,multi adapter,
+AUT-1B3HAKLX,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-1B3HAKLX.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 700mm multi adapter summer,length_mm,700,700
+AUT-1B3HAKLX,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-1B3HAKLX.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 700mm multi adapter summer,season,summer,
+AUT-1B3HAKLX,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-1B3HAKLX.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 700mm multi adapter summer,vehicle_type,car,
+AUT-1DQ4X3UO,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-1DQ4X3UO.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 700mm multi adapter summer,adapter_type,multi adapter,
+AUT-1DQ4X3UO,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-1DQ4X3UO.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 700mm multi adapter summer,length_mm,700,700
+AUT-1DQ4X3UO,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-1DQ4X3UO.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 700mm multi adapter summer,season,summer,
+AUT-1DQ4X3UO,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-1DQ4X3UO.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 700mm multi adapter summer,vehicle_type,van,
+AUT-1T7I72WY,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-1T7I72WY.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 700mm hook summer,adapter_type,hook,
+AUT-1T7I72WY,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-1T7I72WY.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 700mm hook summer,length_mm,700,700
+AUT-1T7I72WY,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-1T7I72WY.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 700mm hook summer,season,summer,
+AUT-1T7I72WY,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-1T7I72WY.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 700mm hook summer,vehicle_type,universal,
+AUT-26V75C7Z,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-26V75C7Z.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 450mm pinch tab summer,adapter_type,pinch tab,
+AUT-26V75C7Z,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-26V75C7Z.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 450mm pinch tab summer,length_mm,450,450
+AUT-26V75C7Z,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-26V75C7Z.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 450mm pinch tab summer,season,summer,
+AUT-26V75C7Z,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0013_3f1kx4cn/AUT-26V75C7Z.json,Valeo,Professional,Silencio 3LJ-R83,Valeo Professional Silencio 3LJ-R83 Wiper Blade 450mm pinch tab summer,vehicle_type,car,
+warning: result truncated at 100 rows
+Next step_6... Query only Valeo + series/model Winter VF 1JR-UBR and return sku/path with length_mm and adapter_type properties. (13309 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       MAX(CASE WHEN pp.key='length_mm' THEN COALESCE(pp.value_number, CAST(pp.value_text AS REAL)) END) AS length_mm,\n       MAX(CASE WHEN pp.key='adapter_type' THEN pp.value_text END) AS adapter_type\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE lower(p.brand)='valeo'\n  AND lower(p.series)='winter vf'\n  AND lower(p.model)='1jr-ubr'\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name\nORDER BY p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       MAX(CASE WHEN pp.key='length_mm' THEN COALESCE(pp.value_number, CAST(pp.value_text AS REAL)) END) AS length_mm,
+       MAX(CASE WHEN pp.key='adapter_type' THEN pp.value_text END) AS adapter_type
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE lower(p.brand)='valeo'
+  AND lower(p.series)='winter vf'
+  AND lower(p.model)='1jr-ubr'
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name
+ORDER BY p.sku;
+SQL
+sku,path,brand,series,model,name,length_mm,adapter_type
+Next step_7... Query Valeo products in series matching Winter VF and filter by properties length_mm=550 and adapter_type='multi adapter' to discover actual model/sku/path. (14985 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       MAX(CASE WHEN pp.key='length_mm' THEN COALESCE(pp.value_number, CAST(pp.value_text AS REAL)) END) AS length_mm,\n       MAX(CASE WHEN pp.key='adapter_type' THEN lower(pp.value_text) END) AS adapter_type\nFROM products p\nJOIN product_properties pp ON pp.sku = p.sku\nWHERE lower(p.brand)='valeo'\n  AND lower(p.series) LIKE '%winter vf%'\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name\nHAVING length_mm = 550\n   AND adapter_type = 'multi adapter'\nORDER BY p.series, p.model, p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       MAX(CASE WHEN pp.key='length_mm' THEN COALESCE(pp.value_number, CAST(pp.value_text AS REAL)) END) AS length_mm,
+       MAX(CASE WHEN pp.key='adapter_type' THEN lower(pp.value_text) END) AS adapter_type
+FROM products p
+JOIN product_properties pp ON pp.sku = p.sku
+WHERE lower(p.brand)='valeo'
+  AND lower(p.series) LIKE '%winter vf%'
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name
+HAVING length_mm = 550
+   AND adapter_type = 'multi adapter'
+ORDER BY p.series, p.model, p.sku;
+SQL
+sku,path,brand,series,model,name,length_mm,adapter_type
+Next step_8... Query Valeo products with model token 1JR-UBR (regardless of series) and inspect properties for length_mm=550 and adapter_type='multi adapter'. (15724 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       MAX(CASE WHEN pp.key='length_mm' THEN COALESCE(pp.value_number, CAST(pp.value_text AS REAL)) END) AS length_mm,\n       MAX(CASE WHEN pp.key='adapter_type' THEN lower(pp.value_text) END) AS adapter_type\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE lower(p.brand)='valeo'\n  AND (lower(p.model)='1jr-ubr' OR lower(p.name) LIKE '%1jr-ubr%')\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name\nORDER BY p.series, p.model, p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       MAX(CASE WHEN pp.key='length_mm' THEN COALESCE(pp.value_number, CAST(pp.value_text AS REAL)) END) AS length_mm,
+       MAX(CASE WHEN pp.key='adapter_type' THEN lower(pp.value_text) END) AS adapter_type
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE lower(p.brand)='valeo'
+  AND (lower(p.model)='1jr-ubr' OR lower(p.name) LIKE '%1jr-ubr%')
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name
+ORDER BY p.series, p.model, p.sku;
+SQL
+sku,path,brand,series,model,name,length_mm,adapter_type
+AUT-1NAK4U4T,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0016_1vjqaw02/AUT-1NAK4U4T.json,Valeo,Winter,VF 1JR-UBR,Valeo Winter VF 1JR-UBR Wiper Blade 350mm hook winter,350,hook
+AUT-2I4PBERF,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0016_1vjqaw02/AUT-2I4PBERF.json,Valeo,Winter,VF 1JR-UBR,Valeo Winter VF 1JR-UBR Wiper Blade 500mm multi adapter winter,500,multi adapter
+AUT-2UZY2YT9,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0016_1vjqaw02/AUT-2UZY2YT9.json,Valeo,Winter,VF 1JR-UBR,Valeo Winter VF 1JR-UBR Wiper Blade 550mm hook winter,550,hook
+AUT-37880IXR,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0016_1vjqaw02/AUT-37880IXR.json,Valeo,Winter,VF 1JR-UBR,Valeo Winter VF 1JR-UBR Wiper Blade 600mm side lock winter,600,side lock
+AUT-3KKSGPG0,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0016_1vjqaw02/AUT-3KKSGPG0.json,Valeo,Winter,VF 1JR-UBR,Valeo Winter VF 1JR-UBR Wiper Blade 550mm multi adapter winter,550,multi adapter
+AUT-3L9YUUK1,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0016_1vjqaw02/AUT-3L9YUUK1.json,Valeo,Winter,VF 1JR-UBR,Valeo Winter VF 1JR-UBR Wiper Blade 500mm pinch tab winter,500,pinch tab
+AUT-CYMPKOQD,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0016_1vjqaw02/AUT-CYMPKOQD.json,Valeo,Winter,VF 1JR-UBR,Valeo Winter VF 1JR-UBR Wiper Blade 450mm side lock winter,450,side lock
+AUT-M66SCWDC,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0016_1vjqaw02/AUT-M66SCWDC.json,Valeo,Winter,VF 1JR-UBR,Valeo Winter VF 1JR-UBR Wiper Blade 600mm multi adapter winter,600,multi adapter
+AUT-NO66HI4H,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0016_1vjqaw02/AUT-NO66HI4H.json,Valeo,Winter,VF 1JR-UBR,Valeo Winter VF 1JR-UBR Wiper Blade 600mm multi adapter winter,600,multi adapter
+AUT-NUJI7I8W,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0016_1vjqaw02/AUT-NUJI7I8W.json,Valeo,Winter,VF 1JR-UBR,Valeo Winter VF 1JR-UBR Wiper Blade 650mm hook winter,650,hook
+AUT-V54TA3S2,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0016_1vjqaw02/AUT-V54TA3S2.json,Valeo,Winter,VF 1JR-UBR,Valeo Winter VF 1JR-UBR Wiper Blade 450mm multi adapter winter,450,multi adapter
+AUT-Z1UP5G7X,/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0016_1vjqaw02/AUT-Z1UP5G7X.json,Valeo,Winter,VF 1JR-UBR,Valeo Winter VF 1JR-UBR Wiper Blade 350mm hook winter,350,hook
+Next step_9... Run one SQL aggregation using LEFT JOIN from Graz stores to inventory for SKU AUT-3KKSGPG0, returning total count and each store path. (13057 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT s.path AS store_path,\n       COALESCE(i.available_today, 0) AS store_available_today,\n       SUM(COALESCE(i.available_today, 0)) OVER () AS total_available_today\nFROM stores s\nLEFT JOIN inventory i\n  ON i.store_id = s.id\n AND i.sku = 'AUT-3KKSGPG0'\nWHERE s.city = 'Graz'\nORDER BY s.path;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT s.path AS store_path,
+       COALESCE(i.available_today, 0) AS store_available_today,
+       SUM(COALESCE(i.available_today, 0)) OVER () AS total_available_today
+FROM stores s
+LEFT JOIN inventory i
+  ON i.store_id = s.id
+ AND i.sku = 'AUT-3KKSGPG0'
+WHERE s.city = 'Graz'
+ORDER BY s.path;
+SQL
+store_path,store_available_today,total_available_today
+/proc/stores/store_graz_jakomini.json,0,5
+/proc/stores/store_graz_lend.json,5,5
+Next step_10... Return report_completion with exact message format and complete grounding refs. (12558 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Identified exact SKU/path for Valeo Winter VF 1JR-UBR 550mm multi adapter variant.', 'Computed Graz-wide available_today total including zero-availability stores via LEFT JOIN aggregation.'] message='count : 5' grounding_refs=['/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0016_1vjqaw02/AUT-3KKSGPG0.json', '/proc/stores/store_graz_jakomini.json', '/proc/stores/store_graz_lend.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Identified exact SKU/path for Valeo Winter VF 1JR-UBR 550mm multi adapter variant.
+- Computed Graz-wide available_today total including zero-availability stores via LEFT JOIN aggregation.
+
+[34mAGENT SUMMARY: count : 5[0m
+- [34m/proc/catalog/automotive/wiper_blades/fam_automotive_wiper_blades_0016_1vjqaw02/AUT-3KKSGPG0.json[0m
+- [34m/proc/stores/store_graz_jakomini.json[0m
+- [34m/proc/stores/store_graz_lend.json[0m

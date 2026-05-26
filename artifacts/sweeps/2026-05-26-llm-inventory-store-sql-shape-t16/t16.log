@@ -1,0 +1,546 @@
+TASK t16 (model codex:gpt-5.3-codex)
+INSTRUCTION: How many of these products have at least 4 items available in the central Bratislava PowerTool shop today: the Adhesive and Glue from Loctite in the Loctite Universal 401 4VI-0XS Adhesive and Glue line that has adhesive type wood glue and color family Brown,the Work Trousers from Snickers Workwear in the Snickers Workwear Classic SW 27F-FGX Work Trousers line that has color family Black, size L, and fit women,the Storage Bin and Organizer from Really Useful Box in the Really Useful Box Compact RUB 10R-QVB Storage Bin and Organizer line that has storage type parts case and color family Clear,the Pliers and Wrenches from Wera in the Wera Professional Kraftform VNH-TAQ Pliers and Wrenches line that has tool type adjustable wrench and length 125 mm,the Corded Angle Grinder from Metabo in the Metabo Professional W 27T-T2L Corded Angle Grinder line that has disc diameter 115 mm and power 2600 W,the Pliers and Wrenches from Stanley in the Stanley Professional SX ECU-AKL Pliers and Wrenches line that has tool type water pump pliers and length 125 mm? Answer in exactly format "count : %d" (no quotes)
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Run focused SQL to resolve store + candidate SKUs + required properties + available_today. (28942 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH target_store AS (\n  SELECT id, path FROM stores\n  WHERE id='store_bratislava_praterstern' OR lower(name) LIKE '%praterstern%' OR (lower(city)='bratislava' AND lower(name) LIKE '%central%')\n), wanted AS (\n  SELECT 'Loctite' AS brand, 'Loctite Universal' AS series, '401' AS model, 'Adhesive and Glue' AS kind,\n         'adhesive_type' AS k1, 'wood glue' AS v1, 'color_family' AS k2, 'Brown' AS v2\n  UNION ALL SELECT 'Snickers Workwear','Snickers Workwear Classic','SW','Work Trousers','color_family','Black','size','L'\n  UNION ALL SELECT 'Really Useful Box','Really Useful Box Compact','RUB','Storage Bin and Organizer','storage_type','parts case','color_family','Clear'\n  UNION ALL SELECT 'Wera','Wera Professional','Kraftform','Pliers and Wrenches','tool_type','adjustable wrench','length_mm','125'\n  UNION ALL SELECT 'Metabo','Metabo Professional','W','Corded Angle Grinder','disc_diameter_mm','115','power_w','2600'\n  UNION ALL SELECT 'Stanley','Stanley Professional','SX','Pliers and Wrenches','tool_type','water pump pliers','length_mm','125'\n), base AS (\n  SELECT w.brand,w.series,w.model,w.kind,w.k1,w.v1,w.k2,w.v2,p.sku,p.path,ts.path AS store_path,i.available_today,pk.name AS kind_name\n  FROM wanted w\n  JOIN product_kinds pk ON pk.name = w.kind\n  JOIN products p ON p.kind_id = pk.id\n    AND p.brand = w.brand\n    AND p.series LIKE w.series || '%'\n    AND p.model LIKE w.model || '%'\n  JOIN product_properties pp1 ON pp1.sku=p.sku AND pp1.key=w.k1\n  JOIN product_properties pp2 ON pp2.sku=p.sku AND pp2.key=w.k2\n  JOIN target_store ts\n  JOIN inventory i ON i.store_id=ts.id AND i.sku=p.sku\n  WHERE (lower(pp1.value_text)=lower(w.v1) OR CAST(pp1.value_number AS TEXT)=w.v1)\n    AND (lower(pp2.value_text)=lower(w.v2) OR CAST(pp2.value_number AS TEXT)=w.v2)\n)\nSELECT * FROM base ORDER BY brand, series, model, sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH target_store AS (
+  SELECT id, path FROM stores
+  WHERE id='store_bratislava_praterstern' OR lower(name) LIKE '%praterstern%' OR (lower(city)='bratislava' AND lower(name) LIKE '%central%')
+), wanted AS (
+  SELECT 'Loctite' AS brand, 'Loctite Universal' AS series, '401' AS model, 'Adhesive and Glue' AS kind,
+         'adhesive_type' AS k1, 'wood glue' AS v1, 'color_family' AS k2, 'Brown' AS v2
+  UNION ALL SELECT 'Snickers Workwear','Snickers Workwear Classic','SW','Work Trousers','color_family','Black','size','L'
+  UNION ALL SELECT 'Really Useful Box','Really Useful Box Compact','RUB','Storage Bin and Organizer','storage_type','parts case','color_family','Clear'
+  UNION ALL SELECT 'Wera','Wera Professional','Kraftform','Pliers and Wrenches','tool_type','adjustable wrench','length_mm','125'
+  UNION ALL SELECT 'Metabo','Metabo Professional','W','Corded Angle Grinder','disc_diameter_mm','115','power_w','2600'
+  UNION ALL SELECT 'Stanley','Stanley Professional','SX','Pliers and Wrenches','tool_type','water pump pliers','length_mm','125'
+), base AS (
+  SELECT w.brand,w.series,w.model,w.kind,w.k1,w.v1,w.k2,w.v2,p.sku,p.path,ts.path AS store_path,i.available_today,pk.name AS kind_name
+  FROM wanted w
+  JOIN product_kinds pk ON pk.name = w.kind
+  JOIN products p ON p.kind_id = pk.id
+    AND p.brand = w.brand
+    AND p.series LIKE w.series || '%'
+    AND p.model LIKE w.model || '%'
+  JOIN product_properties pp1 ON pp1.sku=p.sku AND pp1.key=w.k1
+  JOIN product_properties pp2 ON pp2.sku=p.sku AND pp2.key=w.k2
+  JOIN target_store ts
+  JOIN inventory i ON i.store_id=ts.id AND i.sku=p.sku
+  WHERE (lower(pp1.value_text)=lower(w.v1) OR CAST(pp1.value_number AS TEXT)=w.v1)
+    AND (lower(pp2.value_text)=lower(w.v2) OR CAST(pp2.value_number AS TEXT)=w.v2)
+)
+SELECT * FROM base ORDER BY brand, series, model, sku;
+SQL
+brand,series,model,kind,k1,v1,k2,v2,sku,path,store_path,available_today,kind_name
+Next step_2... Query Bratislava stores to identify the correct 'central Bratislava' row and path. (20297 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH bratislava_stores AS (\n  SELECT id, path, name, city FROM stores WHERE lower(city)='bratislava'\n), wanted AS (\n  SELECT 'Loctite' AS brand, 'Loctite Universal' AS series, '401 4VI-0XS' AS model_hint, 'Adhesive and Glue' AS kind\n  UNION ALL SELECT 'Snickers Workwear','Snickers Workwear Classic','SW 27F-FGX','Work Trousers'\n  UNION ALL SELECT 'Really Useful Box','Really Useful Box Compact','RUB 10R-QVB','Storage Bin and Organizer'\n  UNION ALL SELECT 'Wera','Wera Professional','Kraftform VNH-TAQ','Pliers and Wrenches'\n  UNION ALL SELECT 'Metabo','Metabo Professional','W 27T-T2L','Corded Angle Grinder'\n  UNION ALL SELECT 'Stanley','Stanley Professional','SX ECU-AKL','Pliers and Wrenches'\n)\nSELECT\n  bs.id AS store_id,\n  bs.path AS store_path,\n  bs.name AS store_name,\n  w.brand,\n  w.series,\n  w.model_hint,\n  w.kind,\n  p.sku,\n  p.path AS product_path,\n  p.model,\n  p.name,\n  i.available_today,\n  pp.key,\n  COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) AS value\nFROM bratislava_stores bs\nJOIN inventory i ON i.store_id = bs.id\nJOIN products p ON p.sku = i.sku\nJOIN product_kinds pk ON pk.id = p.kind_id\nJOIN wanted w ON w.brand = p.brand AND pk.name = w.kind\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.series LIKE w.series || '%'\n  AND (p.model LIKE '%' || w.model_hint || '%' OR p.name LIKE '%' || w.model_hint || '%')\nORDER BY bs.id, w.brand, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH bratislava_stores AS (
+  SELECT id, path, name, city FROM stores WHERE lower(city)='bratislava'
+), wanted AS (
+  SELECT 'Loctite' AS brand, 'Loctite Universal' AS series, '401 4VI-0XS' AS model_hint, 'Adhesive and Glue' AS kind
+  UNION ALL SELECT 'Snickers Workwear','Snickers Workwear Classic','SW 27F-FGX','Work Trousers'
+  UNION ALL SELECT 'Really Useful Box','Really Useful Box Compact','RUB 10R-QVB','Storage Bin and Organizer'
+  UNION ALL SELECT 'Wera','Wera Professional','Kraftform VNH-TAQ','Pliers and Wrenches'
+  UNION ALL SELECT 'Metabo','Metabo Professional','W 27T-T2L','Corded Angle Grinder'
+  UNION ALL SELECT 'Stanley','Stanley Professional','SX ECU-AKL','Pliers and Wrenches'
+)
+SELECT
+  bs.id AS store_id,
+  bs.path AS store_path,
+  bs.name AS store_name,
+  w.brand,
+  w.series,
+  w.model_hint,
+  w.kind,
+  p.sku,
+  p.path AS product_path,
+  p.model,
+  p.name,
+  i.available_today,
+  pp.key,
+  COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) AS value
+FROM bratislava_stores bs
+JOIN inventory i ON i.store_id = bs.id
+JOIN products p ON p.sku = i.sku
+JOIN product_kinds pk ON pk.id = p.kind_id
+JOIN wanted w ON w.brand = p.brand AND pk.name = w.kind
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.series LIKE w.series || '%'
+  AND (p.model LIKE '%' || w.model_hint || '%' OR p.name LIKE '%' || w.model_hint || '%')
+ORDER BY bs.id, w.brand, p.sku, pp.key;
+SQL
+store_id,store_path,store_name,brand,series,model_hint,kind,sku,product_path,model,name,available_today,key,value
+Next step_3... List all stores with Bratislava-like names to resolve 'central Bratislava'. (20371 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH store_scan AS (\n  SELECT id, path, name, city\n  FROM stores\n  WHERE lower(city) LIKE '%bratislava%' OR lower(name) LIKE '%bratislava%' OR lower(name) LIKE '%stare mesto%' OR lower(name) LIKE '%praterstern%'\n), wanted AS (\n  SELECT 'Loctite' AS brand, 'Adhesive and Glue' AS kind\n  UNION ALL SELECT 'Snickers Workwear','Work Trousers'\n  UNION ALL SELECT 'Really Useful Box','Storage Bin and Organizer'\n  UNION ALL SELECT 'Wera','Pliers and Wrenches'\n  UNION ALL SELECT 'Metabo','Corded Angle Grinder'\n  UNION ALL SELECT 'Stanley','Pliers and Wrenches'\n)\nSELECT\n  ss.id AS store_id,\n  ss.path AS store_path,\n  ss.name AS store_name,\n  ss.city,\n  p.sku,\n  p.path AS product_path,\n  p.brand,\n  p.series,\n  p.model,\n  pk.name AS kind,\n  i.available_today,\n  pp.key,\n  COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) AS value\nFROM store_scan ss\nJOIN inventory i ON i.store_id = ss.id\nJOIN products p ON p.sku = i.sku\nJOIN product_kinds pk ON pk.id = p.kind_id\nJOIN wanted w ON w.brand = p.brand AND w.kind = pk.name\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nORDER BY ss.id, p.brand, pk.name, p.series, p.model, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH store_scan AS (
+  SELECT id, path, name, city
+  FROM stores
+  WHERE lower(city) LIKE '%bratislava%' OR lower(name) LIKE '%bratislava%' OR lower(name) LIKE '%stare mesto%' OR lower(name) LIKE '%praterstern%'
+), wanted AS (
+  SELECT 'Loctite' AS brand, 'Adhesive and Glue' AS kind
+  UNION ALL SELECT 'Snickers Workwear','Work Trousers'
+  UNION ALL SELECT 'Really Useful Box','Storage Bin and Organizer'
+  UNION ALL SELECT 'Wera','Pliers and Wrenches'
+  UNION ALL SELECT 'Metabo','Corded Angle Grinder'
+  UNION ALL SELECT 'Stanley','Pliers and Wrenches'
+)
+SELECT
+  ss.id AS store_id,
+  ss.path AS store_path,
+  ss.name AS store_name,
+  ss.city,
+  p.sku,
+  p.path AS product_path,
+  p.brand,
+  p.series,
+  p.model,
+  pk.name AS kind,
+  i.available_today,
+  pp.key,
+  COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) AS value
+FROM store_scan ss
+JOIN inventory i ON i.store_id = ss.id
+JOIN products p ON p.sku = i.sku
+JOIN product_kinds pk ON pk.id = p.kind_id
+JOIN wanted w ON w.brand = p.brand AND w.kind = pk.name
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+ORDER BY ss.id, p.brand, pk.name, p.series, p.model, p.sku, pp.key;
+SQL
+store_id,store_path,store_name,city,sku,product_path,brand,series,model,kind,available_today,key,value
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2IE0M6VJ,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0016_3g76uur1/ADH-2IE0M6VJ.json,Loctite,Fast Cure,EA 2W0-T5U,Adhesive and Glue,3,adhesive_type,threadlocker
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2IE0M6VJ,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0016_3g76uur1/ADH-2IE0M6VJ.json,Loctite,Fast Cure,EA 2W0-T5U,Adhesive and Glue,3,chemistry,hybrid polymer
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2IE0M6VJ,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0016_3g76uur1/ADH-2IE0M6VJ.json,Loctite,Fast Cure,EA 2W0-T5U,Adhesive and Glue,3,color_family,clear
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2IE0M6VJ,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0016_3g76uur1/ADH-2IE0M6VJ.json,Loctite,Fast Cure,EA 2W0-T5U,Adhesive and Glue,3,use_area,metal
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2IE0M6VJ,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0016_3g76uur1/ADH-2IE0M6VJ.json,Loctite,Fast Cure,EA 2W0-T5U,Adhesive and Glue,3,volume_ml,100
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-3C9V1U1Z,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0016_3g76uur1/ADH-3C9V1U1Z.json,Loctite,Fast Cure,EA 2W0-T5U,Adhesive and Glue,1,adhesive_type,threadlocker
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-3C9V1U1Z,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0016_3g76uur1/ADH-3C9V1U1Z.json,Loctite,Fast Cure,EA 2W0-T5U,Adhesive and Glue,1,chemistry,hybrid polymer
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-3C9V1U1Z,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0016_3g76uur1/ADH-3C9V1U1Z.json,Loctite,Fast Cure,EA 2W0-T5U,Adhesive and Glue,1,color_family,white
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-3C9V1U1Z,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0016_3g76uur1/ADH-3C9V1U1Z.json,Loctite,Fast Cure,EA 2W0-T5U,Adhesive and Glue,1,use_area,metal
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-3C9V1U1Z,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0016_3g76uur1/ADH-3C9V1U1Z.json,Loctite,Fast Cure,EA 2W0-T5U,Adhesive and Glue,1,volume_ml,500
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2CCAAFJL,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0024_180wryym/ADH-2CCAAFJL.json,Loctite,Professional,HY C3B-8TK,Adhesive and Glue,12,adhesive_type,mounting adhesive
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2CCAAFJL,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0024_180wryym/ADH-2CCAAFJL.json,Loctite,Professional,HY C3B-8TK,Adhesive and Glue,12,chemistry,polyurethane
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2CCAAFJL,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0024_180wryym/ADH-2CCAAFJL.json,Loctite,Professional,HY C3B-8TK,Adhesive and Glue,12,color_family,clear
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2CCAAFJL,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0024_180wryym/ADH-2CCAAFJL.json,Loctite,Professional,HY C3B-8TK,Adhesive and Glue,12,use_area,exterior
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2CCAAFJL,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0024_180wryym/ADH-2CCAAFJL.json,Loctite,Professional,HY C3B-8TK,Adhesive and Glue,12,volume_ml,500
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2WKA5KWM,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0024_180wryym/ADH-2WKA5KWM.json,Loctite,Professional,HY C3B-8TK,Adhesive and Glue,7,adhesive_type,threadlocker
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2WKA5KWM,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0024_180wryym/ADH-2WKA5KWM.json,Loctite,Professional,HY C3B-8TK,Adhesive and Glue,7,chemistry,polyurethane
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2WKA5KWM,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0024_180wryym/ADH-2WKA5KWM.json,Loctite,Professional,HY C3B-8TK,Adhesive and Glue,7,color_family,clear
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2WKA5KWM,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0024_180wryym/ADH-2WKA5KWM.json,Loctite,Professional,HY C3B-8TK,Adhesive and Glue,7,use_area,exterior
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2WKA5KWM,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0024_180wryym/ADH-2WKA5KWM.json,Loctite,Professional,HY C3B-8TK,Adhesive and Glue,7,volume_ml,750
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-3TWZRIQP,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0024_180wryym/ADH-3TWZRIQP.json,Loctite,Professional,HY C3B-8TK,Adhesive and Glue,2,adhesive_type,tile adhesive
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-3TWZRIQP,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0024_180wryym/ADH-3TWZRIQP.json,Loctite,Professional,HY C3B-8TK,Adhesive and Glue,2,chemistry,polyurethane
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-3TWZRIQP,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0024_180wryym/ADH-3TWZRIQP.json,Loctite,Professional,HY C3B-8TK,Adhesive and Glue,2,color_family,brown
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-3TWZRIQP,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0024_180wryym/ADH-3TWZRIQP.json,Loctite,Professional,HY C3B-8TK,Adhesive and Glue,2,use_area,exterior
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-3TWZRIQP,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0024_180wryym/ADH-3TWZRIQP.json,Loctite,Professional,HY C3B-8TK,Adhesive and Glue,2,volume_ml,300
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-1ZXF0ES7,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0009_1xypt9x3/ADH-1ZXF0ES7.json,Loctite,Threadlocker,243 2ZY-J6G,Adhesive and Glue,5,adhesive_type,wood glue
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-1ZXF0ES7,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0009_1xypt9x3/ADH-1ZXF0ES7.json,Loctite,Threadlocker,243 2ZY-J6G,Adhesive and Glue,5,chemistry,solvent based
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-1ZXF0ES7,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0009_1xypt9x3/ADH-1ZXF0ES7.json,Loctite,Threadlocker,243 2ZY-J6G,Adhesive and Glue,5,color_family,white
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-1ZXF0ES7,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0009_1xypt9x3/ADH-1ZXF0ES7.json,Loctite,Threadlocker,243 2ZY-J6G,Adhesive and Glue,5,use_area,masonry
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-1ZXF0ES7,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0009_1xypt9x3/ADH-1ZXF0ES7.json,Loctite,Threadlocker,243 2ZY-J6G,Adhesive and Glue,5,volume_ml,100
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-15GYDVHH,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-15GYDVHH.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,1,adhesive_type,tile adhesive
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-15GYDVHH,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-15GYDVHH.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,1,chemistry,polyurethane
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-15GYDVHH,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-15GYDVHH.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,1,color_family,gray
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-15GYDVHH,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-15GYDVHH.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,1,use_area,metal
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-15GYDVHH,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-15GYDVHH.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,1,volume_ml,50
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-1J7S70A9,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-1J7S70A9.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,6,adhesive_type,mounting adhesive
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-1J7S70A9,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-1J7S70A9.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,6,chemistry,polyurethane
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-1J7S70A9,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-1J7S70A9.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,6,color_family,clear
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-1J7S70A9,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-1J7S70A9.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,6,use_area,metal
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-1J7S70A9,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-1J7S70A9.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,6,volume_ml,500
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2G0EHURO,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-2G0EHURO.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,7,adhesive_type,mounting adhesive
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2G0EHURO,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-2G0EHURO.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,7,chemistry,polyurethane
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2G0EHURO,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-2G0EHURO.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,7,color_family,white
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2G0EHURO,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-2G0EHURO.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,7,use_area,metal
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-2G0EHURO,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-2G0EHURO.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,7,volume_ml,250
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-38NQV52K,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-38NQV52K.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,3,adhesive_type,tile adhesive
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-38NQV52K,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-38NQV52K.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,3,chemistry,polyurethane
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-38NQV52K,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-38NQV52K.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,3,color_family,brown
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-38NQV52K,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-38NQV52K.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,3,use_area,metal
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-38NQV52K,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-38NQV52K.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,3,volume_ml,500
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-3NUJBNFH,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-3NUJBNFH.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,7,adhesive_type,mounting adhesive
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-3NUJBNFH,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-3NUJBNFH.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,7,chemistry,polyurethane
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-3NUJBNFH,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-3NUJBNFH.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,7,color_family,brown
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-3NUJBNFH,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-3NUJBNFH.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,7,use_area,metal
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-3NUJBNFH,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-3NUJBNFH.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,7,volume_ml,300
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-84N7UXHL,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-84N7UXHL.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,9,adhesive_type,wood glue
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-84N7UXHL,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-84N7UXHL.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,9,chemistry,polyurethane
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-84N7UXHL,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-84N7UXHL.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,9,color_family,gray
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-84N7UXHL,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-84N7UXHL.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,9,use_area,metal
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-84N7UXHL,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-84N7UXHL.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,9,volume_ml,250
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-A3O4BXTB,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-A3O4BXTB.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,5,adhesive_type,mounting adhesive
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-A3O4BXTB,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-A3O4BXTB.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,5,chemistry,polyurethane
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-A3O4BXTB,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-A3O4BXTB.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,5,color_family,gray
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-A3O4BXTB,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-A3O4BXTB.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,5,use_area,metal
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,ADH-A3O4BXTB,/proc/catalog/adhesives_sealants/adhesives_glues/fam_adhesives_sealants_adhesives_glues_0022_1566obkw/ADH-A3O4BXTB.json,Loctite,Threadlocker,401 DZ6-M5M,Adhesive and Glue,5,volume_ml,250
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-1P6DE6LK,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0008_3ovdfmal/PWR-1P6DE6LK.json,Metabo,LiHD,W 26F-57D,Corded Angle Grinder,7,disc_diameter_mm,115
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-1P6DE6LK,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0008_3ovdfmal/PWR-1P6DE6LK.json,Metabo,LiHD,W 26F-57D,Corded Angle Grinder,7,power_source,corded
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-1P6DE6LK,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0008_3ovdfmal/PWR-1P6DE6LK.json,Metabo,LiHD,W 26F-57D,Corded Angle Grinder,7,power_w,1100
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-1P6DE6LK,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0008_3ovdfmal/PWR-1P6DE6LK.json,Metabo,LiHD,W 26F-57D,Corded Angle Grinder,7,speed_control,single speed
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-1P6DE6LK,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0008_3ovdfmal/PWR-1P6DE6LK.json,Metabo,LiHD,W 26F-57D,Corded Angle Grinder,7,voltage_v,230
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-3EUYS0GD,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0016_2xik92ei/PWR-3EUYS0GD.json,Metabo,Professional,SBE 36U-EHD,Corded Angle Grinder,12,disc_diameter_mm,150
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-3EUYS0GD,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0016_2xik92ei/PWR-3EUYS0GD.json,Metabo,Professional,SBE 36U-EHD,Corded Angle Grinder,12,power_source,corded
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-3EUYS0GD,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0016_2xik92ei/PWR-3EUYS0GD.json,Metabo,Professional,SBE 36U-EHD,Corded Angle Grinder,12,power_w,650
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-3EUYS0GD,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0016_2xik92ei/PWR-3EUYS0GD.json,Metabo,Professional,SBE 36U-EHD,Corded Angle Grinder,12,speed_control,variable speed
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-3EUYS0GD,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0016_2xik92ei/PWR-3EUYS0GD.json,Metabo,Professional,SBE 36U-EHD,Corded Angle Grinder,12,voltage_v,230
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-EXZG4WZK,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0016_2xik92ei/PWR-EXZG4WZK.json,Metabo,Professional,SBE 36U-EHD,Corded Angle Grinder,6,disc_diameter_mm,180
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-EXZG4WZK,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0016_2xik92ei/PWR-EXZG4WZK.json,Metabo,Professional,SBE 36U-EHD,Corded Angle Grinder,6,power_source,corded
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-EXZG4WZK,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0016_2xik92ei/PWR-EXZG4WZK.json,Metabo,Professional,SBE 36U-EHD,Corded Angle Grinder,6,power_w,850
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-EXZG4WZK,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0016_2xik92ei/PWR-EXZG4WZK.json,Metabo,Professional,SBE 36U-EHD,Corded Angle Grinder,6,speed_control,variable speed
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-EXZG4WZK,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0016_2xik92ei/PWR-EXZG4WZK.json,Metabo,Professional,SBE 36U-EHD,Corded Angle Grinder,6,voltage_v,230
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-2K35IANW,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0022_37f1x4so/PWR-2K35IANW.json,Metabo,Professional,W 27T-T2L,Corded Angle Grinder,4,disc_diameter_mm,115
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-2K35IANW,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0022_37f1x4so/PWR-2K35IANW.json,Metabo,Professional,W 27T-T2L,Corded Angle Grinder,4,power_source,corded
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-2K35IANW,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0022_37f1x4so/PWR-2K35IANW.json,Metabo,Professional,W 27T-T2L,Corded Angle Grinder,4,power_w,2600
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-2K35IANW,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0022_37f1x4so/PWR-2K35IANW.json,Metabo,Professional,W 27T-T2L,Corded Angle Grinder,4,speed_control,variable speed
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-2K35IANW,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0022_37f1x4so/PWR-2K35IANW.json,Metabo,Professional,W 27T-T2L,Corded Angle Grinder,4,voltage_v,230
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-1F3DVJSW,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0014_1tctbkh5/PWR-1F3DVJSW.json,Metabo,Professional,W 33R-024,Corded Angle Grinder,2,disc_diameter_mm,150
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-1F3DVJSW,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0014_1tctbkh5/PWR-1F3DVJSW.json,Metabo,Professional,W 33R-024,Corded Angle Grinder,2,power_source,corded
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-1F3DVJSW,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0014_1tctbkh5/PWR-1F3DVJSW.json,Metabo,Professional,W 33R-024,Corded Angle Grinder,2,power_w,650
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-1F3DVJSW,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0014_1tctbkh5/PWR-1F3DVJSW.json,Metabo,Professional,W 33R-024,Corded Angle Grinder,2,speed_control,single speed
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-1F3DVJSW,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0014_1tctbkh5/PWR-1F3DVJSW.json,Metabo,Professional,W 33R-024,Corded Angle Grinder,2,voltage_v,230
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-1R6QUZEN,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0014_1tctbkh5/PWR-1R6QUZEN.json,Metabo,Professional,W 33R-024,Corded Angle Grinder,6,disc_diameter_mm,150
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-1R6QUZEN,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0014_1tctbkh5/PWR-1R6QUZEN.json,Metabo,Professional,W 33R-024,Corded Angle Grinder,6,power_source,corded
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-1R6QUZEN,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0014_1tctbkh5/PWR-1R6QUZEN.json,Metabo,Professional,W 33R-024,Corded Angle Grinder,6,power_w,1100
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-1R6QUZEN,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0014_1tctbkh5/PWR-1R6QUZEN.json,Metabo,Professional,W 33R-024,Corded Angle Grinder,6,speed_control,single speed
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-1R6QUZEN,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0014_1tctbkh5/PWR-1R6QUZEN.json,Metabo,Professional,W 33R-024,Corded Angle Grinder,6,voltage_v,230
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-2CZMB3IQ,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0014_1tctbkh5/PWR-2CZMB3IQ.json,Metabo,Professional,W 33R-024,Corded Angle Grinder,2,disc_diameter_mm,115
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-2CZMB3IQ,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0014_1tctbkh5/PWR-2CZMB3IQ.json,Metabo,Professional,W 33R-024,Corded Angle Grinder,2,power_source,corded
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-2CZMB3IQ,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0014_1tctbkh5/PWR-2CZMB3IQ.json,Metabo,Professional,W 33R-024,Corded Angle Grinder,2,power_w,650
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-2CZMB3IQ,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0014_1tctbkh5/PWR-2CZMB3IQ.json,Metabo,Professional,W 33R-024,Corded Angle Grinder,2,speed_control,single speed
+store_bratislava_stare_mesto,/proc/stores/store_bratislava_stare_mesto.json,PowerTool Bratislava Stare Mesto,Bratislava,PWR-2CZMB3IQ,/proc/catalog/power_tools/corded_angle_grinder/fam_power_tools_corded_angle_grinder_0014_1tctbkh5/PWR-2CZMB3IQ.json,Metabo,Professional,W 33R-024,Corded Angle Grinder,2,voltage_v,230
+warning: result truncated at 100 rows
+Next step_4... Query Bratislava store ids/paths to resolve the target central store in data. (29802 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH bratislava AS (\n  SELECT id, path, name, city\n  FROM stores\n  WHERE lower(city)='bratislava'\n), target_store AS (\n  SELECT id, path, name\n  FROM bratislava\n  WHERE id='store_bratislava_praterstern'\n     OR lower(name) LIKE '%praterstern%'\n     OR lower(name) LIKE '%central%'\n), wanted(item,brand,series,model,kind,k1,v1,k2,v2,k3,v3) AS (\n  VALUES\n  ('loctite','Loctite','Loctite Universal','401 4VI-0XS','Adhesive and Glue','adhesive_type','wood glue','color_family','Brown',NULL,NULL),\n  ('snickers','Snickers Workwear','Snickers Workwear Classic','SW 27F-FGX','Work Trousers','color_family','Black','size','L','fit','women'),\n  ('rub','Really Useful Box','Really Useful Box Compact','RUB 10R-QVB','Storage Bin and Organizer','storage_type','parts case','color_family','Clear',NULL,NULL),\n  ('wera','Wera','Wera Professional','Kraftform VNH-TAQ','Pliers and Wrenches','tool_type','adjustable wrench','length_mm','125',NULL,NULL),\n  ('metabo','Metabo','Metabo Professional','W 27T-T2L','Corded Angle Grinder','disc_diameter_mm','115','power_w','2600',NULL,NULL),\n  ('stanley','Stanley','Stanley Professional','SX ECU-AKL','Pliers and Wrenches','tool_type','water pump pliers','length_mm','125',NULL,NULL)\n), matched AS (\n  SELECT\n    w.item,\n    w.brand,\n    p.sku,\n    p.path AS product_path,\n    ts.path AS store_path,\n    i.available_today\n  FROM wanted w\n  JOIN product_kinds pk ON pk.name=w.kind\n  JOIN products p ON p.kind_id=pk.id\n   AND p.brand=w.brand\n   AND p.series=w.series\n   AND p.model=w.model\n  JOIN target_store ts\n  JOIN inventory i ON i.store_id=ts.id AND i.sku=p.sku\n  JOIN product_properties a ON a.sku=p.sku AND a.key=w.k1\n  JOIN product_properties b ON b.sku=p.sku AND b.key=w.k2\n  LEFT JOIN product_properties c ON c.sku=p.sku AND w.k3 IS NOT NULL AND c.key=w.k3\n  WHERE (lower(a.value_text)=lower(w.v1) OR CAST(a.value_number AS TEXT)=w.v1)\n    AND (lower(b.value_text)=lower(w.v2) OR CAST(b.value_number AS TEXT)=w.v2)\n    AND (w.k3 IS NULL OR lower(c.value_text)=lower(w.v3) OR CAST(c.value_number AS TEXT)=w.v3)\n)\nSELECT\n  (SELECT group_concat(id,'|') FROM bratislava) AS bratislava_store_ids,\n  (SELECT group_concat(id,'|') FROM target_store) AS resolved_target_store_ids,\n  COUNT(DISTINCT CASE WHEN available_today>=4 THEN item END) AS qualifying_count\nFROM matched;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH bratislava AS (
+  SELECT id, path, name, city
+  FROM stores
+  WHERE lower(city)='bratislava'
+), target_store AS (
+  SELECT id, path, name
+  FROM bratislava
+  WHERE id='store_bratislava_praterstern'
+     OR lower(name) LIKE '%praterstern%'
+     OR lower(name) LIKE '%central%'
+), wanted(item,brand,series,model,kind,k1,v1,k2,v2,k3,v3) AS (
+  VALUES
+  ('loctite','Loctite','Loctite Universal','401 4VI-0XS','Adhesive and Glue','adhesive_type','wood glue','color_family','Brown',NULL,NULL),
+  ('snickers','Snickers Workwear','Snickers Workwear Classic','SW 27F-FGX','Work Trousers','color_family','Black','size','L','fit','women'),
+  ('rub','Really Useful Box','Really Useful Box Compact','RUB 10R-QVB','Storage Bin and Organizer','storage_type','parts case','color_family','Clear',NULL,NULL),
+  ('wera','Wera','Wera Professional','Kraftform VNH-TAQ','Pliers and Wrenches','tool_type','adjustable wrench','length_mm','125',NULL,NULL),
+  ('metabo','Metabo','Metabo Professional','W 27T-T2L','Corded Angle Grinder','disc_diameter_mm','115','power_w','2600',NULL,NULL),
+  ('stanley','Stanley','Stanley Professional','SX ECU-AKL','Pliers and Wrenches','tool_type','water pump pliers','length_mm','125',NULL,NULL)
+), matched AS (
+  SELECT
+    w.item,
+    w.brand,
+    p.sku,
+    p.path AS product_path,
+    ts.path AS store_path,
+    i.available_today
+  FROM wanted w
+  JOIN product_kinds pk ON pk.name=w.kind
+  JOIN products p ON p.kind_id=pk.id
+   AND p.brand=w.brand
+   AND p.series=w.series
+   AND p.model=w.model
+  JOIN target_store ts
+  JOIN inventory i ON i.store_id=ts.id AND i.sku=p.sku
+  JOIN product_properties a ON a.sku=p.sku AND a.key=w.k1
+  JOIN product_properties b ON b.sku=p.sku AND b.key=w.k2
+  LEFT JOIN product_properties c ON c.sku=p.sku AND w.k3 IS NOT NULL AND c.key=w.k3
+  WHERE (lower(a.value_text)=lower(w.v1) OR CAST(a.value_number AS TEXT)=w.v1)
+    AND (lower(b.value_text)=lower(w.v2) OR CAST(b.value_number AS TEXT)=w.v2)
+    AND (w.k3 IS NULL OR lower(c.value_text)=lower(w.v3) OR CAST(c.value_number AS TEXT)=w.v3)
+)
+SELECT
+  (SELECT group_concat(id,'|') FROM bratislava) AS bratislava_store_ids,
+  (SELECT group_concat(id,'|') FROM target_store) AS resolved_target_store_ids,
+  COUNT(DISTINCT CASE WHEN available_today>=4 THEN item END) AS qualifying_count
+FROM matched;
+SQL
+bratislava_store_ids,resolved_target_store_ids,qualifying_count
+store_bratislava_stare_mesto,,0
+Next step_5... Run one focused SQL aggregation using `store_bratislava_stare_mesto`. (26869 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH target_store AS (\n  SELECT id, path FROM stores WHERE id='store_bratislava_stare_mesto'\n), wanted(item,brand,series,model,kind,k1,v1,k2,v2,k3,v3) AS (\n  VALUES\n  ('loctite','Loctite','Loctite Universal','401 4VI-0XS','Adhesive and Glue','adhesive_type','wood glue','color_family','Brown',NULL,NULL),\n  ('snickers','Snickers Workwear','Snickers Workwear Classic','SW 27F-FGX','Work Trousers','color_family','Black','size','L','fit','women'),\n  ('rub','Really Useful Box','Really Useful Box Compact','RUB 10R-QVB','Storage Bin and Organizer','storage_type','parts case','color_family','Clear',NULL,NULL),\n  ('wera','Wera','Wera Professional','Kraftform VNH-TAQ','Pliers and Wrenches','tool_type','adjustable wrench','length_mm','125',NULL,NULL),\n  ('metabo','Metabo','Metabo Professional','W 27T-T2L','Corded Angle Grinder','disc_diameter_mm','115','power_w','2600',NULL,NULL),\n  ('stanley','Stanley','Stanley Professional','SX ECU-AKL','Pliers and Wrenches','tool_type','water pump pliers','length_mm','125',NULL,NULL)\n), matched AS (\n  SELECT w.item, p.sku, p.path AS product_path, ts.path AS store_path, i.available_today\n  FROM wanted w\n  JOIN product_kinds pk ON pk.name=w.kind\n  JOIN products p ON p.kind_id=pk.id AND p.brand=w.brand AND p.series=w.series AND p.model=w.model\n  JOIN target_store ts\n  JOIN inventory i ON i.store_id=ts.id AND i.sku=p.sku\n  JOIN product_properties a ON a.sku=p.sku AND a.key=w.k1\n  JOIN product_properties b ON b.sku=p.sku AND b.key=w.k2\n  LEFT JOIN product_properties c ON c.sku=p.sku AND w.k3 IS NOT NULL AND c.key=w.k3\n  WHERE (lower(a.value_text)=lower(w.v1) OR CAST(a.value_number AS TEXT)=w.v1)\n    AND (lower(b.value_text)=lower(w.v2) OR CAST(b.value_number AS TEXT)=w.v2)\n    AND (w.k3 IS NULL OR lower(c.value_text)=lower(w.v3) OR CAST(c.value_number AS TEXT)=w.v3)\n)\nSELECT COUNT(DISTINCT CASE WHEN available_today>=4 THEN item END) AS qualifying_count\nFROM matched;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH target_store AS (
+  SELECT id, path FROM stores WHERE id='store_bratislava_stare_mesto'
+), wanted(item,brand,series,model,kind,k1,v1,k2,v2,k3,v3) AS (
+  VALUES
+  ('loctite','Loctite','Loctite Universal','401 4VI-0XS','Adhesive and Glue','adhesive_type','wood glue','color_family','Brown',NULL,NULL),
+  ('snickers','Snickers Workwear','Snickers Workwear Classic','SW 27F-FGX','Work Trousers','color_family','Black','size','L','fit','women'),
+  ('rub','Really Useful Box','Really Useful Box Compact','RUB 10R-QVB','Storage Bin and Organizer','storage_type','parts case','color_family','Clear',NULL,NULL),
+  ('wera','Wera','Wera Professional','Kraftform VNH-TAQ','Pliers and Wrenches','tool_type','adjustable wrench','length_mm','125',NULL,NULL),
+  ('metabo','Metabo','Metabo Professional','W 27T-T2L','Corded Angle Grinder','disc_diameter_mm','115','power_w','2600',NULL,NULL),
+  ('stanley','Stanley','Stanley Professional','SX ECU-AKL','Pliers and Wrenches','tool_type','water pump pliers','length_mm','125',NULL,NULL)
+), matched AS (
+  SELECT w.item, p.sku, p.path AS product_path, ts.path AS store_path, i.available_today
+  FROM wanted w
+  JOIN product_kinds pk ON pk.name=w.kind
+  JOIN products p ON p.kind_id=pk.id AND p.brand=w.brand AND p.series=w.series AND p.model=w.model
+  JOIN target_store ts
+  JOIN inventory i ON i.store_id=ts.id AND i.sku=p.sku
+  JOIN product_properties a ON a.sku=p.sku AND a.key=w.k1
+  JOIN product_properties b ON b.sku=p.sku AND b.key=w.k2
+  LEFT JOIN product_properties c ON c.sku=p.sku AND w.k3 IS NOT NULL AND c.key=w.k3
+  WHERE (lower(a.value_text)=lower(w.v1) OR CAST(a.value_number AS TEXT)=w.v1)
+    AND (lower(b.value_text)=lower(w.v2) OR CAST(b.value_number AS TEXT)=w.v2)
+    AND (w.k3 IS NULL OR lower(c.value_text)=lower(w.v3) OR CAST(c.value_number AS TEXT)=w.v3)
+)
+SELECT COUNT(DISTINCT CASE WHEN available_today>=4 THEN item END) AS qualifying_count
+FROM matched;
+SQL
+qualifying_count
+0
+Next step_6... Report completion with exact required format. (17267 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved target Bratislava store.', 'Ran exact SKU/property availability aggregation.', 'Computed qualifying_count = 0.'] message='count : 0' grounding_refs=['/proc/stores/store_bratislava_stare_mesto.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved target Bratislava store.
+- Ran exact SKU/property availability aggregation.
+- Computed qualifying_count = 0.
+
+[34mAGENT SUMMARY: count : 0[0m
+- [34m/proc/stores/store_bratislava_stare_mesto.json[0m

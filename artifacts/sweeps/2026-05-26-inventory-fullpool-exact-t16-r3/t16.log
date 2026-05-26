@@ -1,0 +1,256 @@
+TASK t16 (model codex:gpt-5.3-codex)
+INSTRUCTION: How many of these products have at least 2 items available in the PowerTool store near Linz main square today: the Compressor and Dust Extractor from Einhell in the Einhell Classic TE 1TT-UOH Compressor and Dust Extractor line that has machine type compressor, voltage 400 V, and power 1100 W,the Storage Bin and Organizer from Stanley in the Stanley Professional FM 1LT-4QA Storage Bin and Organizer line that has storage type storage bin and color family Blue,the Cordless Saw and Sander from Milwaukee in the Milwaukee Brushless HD F6B-AAU Cordless Saw and Sander line that has tool type orbital sander, voltage 18 V, battery platform 18v-system, and kit contents starter kit,the Manual Garden Tool from Einhell in the Einhell Smart GE 2QX-SBL Manual Garden Tool line that has tool type soil cultivator and length 900 mm,the Chainsaw from Makita in the Makita XGT DHP 31S-Q68 Chainsaw line that has power source petrol and bar length 45 cm,the Anchor and Wall Plug from Fischer in the Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug line that has anchor type wall plug, diameter 6 mm, length 80 mm, and pack count 10 pcs? Answer in exactly format "[QTY:%d]" (no quotes)
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+INVENTORY_DIAG {"brand": "Einhell", "exact_candidates": [{"path": "/proc/catalog/workshop_machines/compressors_extractors/fam_workshop_machines_compressors_extractors_0001_1bdzjq6m/MAC-2U22EEDG.json", "sku": "MAC-2U22EEDG"}], "inventory": [], "kind": "Compressor and Dust Extractor", "line": "Einhell Classic TE 1TT-UOH Compressor and Dust Extractor", "props": [{"keys": ["machine_type"], "value": "compressor"}, {"keys": ["voltage", "voltage_v"], "value": "400 v"}, {"keys": ["power", "power_w"], "value": "1100 w"}], "reason": "exact_group", "selected": null, "store_id": "store_linz_hauptplatz", "threshold": 2}
+INVENTORY_DIAG {"brand": "Stanley", "candidates": [{"line_score": 9, "matched": [{"keys": ["storage_type"], "matched": false, "value": "storage bin"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": true, "value": "blue"}], "name": "Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 8l Blue", "path": "/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-1GWTKG92.json", "prop_matches": 1, "props": {"color_family": ["blue", ""], "material": ["polypropylene", ""], "stackable": ["no", ""], "storage_type": ["organizer", ""], "volume_l": ["8", "8"]}, "sku": "STO-1GWTKG92"}, {"line_score": 9, "matched": [{"keys": ["storage_type"], "matched": false, "value": "storage bin"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": true, "value": "blue"}], "name": "Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 18l Blue", "path": "/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2AS2XYZJ.json", "prop_matches": 1, "props": {"color_family": ["blue", ""], "material": ["polypropylene", ""], "stackable": ["system only", ""], "storage_type": ["organizer", ""], "volume_l": ["18", "18"]}, "sku": "STO-2AS2XYZJ"}, {"line_score": 9, "matched": [{"keys": ["storage_type"], "matched": true, "value": "storage bin"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "blue"}], "name": "Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 12l Black", "path": "/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2G07G4PD.json", "prop_matches": 1, "props": {"color_family": ["black", ""], "material": ["polypropylene", ""], "stackable": ["yes", ""], "storage_type": ["storage bin", ""], "volume_l": ["12", "12"]}, "sku": "STO-2G07G4PD"}, {"line_score": 9, "matched": [{"keys": ["storage_type"], "matched": true, "value": "storage bin"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "blue"}], "name": "Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 8l Purple", "path": "/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2RJWTXJ7.json", "prop_matches": 1, "props": {"color_family": ["purple", ""], "material": ["polypropylene", ""], "stackable": ["system only", ""], "storage_type": ["storage bin", ""], "volume_l": ["8", "8"]}, "sku": "STO-2RJWTXJ7"}, {"line_score": 9, "matched": [{"keys": ["storage_type"], "matched": true, "value": "storage bin"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "blue"}], "name": "Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 25l Yellow", "path": "/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-3N1QG0DF.json", "prop_matches": 1, "props": {"color_family": ["yellow", ""], "material": ["polypropylene", ""], "stackable": ["system only", ""], "storage_type": ["storage bin", ""], "volume_l": ["25", "25"]}, "sku": "STO-3N1QG0DF"}, {"line_score": 9, "matched": [{"keys": ["storage_type"], "matched": true, "value": "storage bin"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "blue"}], "name": "Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 3l Purple", "path": "/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-4W7MLQH6.json", "prop_matches": 1, "props": {"color_family": ["purple", ""], "material": ["polypropylene", ""], "stackable": ["system only", ""], "storage_type": ["storage bin", ""], "volume_l": ["3", "3"]}, "sku": "STO-4W7MLQH6"}, {"line_score": 9, "matched": [{"keys": ["storage_type"], "matched": false, "value": "storage bin"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "blue"}], "name": "Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 12l Red", "path": "/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-1LQ7DQVR.json", "prop_matches": 0, "props": {"color_family": ["red", ""], "material": ["polypropylene", ""], "stackable": ["yes", ""], "storage_type": ["organizer", ""], "volume_l": ["12", "12"]}, "sku": "STO-1LQ7DQVR"}, {"line_score": 9, "matched": [{"keys": ["storage_type"], "matched": false, "value": "storage bin"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "blue"}], "name": "Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 25l Yellow", "path": "/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-81YVMVK6.json", "prop_matches": 0, "props": {"color_family": ["yellow", ""], "material": ["polypropylene", ""], "stackable": ["yes", ""], "storage_type": ["organizer", ""], "volume_l": ["25", "25"]}, "sku": "STO-81YVMVK6"}], "kind": "Storage Bin and Organizer", "line": "Stanley Professional FM 1LT-4QA Storage Bin and Organizer", "props": [{"keys": ["storage_type"], "value": "storage bin"}, {"keys": ["color_family", "color", "colour_family", "colour"], "value": "blue"}], "reason": "fallback_single", "selected": {"path": "/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-1GWTKG92.json", "sku": "STO-1GWTKG92"}, "store_id": "store_linz_hauptplatz", "threshold": 2}
+INVENTORY_DIAG {"brand": "Milwaukee", "exact_candidates": [{"path": "/proc/catalog/power_tools/cordless_saw_sander/fam_power_tools_cordless_saw_sander_0014_3bgz2e6n/PWR-3VBYGAIO.json", "sku": "PWR-3VBYGAIO"}], "inventory": [], "kind": "Cordless Saw and Sander", "line": "Milwaukee Brushless HD F6B-AAU Cordless Saw and Sander", "props": [{"keys": ["tool_type"], "value": "orbital sander"}, {"keys": ["voltage", "voltage_v"], "value": "18 v"}, {"keys": ["battery_platform", "battery_system", "battery_voltage", "battery_platform_v"], "value": "18v-system"}, {"keys": ["kit_contents"], "value": "starter kit"}], "reason": "exact_group", "selected": null, "store_id": "store_linz_hauptplatz", "threshold": 2}
+INVENTORY_DIAG {"brand": "Einhell", "exact_candidates": [{"path": "/proc/catalog/garden_tools/manual_garden_tools/fam_garden_tools_manual_garden_tools_0010_37nyynxn/GRD-1AMXY19X.json", "sku": "GRD-1AMXY19X"}], "inventory": [{"available_today": "7", "sku": "GRD-1AMXY19X"}], "kind": "Manual Garden Tool", "line": "Einhell Smart GE 2QX-SBL Manual Garden Tool", "props": [{"keys": ["tool_type"], "value": "soil cultivator"}, {"keys": ["length", "length_mm"], "value": "900 mm"}], "reason": "exact_group", "selected": {"path": "/proc/catalog/garden_tools/manual_garden_tools/fam_garden_tools_manual_garden_tools_0010_37nyynxn/GRD-1AMXY19X.json", "sku": "GRD-1AMXY19X"}, "store_id": "store_linz_hauptplatz", "threshold": 2}
+INVENTORY_DIAG {"brand": "Makita", "candidates": [{"line_score": 6, "matched": [{"keys": ["power_source"], "matched": true, "value": "petrol"}, {"keys": ["bar_length", "bar_length_cm"], "matched": false, "value": "45 cm"}], "name": "Makita XGT DHP 31S-Q68 Chainsaw petrol 30cm", "path": "/proc/catalog/garden_tools/chainsaws/fam_garden_tools_chainsaws_0003_3d31yntv/GRD-2LVBRV9G.json", "prop_matches": 1, "props": {"bar_length_cm": ["30", "30"], "battery_platform": ["petrol", ""], "chain_speed_class": ["fast", ""], "power_source": ["petrol", ""]}, "sku": "GRD-2LVBRV9G"}, {"line_score": 6, "matched": [{"keys": ["power_source"], "matched": false, "value": "petrol"}, {"keys": ["bar_length", "bar_length_cm"], "matched": false, "value": "45 cm"}], "name": "Makita XGT DHP 31S-Q68 Chainsaw corded 40cm", "path": "/proc/catalog/garden_tools/chainsaws/fam_garden_tools_chainsaws_0003_3d31yntv/GRD-1E5MEARU.json", "prop_matches": 0, "props": {"bar_length_cm": ["40", "40"], "battery_platform": ["corded", ""], "chain_speed_class": ["fast", ""], "power_source": ["corded", ""]}, "sku": "GRD-1E5MEARU"}, {"line_score": 6, "matched": [{"keys": ["power_source"], "matched": false, "value": "petrol"}, {"keys": ["bar_length", "bar_length_cm"], "matched": false, "value": "45 cm"}], "name": "Makita XGT DHP 31S-Q68 Chainsaw battery 25cm", "path": "/proc/catalog/garden_tools/chainsaws/fam_garden_tools_chainsaws_0003_3d31yntv/GRD-1OWYRT3D.json", "prop_matches": 0, "props": {"bar_length_cm": ["25", "25"], "battery_platform": ["18v-system", ""], "chain_speed_class": ["fast", ""], "power_source": ["battery", ""]}, "sku": "GRD-1OWYRT3D"}, {"line_score": 6, "matched": [{"keys": ["power_source"], "matched": false, "value": "petrol"}, {"keys": ["bar_length", "bar_length_cm"], "matched": false, "value": "45 cm"}], "name": "Makita XGT DHP 31S-Q68 Chainsaw corded 25cm", "path": "/proc/catalog/garden_tools/chainsaws/fam_garden_tools_chainsaws_0003_3d31yntv/GRD-231GJ6NY.json", "prop_matches": 0, "props": {"bar_length_cm": ["25", "25"], "battery_platform": ["corded", ""], "chain_speed_class": ["fast", ""], "power_source": ["corded", ""]}, "sku": "GRD-231GJ6NY"}], "kind": "Chainsaw", "line": "Makita XGT DHP 31S-Q68 Chainsaw", "props": [{"keys": ["power_source"], "value": "petrol"}, {"keys": ["bar_length", "bar_length_cm"], "value": "45 cm"}], "reason": "fallback_single", "selected": {"path": "/proc/catalog/garden_tools/chainsaws/fam_garden_tools_chainsaws_0003_3d31yntv/GRD-2LVBRV9G.json", "sku": "GRD-2LVBRV9G"}, "store_id": "store_linz_hauptplatz", "threshold": 2}
+INVENTORY_DIAG {"brand": "Fischer", "candidates": [{"line_score": 10, "matched": [{"keys": ["anchor_type"], "matched": true, "value": "wall plug"}, {"keys": ["diameter", "diameter_mm"], "matched": true, "value": "6 mm"}, {"keys": ["length", "length_mm"], "matched": true, "value": "80 mm"}, {"keys": ["pack_count"], "matched": false, "value": "10 pcs"}], "name": "Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug wall plug 6mm 80mm 50pc", "path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-1R54J4A7.json", "prop_matches": 3, "props": {"anchor_type": ["wall plug", ""], "diameter_mm": ["6", "6"], "length_mm": ["80", "80"], "material": ["steel", ""], "pack_count": ["50", "50"]}, "sku": "FST-1R54J4A7"}, {"line_score": 10, "matched": [{"keys": ["anchor_type"], "matched": true, "value": "wall plug"}, {"keys": ["diameter", "diameter_mm"], "matched": true, "value": "6 mm"}, {"keys": ["length", "length_mm"], "matched": false, "value": "80 mm"}, {"keys": ["pack_count"], "matched": false, "value": "10 pcs"}], "name": "Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug wall plug 6mm 40mm 25pc", "path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-1YOIS9XA.json", "prop_matches": 2, "props": {"anchor_type": ["wall plug", ""], "diameter_mm": ["6", "6"], "length_mm": ["40", "40"], "material": ["steel", ""], "pack_count": ["25", "25"]}, "sku": "FST-1YOIS9XA"}, {"line_score": 10, "matched": [{"keys": ["anchor_type"], "matched": false, "value": "wall plug"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "6 mm"}, {"keys": ["length", "length_mm"], "matched": true, "value": "80 mm"}, {"keys": ["pack_count"], "matched": true, "value": "10 pcs"}], "name": "Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug frame fixing 5mm 80mm 10pc", "path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-20XYEX5W.json", "prop_matches": 2, "props": {"anchor_type": ["frame fixing", ""], "diameter_mm": ["5", "5"], "length_mm": ["80", "80"], "material": ["steel", ""], "pack_count": ["10", "10"]}, "sku": "FST-20XYEX5W"}, {"line_score": 10, "matched": [{"keys": ["anchor_type"], "matched": false, "value": "wall plug"}, {"keys": ["diameter", "diameter_mm"], "matched": true, "value": "6 mm"}, {"keys": ["length", "length_mm"], "matched": false, "value": "80 mm"}, {"keys": ["pack_count"], "matched": false, "value": "10 pcs"}], "name": "Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug concrete anchor 6mm 50mm 25pc", "path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-1TTOH473.json", "prop_matches": 1, "props": {"anchor_type": ["concrete anchor", ""], "diameter_mm": ["6", "6"], "length_mm": ["50", "50"], "material": ["steel", ""], "pack_count": ["25", "25"]}, "sku": "FST-1TTOH473"}, {"line_score": 10, "matched": [{"keys": ["anchor_type"], "matched": false, "value": "wall plug"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "6 mm"}, {"keys": ["length", "length_mm"], "matched": true, "value": "80 mm"}, {"keys": ["pack_count"], "matched": false, "value": "10 pcs"}], "name": "Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug concrete anchor 10mm 80mm 100pc", "path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-1XACPMWT.json", "prop_matches": 1, "props": {"anchor_type": ["concrete anchor", ""], "diameter_mm": ["10", "10"], "length_mm": ["80", "80"], "material": ["steel", ""], "pack_count": ["100", "100"]}, "sku": "FST-1XACPMWT"}, {"line_score": 10, "matched": [{"keys": ["anchor_type"], "matched": false, "value": "wall plug"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "6 mm"}, {"keys": ["length", "length_mm"], "matched": false, "value": "80 mm"}, {"keys": ["pack_count"], "matched": false, "value": "10 pcs"}], "name": "Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug frame fixing 8mm 120mm 200pc", "path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-196PW7DZ.json", "prop_matches": 0, "props": {"anchor_type": ["frame fixing", ""], "diameter_mm": ["8", "8"], "length_mm": ["120", "120"], "material": ["steel", ""], "pack_count": ["200", "200"]}, "sku": "FST-196PW7DZ"}, {"line_score": 10, "matched": [{"keys": ["anchor_type"], "matched": false, "value": "wall plug"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "6 mm"}, {"keys": ["length", "length_mm"], "matched": false, "value": "80 mm"}, {"keys": ["pack_count"], "matched": false, "value": "10 pcs"}], "name": "Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug concrete anchor 5mm 30mm 200pc", "path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-1PMJ2Z2K.json", "prop_matches": 0, "props": {"anchor_type": ["concrete anchor", ""], "diameter_mm": ["5", "5"], "length_mm": ["30", "30"], "material": ["steel", ""], "pack_count": ["200", "200"]}, "sku": "FST-1PMJ2Z2K"}, {"line_score": 10, "matched": [{"keys": ["anchor_type"], "matched": false, "value": "wall plug"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "6 mm"}, {"keys": ["length", "length_mm"], "matched": false, "value": "80 mm"}, {"keys": ["pack_count"], "matched": false, "value": "10 pcs"}], "name": "Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug frame fixing 10mm 40mm 25pc", "path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-1SEJO29O.json", "prop_matches": 0, "props": {"anchor_type": ["frame fixing", ""], "diameter_mm": ["10", "10"], "length_mm": ["40", "40"], "material": ["steel", ""], "pack_count": ["25", "25"]}, "sku": "FST-1SEJO29O"}], "kind": "Anchor and Wall Plug", "line": "Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug", "props": [{"keys": ["anchor_type"], "value": "wall plug"}, {"keys": ["diameter", "diameter_mm"], "value": "6 mm"}, {"keys": ["length", "length_mm"], "value": "80 mm"}, {"keys": ["pack_count"], "value": "10 pcs"}], "reason": "fallback_single", "selected": {"path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym/FST-1R54J4A7.json", "sku": "FST-1R54J4A7"}, "store_id": "store_linz_hauptplatz", "threshold": 2}
+[32mdeterministic solver[0m: _try_inventory_count
+[32magent OUTCOME_OK[0m. Summary:
+- deterministic store inventory count via SQL
+
+[34mAGENT SUMMARY: [QTY:1][0m
+- [34m/proc/stores/store_linz_hauptplatz.json[0m
+- [34m/proc/catalog/garden_tools/manual_garden_tools/fam_garden_tools_manual_garden_tools_0010_37nyynxn/GRD-1AMXY19X.json[0m

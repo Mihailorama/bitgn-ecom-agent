@@ -1,0 +1,410 @@
+TASK t08 (model codex:gpt-5.3-codex)
+INSTRUCTION: A support note claims we stock the Workshop Drill Grinder and Sander from Makita in the Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander line that has machine type lathe, voltage 230 V, power 500 W, and working width 250 mm and has voltage 400 V. Check the actual catalogue item, cite the exact product record, and if the base product exists but that extra catalogue claim is absent, answer with <NO> and include the checked SKU.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query candidate Makita XGT DHS 22O-UB5 products and joined properties (machine type, voltage, power, working width). (14270 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind,\n       pp.key, pp.value_text, pp.value_number\nFROM products p\nLEFT JOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'Makita'\n  AND (\n    p.series = 'XGT DHS 22O-UB5'\n    OR p.model = 'XGT DHS 22O-UB5'\n    OR p.name LIKE '%XGT DHS 22O-UB5%'\n    OR p.name LIKE '%Workshop Drill Grinder and Sander%'\n  )\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind,
+       pp.key, pp.value_text, pp.value_number
+FROM products p
+LEFT JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'Makita'
+  AND (
+    p.series = 'XGT DHS 22O-UB5'
+    OR p.model = 'XGT DHS 22O-UB5'
+    OR p.name LIKE '%XGT DHS 22O-UB5%'
+    OR p.name LIKE '%Workshop Drill Grinder and Sander%'
+  )
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,kind,key,value_text,value_number
+MAC-10JVQIF7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0003_2rto7p10/MAC-10JVQIF7.json,Makita,CXT,DHS 3GD-XYX,Makita CXT DHS 3GD-XYX Workshop Drill Grinder and Sander belt sander 500W bench,Workshop Drill Grinder and Sander,machine_type,belt sander,
+MAC-10JVQIF7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0003_2rto7p10/MAC-10JVQIF7.json,Makita,CXT,DHS 3GD-XYX,Makita CXT DHS 3GD-XYX Workshop Drill Grinder and Sander belt sander 500W bench,Workshop Drill Grinder and Sander,mount_type,bench,
+MAC-10JVQIF7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0003_2rto7p10/MAC-10JVQIF7.json,Makita,CXT,DHS 3GD-XYX,Makita CXT DHS 3GD-XYX Workshop Drill Grinder and Sander belt sander 500W bench,Workshop Drill Grinder and Sander,power_w,500,500
+MAC-10JVQIF7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0003_2rto7p10/MAC-10JVQIF7.json,Makita,CXT,DHS 3GD-XYX,Makita CXT DHS 3GD-XYX Workshop Drill Grinder and Sander belt sander 500W bench,Workshop Drill Grinder and Sander,voltage_v,110,110
+MAC-10JVQIF7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0003_2rto7p10/MAC-10JVQIF7.json,Makita,CXT,DHS 3GD-XYX,Makita CXT DHS 3GD-XYX Workshop Drill Grinder and Sander belt sander 500W bench,Workshop Drill Grinder and Sander,working_width_mm,200,200
+MAC-1TPNFJF7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-1TPNFJF7.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander drill press 1500W bench,Workshop Drill Grinder and Sander,machine_type,drill press,
+MAC-1TPNFJF7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-1TPNFJF7.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander drill press 1500W bench,Workshop Drill Grinder and Sander,mount_type,bench,
+MAC-1TPNFJF7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-1TPNFJF7.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander drill press 1500W bench,Workshop Drill Grinder and Sander,power_w,1500,1500
+MAC-1TPNFJF7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-1TPNFJF7.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander drill press 1500W bench,Workshop Drill Grinder and Sander,voltage_v,110,110
+MAC-1TPNFJF7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-1TPNFJF7.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander drill press 1500W bench,Workshop Drill Grinder and Sander,working_width_mm,200,200
+MAC-1WLOYAT3,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-1WLOYAT3.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander planer thicknesser 750W bench,Workshop Drill Grinder and Sander,machine_type,planer thicknesser,
+MAC-1WLOYAT3,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-1WLOYAT3.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander planer thicknesser 750W bench,Workshop Drill Grinder and Sander,mount_type,bench,
+MAC-1WLOYAT3,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-1WLOYAT3.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander planer thicknesser 750W bench,Workshop Drill Grinder and Sander,power_w,750,750
+MAC-1WLOYAT3,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-1WLOYAT3.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander planer thicknesser 750W bench,Workshop Drill Grinder and Sander,voltage_v,230,230
+MAC-1WLOYAT3,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-1WLOYAT3.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander planer thicknesser 750W bench,Workshop Drill Grinder and Sander,working_width_mm,250,250
+MAC-1YFU8EE0,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-1YFU8EE0.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander bench grinder 500W bench,Workshop Drill Grinder and Sander,machine_type,bench grinder,
+MAC-1YFU8EE0,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-1YFU8EE0.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander bench grinder 500W bench,Workshop Drill Grinder and Sander,mount_type,bench,
+MAC-1YFU8EE0,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-1YFU8EE0.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander bench grinder 500W bench,Workshop Drill Grinder and Sander,power_w,500,500
+MAC-1YFU8EE0,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-1YFU8EE0.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander bench grinder 500W bench,Workshop Drill Grinder and Sander,voltage_v,230,230
+MAC-1YFU8EE0,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-1YFU8EE0.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander bench grinder 500W bench,Workshop Drill Grinder and Sander,working_width_mm,100,100
+MAC-1YJAAWWL,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-1YJAAWWL.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 250W bench,Workshop Drill Grinder and Sander,machine_type,drill press,
+MAC-1YJAAWWL,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-1YJAAWWL.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 250W bench,Workshop Drill Grinder and Sander,mount_type,bench,
+MAC-1YJAAWWL,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-1YJAAWWL.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 250W bench,Workshop Drill Grinder and Sander,power_w,250,250
+MAC-1YJAAWWL,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-1YJAAWWL.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 250W bench,Workshop Drill Grinder and Sander,voltage_v,230,230
+MAC-1YJAAWWL,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-1YJAAWWL.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 250W bench,Workshop Drill Grinder and Sander,working_width_mm,400,400
+MAC-25EH9RUN,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-25EH9RUN.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander lathe 500W bench,Workshop Drill Grinder and Sander,machine_type,lathe,
+MAC-25EH9RUN,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-25EH9RUN.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander lathe 500W bench,Workshop Drill Grinder and Sander,mount_type,bench,
+MAC-25EH9RUN,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-25EH9RUN.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander lathe 500W bench,Workshop Drill Grinder and Sander,power_w,500,500
+MAC-25EH9RUN,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-25EH9RUN.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander lathe 500W bench,Workshop Drill Grinder and Sander,voltage_v,230,230
+MAC-25EH9RUN,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-25EH9RUN.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander lathe 500W bench,Workshop Drill Grinder and Sander,working_width_mm,150,150
+MAC-25LK48MR,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-25LK48MR.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander bench grinder 250W bench,Workshop Drill Grinder and Sander,machine_type,bench grinder,
+MAC-25LK48MR,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-25LK48MR.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander bench grinder 250W bench,Workshop Drill Grinder and Sander,mount_type,bench,
+MAC-25LK48MR,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-25LK48MR.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander bench grinder 250W bench,Workshop Drill Grinder and Sander,power_w,250,250
+MAC-25LK48MR,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-25LK48MR.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander bench grinder 250W bench,Workshop Drill Grinder and Sander,voltage_v,400,400
+MAC-25LK48MR,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-25LK48MR.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander bench grinder 250W bench,Workshop Drill Grinder and Sander,working_width_mm,400,400
+MAC-291W223W,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0016_1gonddck/MAC-291W223W.json,Makita,Bench,DHP 1AQ-LA9,Makita Bench DHP 1AQ-LA9 Workshop Drill Grinder and Sander belt sander 250W floor standing,Workshop Drill Grinder and Sander,machine_type,belt sander,
+MAC-291W223W,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0016_1gonddck/MAC-291W223W.json,Makita,Bench,DHP 1AQ-LA9,Makita Bench DHP 1AQ-LA9 Workshop Drill Grinder and Sander belt sander 250W floor standing,Workshop Drill Grinder and Sander,mount_type,floor standing,
+MAC-291W223W,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0016_1gonddck/MAC-291W223W.json,Makita,Bench,DHP 1AQ-LA9,Makita Bench DHP 1AQ-LA9 Workshop Drill Grinder and Sander belt sander 250W floor standing,Workshop Drill Grinder and Sander,power_w,250,250
+MAC-291W223W,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0016_1gonddck/MAC-291W223W.json,Makita,Bench,DHP 1AQ-LA9,Makita Bench DHP 1AQ-LA9 Workshop Drill Grinder and Sander belt sander 250W floor standing,Workshop Drill Grinder and Sander,voltage_v,230,230
+MAC-291W223W,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0016_1gonddck/MAC-291W223W.json,Makita,Bench,DHP 1AQ-LA9,Makita Bench DHP 1AQ-LA9 Workshop Drill Grinder and Sander belt sander 250W floor standing,Workshop Drill Grinder and Sander,working_width_mm,100,100
+MAC-2D2YVGOW,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2D2YVGOW.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander drill press 500W bench,Workshop Drill Grinder and Sander,machine_type,drill press,
+MAC-2D2YVGOW,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2D2YVGOW.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander drill press 500W bench,Workshop Drill Grinder and Sander,mount_type,bench,
+MAC-2D2YVGOW,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2D2YVGOW.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander drill press 500W bench,Workshop Drill Grinder and Sander,power_w,500,500
+MAC-2D2YVGOW,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2D2YVGOW.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander drill press 500W bench,Workshop Drill Grinder and Sander,voltage_v,230,230
+MAC-2D2YVGOW,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2D2YVGOW.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander drill press 500W bench,Workshop Drill Grinder and Sander,working_width_mm,250,250
+MAC-2D9XBU8F,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2D9XBU8F.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander bench grinder 1500W bench,Workshop Drill Grinder and Sander,machine_type,bench grinder,
+MAC-2D9XBU8F,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2D9XBU8F.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander bench grinder 1500W bench,Workshop Drill Grinder and Sander,mount_type,bench,
+MAC-2D9XBU8F,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2D9XBU8F.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander bench grinder 1500W bench,Workshop Drill Grinder and Sander,power_w,1500,1500
+MAC-2D9XBU8F,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2D9XBU8F.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander bench grinder 1500W bench,Workshop Drill Grinder and Sander,voltage_v,400,400
+MAC-2D9XBU8F,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2D9XBU8F.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander bench grinder 1500W bench,Workshop Drill Grinder and Sander,working_width_mm,400,400
+MAC-2GGE6JMQ,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0003_2rto7p10/MAC-2GGE6JMQ.json,Makita,CXT,DHS 3GD-XYX,Makita CXT DHS 3GD-XYX Workshop Drill Grinder and Sander drill press 500W bench,Workshop Drill Grinder and Sander,machine_type,drill press,
+MAC-2GGE6JMQ,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0003_2rto7p10/MAC-2GGE6JMQ.json,Makita,CXT,DHS 3GD-XYX,Makita CXT DHS 3GD-XYX Workshop Drill Grinder and Sander drill press 500W bench,Workshop Drill Grinder and Sander,mount_type,bench,
+MAC-2GGE6JMQ,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0003_2rto7p10/MAC-2GGE6JMQ.json,Makita,CXT,DHS 3GD-XYX,Makita CXT DHS 3GD-XYX Workshop Drill Grinder and Sander drill press 500W bench,Workshop Drill Grinder and Sander,power_w,500,500
+MAC-2GGE6JMQ,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0003_2rto7p10/MAC-2GGE6JMQ.json,Makita,CXT,DHS 3GD-XYX,Makita CXT DHS 3GD-XYX Workshop Drill Grinder and Sander drill press 500W bench,Workshop Drill Grinder and Sander,voltage_v,400,400
+MAC-2GGE6JMQ,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0003_2rto7p10/MAC-2GGE6JMQ.json,Makita,CXT,DHS 3GD-XYX,Makita CXT DHS 3GD-XYX Workshop Drill Grinder and Sander drill press 500W bench,Workshop Drill Grinder and Sander,working_width_mm,150,150
+MAC-2K4R9GI8,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0016_1gonddck/MAC-2K4R9GI8.json,Makita,Bench,DHP 1AQ-LA9,Makita Bench DHP 1AQ-LA9 Workshop Drill Grinder and Sander bench grinder 1100W floor standing,Workshop Drill Grinder and Sander,machine_type,bench grinder,
+MAC-2K4R9GI8,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0016_1gonddck/MAC-2K4R9GI8.json,Makita,Bench,DHP 1AQ-LA9,Makita Bench DHP 1AQ-LA9 Workshop Drill Grinder and Sander bench grinder 1100W floor standing,Workshop Drill Grinder and Sander,mount_type,floor standing,
+MAC-2K4R9GI8,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0016_1gonddck/MAC-2K4R9GI8.json,Makita,Bench,DHP 1AQ-LA9,Makita Bench DHP 1AQ-LA9 Workshop Drill Grinder and Sander bench grinder 1100W floor standing,Workshop Drill Grinder and Sander,power_w,1100,1100
+MAC-2K4R9GI8,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0016_1gonddck/MAC-2K4R9GI8.json,Makita,Bench,DHP 1AQ-LA9,Makita Bench DHP 1AQ-LA9 Workshop Drill Grinder and Sander bench grinder 1100W floor standing,Workshop Drill Grinder and Sander,voltage_v,400,400
+MAC-2K4R9GI8,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0016_1gonddck/MAC-2K4R9GI8.json,Makita,Bench,DHP 1AQ-LA9,Makita Bench DHP 1AQ-LA9 Workshop Drill Grinder and Sander bench grinder 1100W floor standing,Workshop Drill Grinder and Sander,working_width_mm,200,200
+MAC-2LAKGGIZ,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0016_1gonddck/MAC-2LAKGGIZ.json,Makita,Bench,DHP 1AQ-LA9,Makita Bench DHP 1AQ-LA9 Workshop Drill Grinder and Sander bench grinder 1100W floor standing,Workshop Drill Grinder and Sander,machine_type,bench grinder,
+MAC-2LAKGGIZ,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0016_1gonddck/MAC-2LAKGGIZ.json,Makita,Bench,DHP 1AQ-LA9,Makita Bench DHP 1AQ-LA9 Workshop Drill Grinder and Sander bench grinder 1100W floor standing,Workshop Drill Grinder and Sander,mount_type,floor standing,
+MAC-2LAKGGIZ,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0016_1gonddck/MAC-2LAKGGIZ.json,Makita,Bench,DHP 1AQ-LA9,Makita Bench DHP 1AQ-LA9 Workshop Drill Grinder and Sander bench grinder 1100W floor standing,Workshop Drill Grinder and Sander,power_w,1100,1100
+MAC-2LAKGGIZ,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0016_1gonddck/MAC-2LAKGGIZ.json,Makita,Bench,DHP 1AQ-LA9,Makita Bench DHP 1AQ-LA9 Workshop Drill Grinder and Sander bench grinder 1100W floor standing,Workshop Drill Grinder and Sander,voltage_v,230,230
+MAC-2LAKGGIZ,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0016_1gonddck/MAC-2LAKGGIZ.json,Makita,Bench,DHP 1AQ-LA9,Makita Bench DHP 1AQ-LA9 Workshop Drill Grinder and Sander bench grinder 1100W floor standing,Workshop Drill Grinder and Sander,working_width_mm,150,150
+MAC-2LOZ3D79,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2LOZ3D79.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 1500W bench,Workshop Drill Grinder and Sander,machine_type,drill press,
+MAC-2LOZ3D79,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2LOZ3D79.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 1500W bench,Workshop Drill Grinder and Sander,mount_type,bench,
+MAC-2LOZ3D79,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2LOZ3D79.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 1500W bench,Workshop Drill Grinder and Sander,power_w,1500,1500
+MAC-2LOZ3D79,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2LOZ3D79.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 1500W bench,Workshop Drill Grinder and Sander,voltage_v,230,230
+MAC-2LOZ3D79,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2LOZ3D79.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 1500W bench,Workshop Drill Grinder and Sander,working_width_mm,400,400
+MAC-2M8O2485,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2M8O2485.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander lathe 500W bench,Workshop Drill Grinder and Sander,machine_type,lathe,
+MAC-2M8O2485,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2M8O2485.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander lathe 500W bench,Workshop Drill Grinder and Sander,mount_type,bench,
+MAC-2M8O2485,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2M8O2485.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander lathe 500W bench,Workshop Drill Grinder and Sander,power_w,500,500
+MAC-2M8O2485,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2M8O2485.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander lathe 500W bench,Workshop Drill Grinder and Sander,voltage_v,230,230
+MAC-2M8O2485,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2M8O2485.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander lathe 500W bench,Workshop Drill Grinder and Sander,working_width_mm,250,250
+MAC-2PS61GJ7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2PS61GJ7.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander bench grinder 1100W bench,Workshop Drill Grinder and Sander,machine_type,bench grinder,
+MAC-2PS61GJ7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2PS61GJ7.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander bench grinder 1100W bench,Workshop Drill Grinder and Sander,mount_type,bench,
+MAC-2PS61GJ7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2PS61GJ7.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander bench grinder 1100W bench,Workshop Drill Grinder and Sander,power_w,1100,1100
+MAC-2PS61GJ7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2PS61GJ7.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander bench grinder 1100W bench,Workshop Drill Grinder and Sander,voltage_v,230,230
+MAC-2PS61GJ7,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2PS61GJ7.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander bench grinder 1100W bench,Workshop Drill Grinder and Sander,working_width_mm,150,150
+MAC-2RDO7ZOU,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2RDO7ZOU.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 750W bench,Workshop Drill Grinder and Sander,machine_type,drill press,
+MAC-2RDO7ZOU,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2RDO7ZOU.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 750W bench,Workshop Drill Grinder and Sander,mount_type,bench,
+MAC-2RDO7ZOU,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2RDO7ZOU.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 750W bench,Workshop Drill Grinder and Sander,power_w,750,750
+MAC-2RDO7ZOU,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2RDO7ZOU.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 750W bench,Workshop Drill Grinder and Sander,voltage_v,230,230
+MAC-2RDO7ZOU,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2RDO7ZOU.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 750W bench,Workshop Drill Grinder and Sander,working_width_mm,400,400
+MAC-2UL79WV1,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2UL79WV1.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander bench grinder 750W bench,Workshop Drill Grinder and Sander,machine_type,bench grinder,
+MAC-2UL79WV1,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2UL79WV1.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander bench grinder 750W bench,Workshop Drill Grinder and Sander,mount_type,bench,
+MAC-2UL79WV1,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2UL79WV1.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander bench grinder 750W bench,Workshop Drill Grinder and Sander,power_w,750,750
+MAC-2UL79WV1,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2UL79WV1.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander bench grinder 750W bench,Workshop Drill Grinder and Sander,voltage_v,400,400
+MAC-2UL79WV1,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2UL79WV1.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander bench grinder 750W bench,Workshop Drill Grinder and Sander,working_width_mm,150,150
+MAC-2XNLC3T0,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2XNLC3T0.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 1100W bench,Workshop Drill Grinder and Sander,machine_type,drill press,
+MAC-2XNLC3T0,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2XNLC3T0.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 1100W bench,Workshop Drill Grinder and Sander,mount_type,bench,
+MAC-2XNLC3T0,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2XNLC3T0.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 1100W bench,Workshop Drill Grinder and Sander,power_w,1100,1100
+MAC-2XNLC3T0,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2XNLC3T0.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 1100W bench,Workshop Drill Grinder and Sander,voltage_v,400,400
+MAC-2XNLC3T0,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0020_3fftiavz/MAC-2XNLC3T0.json,Makita,Workshop,DHS 2Z9-X7O,Makita Workshop DHS 2Z9-X7O Workshop Drill Grinder and Sander drill press 1100W bench,Workshop Drill Grinder and Sander,working_width_mm,300,300
+MAC-2YHLQD99,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2YHLQD99.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander planer thicknesser 1500W bench,Workshop Drill Grinder and Sander,machine_type,planer thicknesser,
+MAC-2YHLQD99,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2YHLQD99.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander planer thicknesser 1500W bench,Workshop Drill Grinder and Sander,mount_type,bench,
+MAC-2YHLQD99,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2YHLQD99.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander planer thicknesser 1500W bench,Workshop Drill Grinder and Sander,power_w,1500,1500
+MAC-2YHLQD99,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2YHLQD99.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander planer thicknesser 1500W bench,Workshop Drill Grinder and Sander,voltage_v,400,400
+MAC-2YHLQD99,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2YHLQD99.json,Makita,XGT,DHS 22O-UB5,Makita XGT DHS 22O-UB5 Workshop Drill Grinder and Sander planer thicknesser 1500W bench,Workshop Drill Grinder and Sander,working_width_mm,150,150
+warning: result truncated at 100 rows
+Next step_2... Run focused SQL on XGT DHS 22O-UB5 with required properties (machine_type lathe, power_w 500, working_width_mm 250, voltage_v 230). (20084 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH props AS (\n  SELECT sku,\n         MAX(CASE WHEN key='machine_type' THEN value_text END) AS machine_type,\n         MAX(CASE WHEN key='power_w' THEN CAST(value_number AS INTEGER) END) AS power_w,\n         MAX(CASE WHEN key='working_width_mm' THEN CAST(value_number AS INTEGER) END) AS working_width_mm,\n         MAX(CASE WHEN key='voltage_v' THEN CAST(value_number AS INTEGER) END) AS voltage_v\n  FROM product_properties\n  GROUP BY sku\n)\nSELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       pr.machine_type, pr.power_w, pr.working_width_mm, pr.voltage_v\nFROM products p\nJOIN props pr ON pr.sku = p.sku\nWHERE p.brand='Makita'\n  AND p.series='XGT'\n  AND p.model='DHS 22O-UB5'\n  AND pr.machine_type='lathe'\n  AND pr.power_w=500\n  AND pr.working_width_mm=250\n  AND pr.voltage_v=230\nORDER BY p.sku;\n\nSELECT p.sku, p.path\nFROM products p\nJOIN product_properties pp ON pp.sku=p.sku\nWHERE p.brand='Makita'\n  AND p.series='XGT'\n  AND p.model='DHS 22O-UB5'\n  AND pp.key='voltage_v'\n  AND CAST(pp.value_number AS INTEGER)=400\nORDER BY p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH props AS (
+  SELECT sku,
+         MAX(CASE WHEN key='machine_type' THEN value_text END) AS machine_type,
+         MAX(CASE WHEN key='power_w' THEN CAST(value_number AS INTEGER) END) AS power_w,
+         MAX(CASE WHEN key='working_width_mm' THEN CAST(value_number AS INTEGER) END) AS working_width_mm,
+         MAX(CASE WHEN key='voltage_v' THEN CAST(value_number AS INTEGER) END) AS voltage_v
+  FROM product_properties
+  GROUP BY sku
+)
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       pr.machine_type, pr.power_w, pr.working_width_mm, pr.voltage_v
+FROM products p
+JOIN props pr ON pr.sku = p.sku
+WHERE p.brand='Makita'
+  AND p.series='XGT'
+  AND p.model='DHS 22O-UB5'
+  AND pr.machine_type='lathe'
+  AND pr.power_w=500
+  AND pr.working_width_mm=250
+  AND pr.voltage_v=230
+ORDER BY p.sku;
+
+SELECT p.sku, p.path
+FROM products p
+JOIN product_properties pp ON pp.sku=p.sku
+WHERE p.brand='Makita'
+  AND p.series='XGT'
+  AND p.model='DHS 22O-UB5'
+  AND pp.key='voltage_v'
+  AND CAST(pp.value_number AS INTEGER)=400
+ORDER BY p.sku;
+SQL
+sku,path
+MAC-2D9XBU8F,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2D9XBU8F.json
+MAC-2YHLQD99,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2YHLQD99.json
+MAC-3B4UJ8TH,/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-3B4UJ8TH.json
+Next step_3... Report completion with exact <NO> decision and checked SKU. (19895 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved Makita XGT DHS 22O-UB5 candidates from SQL', 'Checked required variant attributes and extra 400V claim', 'Prepared final required-token response with checked SKU'] message='<NO> MAC-2M8O2485' grounding_refs=['/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2M8O2485.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved Makita XGT DHS 22O-UB5 candidates from SQL
+- Checked required variant attributes and extra 400V claim
+- Prepared final required-token response with checked SKU
+
+[34mAGENT SUMMARY: <NO> MAC-2M8O2485[0m
+- [34m/proc/catalog/workshop_machines/drill_grinders_sanders/fam_workshop_machines_drill_grinders_sanders_0005_2nuh7kbl/MAC-2M8O2485.json[0m

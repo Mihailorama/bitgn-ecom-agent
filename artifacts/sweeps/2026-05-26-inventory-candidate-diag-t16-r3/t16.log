@@ -1,0 +1,257 @@
+TASK t16 (model codex:gpt-5.3-codex)
+INSTRUCTION: How many of these products have at least 1 items available in central Salzburg PowerTool branch today: the Anchor and Wall Plug from Sormat in the Sormat Universal S-KA GGR-F8A Anchor and Wall Plug line that has anchor type concrete anchor, diameter 8 mm, and length 50 mm,the Work Top from Sparco in the Sparco Classic SP CT4-DY9 Work Top line that has garment type polo shirt, color family Black, and size S,the Wiring Device from Schneider Electric in the Schneider Electric Merten Acti M5T-N4C Wiring Device line that has device type terminal clamp, color family Gray, and ip rating IP20,the Drain Trap and Siphon from Wavin in the Wavin Flexible Tigris 1GZ-17Z Drain Trap and Siphon line that has trap type drain trap and diameter 40 mm,the Wall Paint from Jub in the Jub Jupol Akrilin 296-K0S Wall Paint line that has color family Beige, finish matte, and volume 2500 ml,the Cleaning Machine from Leifheit in the Leifheit Workshop Classic 2SY-YWM Cleaning Machine line that has machine type floor cleaner, power 2200 W, and tank volume 12 l? Answer in exactly format "%d" (no quotes)
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+INVENTORY_DIAG {"brand": "Sormat", "exact_candidates": [{"path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0014_1pfp949z/FST-2WCLN296.json", "sku": "FST-2WCLN296"}], "inventory": [], "kind": "Anchor and Wall Plug", "line": "Sormat Universal S-KA GGR-F8A Anchor and Wall Plug", "props": [{"keys": ["anchor_type"], "value": "concrete anchor"}, {"keys": ["diameter", "diameter_mm"], "value": "8 mm"}, {"keys": ["length", "length_mm"], "value": "50 mm"}], "reason": "exact_group", "selected": null, "store_id": "store_salzburg_elisabeth_vorstadt", "threshold": 1}
+INVENTORY_DIAG {"brand": "Sparco", "candidates": [{"line_score": 7, "matched": [{"keys": ["garment_type"], "matched": true, "value": "polo shirt"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "black"}, {"keys": ["size"], "matched": false, "value": "s"}], "name": "Sparco Classic SP CT4-DY9 Work Top polo shirt Gray XXL", "path": "/proc/catalog/workwear/work_tops/fam_workwear_work_tops_0009_2qliue3e/WRK-15IOR9ZN.json", "prop_matches": 1, "props": {"color_family": ["gray", ""], "fabric_weight_gsm": ["260", "260"], "fit": ["relaxed", ""], "garment_type": ["polo shirt", ""], "size": ["XXL", ""]}, "sku": "WRK-15IOR9ZN"}, {"line_score": 7, "matched": [{"keys": ["garment_type"], "matched": false, "value": "polo shirt"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "black"}, {"keys": ["size"], "matched": true, "value": "s"}], "name": "Sparco Classic SP CT4-DY9 Work Top work bib Gray S", "path": "/proc/catalog/workwear/work_tops/fam_workwear_work_tops_0009_2qliue3e/WRK-1B66XKO5.json", "prop_matches": 1, "props": {"color_family": ["gray", ""], "fabric_weight_gsm": ["260", "260"], "fit": ["women", ""], "garment_type": ["work bib", ""], "size": ["S", ""]}, "sku": "WRK-1B66XKO5"}, {"line_score": 7, "matched": [{"keys": ["garment_type"], "matched": false, "value": "polo shirt"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": true, "value": "black"}, {"keys": ["size"], "matched": false, "value": "s"}], "name": "Sparco Classic SP CT4-DY9 Work Top t-shirt Black M", "path": "/proc/catalog/workwear/work_tops/fam_workwear_work_tops_0009_2qliue3e/WRK-1E4ZGAHT.json", "prop_matches": 1, "props": {"color_family": ["black", ""], "fabric_weight_gsm": ["260", "260"], "fit": ["relaxed", ""], "garment_type": ["t-shirt", ""], "size": ["M", ""]}, "sku": "WRK-1E4ZGAHT"}, {"line_score": 7, "matched": [{"keys": ["garment_type"], "matched": false, "value": "polo shirt"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "black"}, {"keys": ["size"], "matched": true, "value": "s"}], "name": "Sparco Classic SP CT4-DY9 Work Top fleece hoodie Blue S", "path": "/proc/catalog/workwear/work_tops/fam_workwear_work_tops_0009_2qliue3e/WRK-1K9U06B4.json", "prop_matches": 1, "props": {"color_family": ["blue", ""], "fabric_weight_gsm": ["260", "260"], "fit": ["regular", ""], "garment_type": ["fleece hoodie", ""], "size": ["S", ""]}, "sku": "WRK-1K9U06B4"}, {"line_score": 7, "matched": [{"keys": ["garment_type"], "matched": false, "value": "polo shirt"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": true, "value": "black"}, {"keys": ["size"], "matched": false, "value": "s"}], "name": "Sparco Classic SP CT4-DY9 Work Top t-shirt Black M", "path": "/proc/catalog/workwear/work_tops/fam_workwear_work_tops_0009_2qliue3e/WRK-1U8DF3ZT.json", "prop_matches": 1, "props": {"color_family": ["black", ""], "fabric_weight_gsm": ["260", "260"], "fit": ["regular", ""], "garment_type": ["t-shirt", ""], "size": ["M", ""]}, "sku": "WRK-1U8DF3ZT"}, {"line_score": 7, "matched": [{"keys": ["garment_type"], "matched": false, "value": "polo shirt"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": true, "value": "black"}, {"keys": ["size"], "matched": false, "value": "s"}], "name": "Sparco Classic SP CT4-DY9 Work Top work bib Black XXL", "path": "/proc/catalog/workwear/work_tops/fam_workwear_work_tops_0009_2qliue3e/WRK-20D4AVQO.json", "prop_matches": 1, "props": {"color_family": ["black", ""], "fabric_weight_gsm": ["260", "260"], "fit": ["women", ""], "garment_type": ["work bib", ""], "size": ["XXL", ""]}, "sku": "WRK-20D4AVQO"}, {"line_score": 7, "matched": [{"keys": ["garment_type"], "matched": false, "value": "polo shirt"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "black"}, {"keys": ["size"], "matched": true, "value": "s"}], "name": "Sparco Classic SP CT4-DY9 Work Top t-shirt Blue S", "path": "/proc/catalog/workwear/work_tops/fam_workwear_work_tops_0009_2qliue3e/WRK-2389D2YK.json", "prop_matches": 1, "props": {"color_family": ["blue", ""], "fabric_weight_gsm": ["260", "260"], "fit": ["unisex", ""], "garment_type": ["t-shirt", ""], "size": ["S", ""]}, "sku": "WRK-2389D2YK"}, {"line_score": 7, "matched": [{"keys": ["garment_type"], "matched": false, "value": "polo shirt"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "black"}, {"keys": ["size"], "matched": false, "value": "s"}], "name": "Sparco Classic SP CT4-DY9 Work Top fleece hoodie Green M", "path": "/proc/catalog/workwear/work_tops/fam_workwear_work_tops_0009_2qliue3e/WRK-1L9BD14Q.json", "prop_matches": 0, "props": {"color_family": ["green", ""], "fabric_weight_gsm": ["260", "260"], "fit": ["regular", ""], "garment_type": ["fleece hoodie", ""], "size": ["M", ""]}, "sku": "WRK-1L9BD14Q"}], "kind": "Work Top", "line": "Sparco Classic SP CT4-DY9 Work Top", "props": [{"keys": ["garment_type"], "value": "polo shirt"}, {"keys": ["color_family", "color", "colour_family", "colour"], "value": "black"}, {"keys": ["size"], "value": "s"}], "reason": "fallback_single", "selected": {"path": "/proc/catalog/workwear/work_tops/fam_workwear_work_tops_0009_2qliue3e/WRK-15IOR9ZN.json", "sku": "WRK-15IOR9ZN"}, "store_id": "store_salzburg_elisabeth_vorstadt", "threshold": 1}
+INVENTORY_DIAG {"brand": "Schneider Electric", "exact_candidates": [{"path": "/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0004_27vwnmvf/ELC-1GZLWI2C.json", "sku": "ELC-1GZLWI2C"}], "inventory": [], "kind": "Wiring Device", "line": "Schneider Electric Merten Acti M5T-N4C Wiring Device", "props": [{"keys": ["device_type"], "value": "terminal clamp"}, {"keys": ["color_family", "color", "colour_family", "colour"], "value": "gray"}, {"keys": ["ip_rating"], "value": "ip20"}], "reason": "exact_group", "selected": null, "store_id": "store_salzburg_elisabeth_vorstadt", "threshold": 1}
+INVENTORY_DIAG {"brand": "Wavin", "exact_candidates": [{"path": "/proc/catalog/plumbing/drain_traps_siphons/fam_plumbing_drain_traps_siphons_0013_ifrvu8rg/PLB-3TJFCU3W.json", "sku": "PLB-3TJFCU3W"}], "inventory": [{"available_today": "3", "sku": "PLB-3TJFCU3W"}], "kind": "Drain Trap and Siphon", "line": "Wavin Flexible Tigris 1GZ-17Z Drain Trap and Siphon", "props": [{"keys": ["trap_type"], "value": "drain trap"}, {"keys": ["diameter", "diameter_mm"], "value": "40 mm"}], "reason": "exact_group", "selected": {"path": "/proc/catalog/plumbing/drain_traps_siphons/fam_plumbing_drain_traps_siphons_0013_ifrvu8rg/PLB-3TJFCU3W.json", "sku": "PLB-3TJFCU3W"}, "store_id": "store_salzburg_elisabeth_vorstadt", "threshold": 1}
+INVENTORY_DIAG {"brand": "Jub", "candidates": [{"line_score": 7, "matched": [{"keys": ["color_family", "color", "colour_family", "colour"], "matched": true, "value": "beige"}, {"keys": ["finish"], "matched": false, "value": "matte"}, {"keys": ["volume", "volume_ml"], "matched": true, "value": "2500 ml"}], "name": "Jub Jupol Akrilin 296-K0S Wall Paint Beige satin 2500ml", "path": "/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0016_34fe2ygl/PNT-1DA97H7Q.json", "prop_matches": 2, "props": {"base_type": ["water based", ""], "color_family": ["beige", ""], "finish": ["satin", ""], "use_area": ["interior", ""], "volume_ml": ["2500", "2500"]}, "sku": "PNT-1DA97H7Q"}, {"line_score": 7, "matched": [{"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "beige"}, {"keys": ["finish"], "matched": true, "value": "matte"}, {"keys": ["volume", "volume_ml"], "matched": true, "value": "2500 ml"}], "name": "Jub Jupol Akrilin 296-K0S Wall Paint Gray matte 2500ml", "path": "/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0016_34fe2ygl/PNT-1M9UBUL3.json", "prop_matches": 2, "props": {"base_type": ["water based", ""], "color_family": ["gray", ""], "finish": ["matte", ""], "use_area": ["interior", ""], "volume_ml": ["2500", "2500"]}, "sku": "PNT-1M9UBUL3"}, {"line_score": 7, "matched": [{"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "beige"}, {"keys": ["finish"], "matched": true, "value": "matte"}, {"keys": ["volume", "volume_ml"], "matched": true, "value": "2500 ml"}], "name": "Jub Jupol Akrilin 296-K0S Wall Paint White matte 2500ml", "path": "/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0016_34fe2ygl/PNT-1NZTF2QU.json", "prop_matches": 2, "props": {"base_type": ["water based", ""], "color_family": ["white", ""], "finish": ["matte", ""], "use_area": ["interior", ""], "volume_ml": ["2500", "2500"]}, "sku": "PNT-1NZTF2QU"}, {"line_score": 7, "matched": [{"keys": ["color_family", "color", "colour_family", "colour"], "matched": true, "value": "beige"}, {"keys": ["finish"], "matched": true, "value": "matte"}, {"keys": ["volume", "volume_ml"], "matched": false, "value": "2500 ml"}], "name": "Jub Jupol Akrilin 296-K0S Wall Paint Beige matte 750ml", "path": "/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0016_34fe2ygl/PNT-29EU4V7A.json", "prop_matches": 2, "props": {"base_type": ["water based", ""], "color_family": ["beige", ""], "finish": ["matte", ""], "use_area": ["interior", ""], "volume_ml": ["750", "750"]}, "sku": "PNT-29EU4V7A"}, {"line_score": 7, "matched": [{"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "beige"}, {"keys": ["finish"], "matched": false, "value": "matte"}, {"keys": ["volume", "volume_ml"], "matched": true, "value": "2500 ml"}], "name": "Jub Jupol Akrilin 296-K0S Wall Paint Green satin 2500ml", "path": "/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0016_34fe2ygl/PNT-2E4ED8MB.json", "prop_matches": 1, "props": {"base_type": ["water based", ""], "color_family": ["green", ""], "finish": ["satin", ""], "use_area": ["interior", ""], "volume_ml": ["2500", "2500"]}, "sku": "PNT-2E4ED8MB"}, {"line_score": 7, "matched": [{"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "beige"}, {"keys": ["finish"], "matched": false, "value": "matte"}, {"keys": ["volume", "volume_ml"], "matched": false, "value": "2500 ml"}], "name": "Jub Jupol Akrilin 296-K0S Wall Paint Red gloss 5000ml", "path": "/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0016_34fe2ygl/PNT-1P2T8PDH.json", "prop_matches": 0, "props": {"base_type": ["water based", ""], "color_family": ["red", ""], "finish": ["gloss", ""], "use_area": ["interior", ""], "volume_ml": ["5000", "5000"]}, "sku": "PNT-1P2T8PDH"}, {"line_score": 7, "matched": [{"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "beige"}, {"keys": ["finish"], "matched": false, "value": "matte"}, {"keys": ["volume", "volume_ml"], "matched": false, "value": "2500 ml"}], "name": "Jub Jupol Akrilin 296-K0S Wall Paint Yellow satin 5000ml", "path": "/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0016_34fe2ygl/PNT-1RVJO3TH.json", "prop_matches": 0, "props": {"base_type": ["water based", ""], "color_family": ["yellow", ""], "finish": ["satin", ""], "use_area": ["interior", ""], "volume_ml": ["5000", "5000"]}, "sku": "PNT-1RVJO3TH"}], "kind": "Wall Paint", "line": "Jub Jupol Akrilin 296-K0S Wall Paint", "props": [{"keys": ["color_family", "color", "colour_family", "colour"], "value": "beige"}, {"keys": ["finish"], "value": "matte"}, {"keys": ["volume", "volume_ml"], "value": "2500 ml"}], "reason": "fallback_single", "selected": {"path": "/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0016_34fe2ygl/PNT-1DA97H7Q.json", "sku": "PNT-1DA97H7Q"}, "store_id": "store_salzburg_elisabeth_vorstadt", "threshold": 1}
+INVENTORY_DIAG {"brand": "Leifheit", "exact_candidates": [{"path": "/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0018_3dwq89tq/CLN-28WVWAWX.json", "sku": "CLN-28WVWAWX"}], "inventory": [{"available_today": "6", "sku": "CLN-28WVWAWX"}], "kind": "Cleaning Machine", "line": "Leifheit Workshop Classic 2SY-YWM Cleaning Machine", "props": [{"keys": ["machine_type"], "value": "floor cleaner"}, {"keys": ["power", "power_w"], "value": "2200 w"}, {"keys": ["tank_volume", "tank_volume_l"], "value": "12 l"}], "reason": "exact_group", "selected": {"path": "/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0018_3dwq89tq/CLN-28WVWAWX.json", "sku": "CLN-28WVWAWX"}, "store_id": "store_salzburg_elisabeth_vorstadt", "threshold": 1}
+[32mdeterministic solver[0m: _try_inventory_count
+[32magent OUTCOME_OK[0m. Summary:
+- deterministic store inventory count via SQL
+
+[34mAGENT SUMMARY: 2[0m
+- [34m/proc/stores/store_salzburg_elisabeth_vorstadt.json[0m
+- [34m/proc/catalog/plumbing/drain_traps_siphons/fam_plumbing_drain_traps_siphons_0013_ifrvu8rg/PLB-3TJFCU3W.json[0m
+- [34m/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0018_3dwq89tq/CLN-28WVWAWX.json[0m

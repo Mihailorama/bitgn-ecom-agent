@@ -1,0 +1,319 @@
+TASK t04 (model codex:gpt-5.3-codex)
+INSTRUCTION: Do you have the Cleaning Machine from HG in the HG Workshop Pro 36S-DPD Cleaning Machine line that has machine type wet dry vacuum and power 1400 W in catalogue?
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query products joined with product_kinds and product_properties to find matching candidate SKU(s) and path(s). (14804 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, pk.name AS kind,\n       MAX(CASE WHEN pp.key='machine_type' THEN pp.value_text END) AS machine_type,\n       MAX(CASE WHEN pp.key='power_w' THEN COALESCE(CAST(pp.value_number AS TEXT), pp.value_text) END) AS power_w\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'HG'\n  AND p.series = 'HG Workshop Pro'\n  AND p.model = '36S-DPD Cleaning Machine'\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, pk.name\nHAVING LOWER(pk.name) = LOWER('Cleaning Machine')\n   AND LOWER(MAX(CASE WHEN pp.key='machine_type' THEN pp.value_text END)) = LOWER('wet dry vacuum')\n   AND CAST(MAX(CASE WHEN pp.key='power_w' THEN pp.value_number END) AS INTEGER) = 1400;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, pk.name AS kind,
+       MAX(CASE WHEN pp.key='machine_type' THEN pp.value_text END) AS machine_type,
+       MAX(CASE WHEN pp.key='power_w' THEN COALESCE(CAST(pp.value_number AS TEXT), pp.value_text) END) AS power_w
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'HG'
+  AND p.series = 'HG Workshop Pro'
+  AND p.model = '36S-DPD Cleaning Machine'
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, pk.name
+HAVING LOWER(pk.name) = LOWER('Cleaning Machine')
+   AND LOWER(MAX(CASE WHEN pp.key='machine_type' THEN pp.value_text END)) = LOWER('wet dry vacuum')
+   AND CAST(MAX(CASE WHEN pp.key='power_w' THEN pp.value_number END) AS INTEGER) = 1400;
+SQL
+sku,path,brand,series,model,kind,machine_type,power_w
+Next step_2... Run a broader SQL candidate query for HG products with cleaning-machine-like kind/model text and include machine/power property rows. (18671 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, pk.name AS kind, pp.key, pp.value_text, pp.value_number\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'HG'\n  AND (\n    LOWER(pk.name) LIKE '%clean%'\n    OR LOWER(p.model) LIKE '%clean%'\n    OR LOWER(p.name) LIKE '%clean%'\n    OR LOWER(p.series) LIKE '%workshop%'\n  )\n  AND (pp.key IN ('machine_type','power_w','power') OR pp.key IS NULL)\nORDER BY p.series, p.model, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, pk.name AS kind, pp.key, pp.value_text, pp.value_number
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'HG'
+  AND (
+    LOWER(pk.name) LIKE '%clean%'
+    OR LOWER(p.model) LIKE '%clean%'
+    OR LOWER(p.name) LIKE '%clean%'
+    OR LOWER(p.series) LIKE '%workshop%'
+  )
+  AND (pp.key IN ('machine_type','power_w','power') OR pp.key IS NULL)
+ORDER BY p.series, p.model, p.sku, pp.key;
+SQL
+sku,path,brand,series,model,kind,key,value_text,value_number
+CLN-1A7ADFQN,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0008_27jxgk2h/CLN-1A7ADFQN.json,HG,Professional,Clean 3C2-YLY,Cleaning Machine,machine_type,wet dry vacuum,
+CLN-1A7ADFQN,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0008_27jxgk2h/CLN-1A7ADFQN.json,HG,Professional,Clean 3C2-YLY,Cleaning Machine,power_w,2200,2200
+CLN-1EACGODJ,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0008_27jxgk2h/CLN-1EACGODJ.json,HG,Professional,Clean 3C2-YLY,Cleaning Machine,machine_type,wet dry vacuum,
+CLN-1EACGODJ,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0008_27jxgk2h/CLN-1EACGODJ.json,HG,Professional,Clean 3C2-YLY,Cleaning Machine,power_w,3000,3000
+CLN-2J27FZ3W,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0008_27jxgk2h/CLN-2J27FZ3W.json,HG,Professional,Clean 3C2-YLY,Cleaning Machine,machine_type,wet dry vacuum,
+CLN-2J27FZ3W,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0008_27jxgk2h/CLN-2J27FZ3W.json,HG,Professional,Clean 3C2-YLY,Cleaning Machine,power_w,1400,1400
+CLN-2K2UHI4U,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0008_27jxgk2h/CLN-2K2UHI4U.json,HG,Professional,Clean 3C2-YLY,Cleaning Machine,machine_type,pressure washer,
+CLN-2K2UHI4U,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0008_27jxgk2h/CLN-2K2UHI4U.json,HG,Professional,Clean 3C2-YLY,Cleaning Machine,power_w,2200,2200
+CLN-3KB6DHQR,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0008_27jxgk2h/CLN-3KB6DHQR.json,HG,Professional,Clean 3C2-YLY,Cleaning Machine,machine_type,steam cleaner,
+CLN-3KB6DHQR,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0008_27jxgk2h/CLN-3KB6DHQR.json,HG,Professional,Clean 3C2-YLY,Cleaning Machine,power_w,1400,1400
+CLN-3OUWH23W,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0008_27jxgk2h/CLN-3OUWH23W.json,HG,Professional,Clean 3C2-YLY,Cleaning Machine,machine_type,pressure washer,
+CLN-3OUWH23W,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0008_27jxgk2h/CLN-3OUWH23W.json,HG,Professional,Clean 3C2-YLY,Cleaning Machine,power_w,1000,1000
+CLN-3UALDCST,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0008_27jxgk2h/CLN-3UALDCST.json,HG,Professional,Clean 3C2-YLY,Cleaning Machine,machine_type,floor cleaner,
+CLN-3UALDCST,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0008_27jxgk2h/CLN-3UALDCST.json,HG,Professional,Clean 3C2-YLY,Cleaning Machine,power_w,2200,2200
+CLN-5LU8LHTJ,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0008_27jxgk2h/CLN-5LU8LHTJ.json,HG,Professional,Clean 3C2-YLY,Cleaning Machine,machine_type,floor cleaner,
+CLN-5LU8LHTJ,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0008_27jxgk2h/CLN-5LU8LHTJ.json,HG,Professional,Clean 3C2-YLY,Cleaning Machine,power_w,2200,2200
+CLN-1TA5XZJQ,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-1TA5XZJQ.json,HG,Workshop,Pro 36S-DPD,Cleaning Machine,machine_type,wet dry vacuum,
+CLN-1TA5XZJQ,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-1TA5XZJQ.json,HG,Workshop,Pro 36S-DPD,Cleaning Machine,power_w,2200,2200
+CLN-2AGXM5H1,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-2AGXM5H1.json,HG,Workshop,Pro 36S-DPD,Cleaning Machine,machine_type,steam cleaner,
+CLN-2AGXM5H1,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-2AGXM5H1.json,HG,Workshop,Pro 36S-DPD,Cleaning Machine,power_w,500,500
+CLN-2IG6KQBH,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-2IG6KQBH.json,HG,Workshop,Pro 36S-DPD,Cleaning Machine,machine_type,wet dry vacuum,
+CLN-2IG6KQBH,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-2IG6KQBH.json,HG,Workshop,Pro 36S-DPD,Cleaning Machine,power_w,2200,2200
+CLN-3H6DM3OE,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-3H6DM3OE.json,HG,Workshop,Pro 36S-DPD,Cleaning Machine,machine_type,pressure washer,
+CLN-3H6DM3OE,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-3H6DM3OE.json,HG,Workshop,Pro 36S-DPD,Cleaning Machine,power_w,1400,1400
+CLN-3MIY6NLD,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-3MIY6NLD.json,HG,Workshop,Pro 36S-DPD,Cleaning Machine,machine_type,wet dry vacuum,
+CLN-3MIY6NLD,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-3MIY6NLD.json,HG,Workshop,Pro 36S-DPD,Cleaning Machine,power_w,1000,1000
+CLN-9TG3UQBE,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-9TG3UQBE.json,HG,Workshop,Pro 36S-DPD,Cleaning Machine,machine_type,wet dry vacuum,
+CLN-9TG3UQBE,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-9TG3UQBE.json,HG,Workshop,Pro 36S-DPD,Cleaning Machine,power_w,500,500
+CLN-F84XNOBK,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-F84XNOBK.json,HG,Workshop,Pro 36S-DPD,Cleaning Machine,machine_type,wet dry vacuum,
+CLN-F84XNOBK,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-F84XNOBK.json,HG,Workshop,Pro 36S-DPD,Cleaning Machine,power_w,1000,1000
+CLN-VDWX8BZP,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-VDWX8BZP.json,HG,Workshop,Pro 36S-DPD,Cleaning Machine,machine_type,wet dry vacuum,
+CLN-VDWX8BZP,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-VDWX8BZP.json,HG,Workshop,Pro 36S-DPD,Cleaning Machine,power_w,1400,1400
+Next step_3... Return final yes/no result with grounded catalog path. (12912 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Queried catalog candidates for HG cleaning machines and inspected property rows.', 'Confirmed exact variant exists with machine_type=wet dry vacuum and power_w=1400 in Pro 36S-DPD line.'] message='<YES>' grounding_refs=['/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-VDWX8BZP.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Queried catalog candidates for HG cleaning machines and inspected property rows.
+- Confirmed exact variant exists with machine_type=wet dry vacuum and power_w=1400 in Pro 36S-DPD line.
+
+[34mAGENT SUMMARY: <YES>[0m
+- [34m/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0015_18e7acfk/CLN-VDWX8BZP.json[0m

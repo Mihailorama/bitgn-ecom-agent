@@ -1,0 +1,255 @@
+TASK t16 (model codex:gpt-5.3-codex)
+INSTRUCTION: How many of these products have at least 4 items available in the west-side Vienna PowerTool shop today: the Anchor and Wall Plug from Rawlplug in the Rawlplug Heavy Duty UNO 2E0-SHU Anchor and Wall Plug line that has anchor type frame fixing, diameter 10 mm, and length 100 mm,the Valve and Connector from Viega in the Viega Flexible Profipress 1M1-Z71 Valve and Connector line that has connector type faucet connector and diameter 16 mm,the Lawn Mower from Bosch in the Bosch Home & Garden GWS OJL-YK7 Lawn Mower line that has power source battery and cutting width 32 cm,the Pliers and Wrenches from Stanley in the Stanley Professional SX 2DI-420 Pliers and Wrenches line that has tool type pipe wrench and length 200 mm,the Storage Bin and Organizer from Raaco in the Raaco Clear Lid CarryLite 2PF-6FB Storage Bin and Organizer line that has storage type parts case and color family Red,the Work Gloves from Ansell in the Ansell HyFlex ActivArmr 1UK-HW2 Work Gloves line that has size L, color family Black, and protection class chemical? Answer in exactly format "<COUNT:%d>" (no quotes)
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+INVENTORY_DIAG {"brand": "Rawlplug", "candidates": [{"line_score": 10, "matched": [{"keys": ["anchor_type"], "matched": false, "value": "frame fixing"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "10 mm"}, {"keys": ["length", "length_mm"], "matched": true, "value": "100 mm"}], "name": "Rawlplug Heavy Duty UNO 2E0-SHU Anchor and Wall Plug cavity fixing 6mm 100mm 10pc", "path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0008_1sayb813/FST-16GVLRWJ.json", "prop_matches": 1, "props": {"anchor_type": ["cavity fixing", ""], "diameter_mm": ["6", "6"], "length_mm": ["100", "100"], "material": ["steel", ""], "pack_count": ["10", "10"]}, "sku": "FST-16GVLRWJ"}, {"line_score": 10, "matched": [{"keys": ["anchor_type"], "matched": true, "value": "frame fixing"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "10 mm"}, {"keys": ["length", "length_mm"], "matched": false, "value": "100 mm"}], "name": "Rawlplug Heavy Duty UNO 2E0-SHU Anchor and Wall Plug frame fixing 5mm 60mm 100pc", "path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0008_1sayb813/FST-1HQB9JJO.json", "prop_matches": 1, "props": {"anchor_type": ["frame fixing", ""], "diameter_mm": ["5", "5"], "length_mm": ["60", "60"], "material": ["steel", ""], "pack_count": ["100", "100"]}, "sku": "FST-1HQB9JJO"}, {"line_score": 10, "matched": [{"keys": ["anchor_type"], "matched": false, "value": "frame fixing"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "10 mm"}, {"keys": ["length", "length_mm"], "matched": false, "value": "100 mm"}], "name": "Rawlplug Heavy Duty UNO 2E0-SHU Anchor and Wall Plug cavity fixing 8mm 40mm 10pc", "path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0008_1sayb813/FST-1IBUZNTV.json", "prop_matches": 0, "props": {"anchor_type": ["cavity fixing", ""], "diameter_mm": ["8", "8"], "length_mm": ["40", "40"], "material": ["steel", ""], "pack_count": ["10", "10"]}, "sku": "FST-1IBUZNTV"}, {"line_score": 10, "matched": [{"keys": ["anchor_type"], "matched": false, "value": "frame fixing"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "10 mm"}, {"keys": ["length", "length_mm"], "matched": false, "value": "100 mm"}], "name": "Rawlplug Heavy Duty UNO 2E0-SHU Anchor and Wall Plug wall plug 12mm 30mm 50pc", "path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0008_1sayb813/FST-1P2SPWUY.json", "prop_matches": 0, "props": {"anchor_type": ["wall plug", ""], "diameter_mm": ["12", "12"], "length_mm": ["30", "30"], "material": ["steel", ""], "pack_count": ["50", "50"]}, "sku": "FST-1P2SPWUY"}, {"line_score": 10, "matched": [{"keys": ["anchor_type"], "matched": false, "value": "frame fixing"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "10 mm"}, {"keys": ["length", "length_mm"], "matched": false, "value": "100 mm"}], "name": "Rawlplug Heavy Duty UNO 2E0-SHU Anchor and Wall Plug concrete anchor 6mm 40mm 200pc", "path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0008_1sayb813/FST-1WXWRRTO.json", "prop_matches": 0, "props": {"anchor_type": ["concrete anchor", ""], "diameter_mm": ["6", "6"], "length_mm": ["40", "40"], "material": ["steel", ""], "pack_count": ["200", "200"]}, "sku": "FST-1WXWRRTO"}], "kind": "Anchor and Wall Plug", "line": "Rawlplug Heavy Duty UNO 2E0-SHU Anchor and Wall Plug", "props": [{"keys": ["anchor_type"], "value": "frame fixing"}, {"keys": ["diameter", "diameter_mm"], "value": "10 mm"}, {"keys": ["length", "length_mm"], "value": "100 mm"}], "reason": "fallback_single", "selected": {"path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0008_1sayb813/FST-16GVLRWJ.json", "sku": "FST-16GVLRWJ"}, "store_id": "store_vienna_meidling", "threshold": 4}
+INVENTORY_DIAG {"brand": "Viega", "candidates": [{"line_score": 8, "matched": [{"keys": ["connector_type"], "matched": true, "value": "faucet connector"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "16 mm"}], "name": "Viega Flexible Profipress 1M1-Z71 Valve and Connector faucet connector 15mm 1/2 inch", "path": "/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0003_2ezvw9r4/PLB-1AKYYNF3.json", "prop_matches": 1, "props": {"connection_type": ["press", ""], "connector_type": ["faucet connector", ""], "diameter_mm": ["15", "15"], "material": ["chrome plated brass", ""], "thread_type": ["1/2 inch", ""]}, "sku": "PLB-1AKYYNF3"}, {"line_score": 8, "matched": [{"keys": ["connector_type"], "matched": true, "value": "faucet connector"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "16 mm"}], "name": "Viega Flexible Profipress 1M1-Z71 Valve and Connector faucet connector 40mm M24", "path": "/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0003_2ezvw9r4/PLB-282AHS2P.json", "prop_matches": 1, "props": {"connection_type": ["press", ""], "connector_type": ["faucet connector", ""], "diameter_mm": ["40", "40"], "material": ["chrome plated brass", ""], "thread_type": ["M24", ""]}, "sku": "PLB-282AHS2P"}, {"line_score": 8, "matched": [{"keys": ["connector_type"], "matched": true, "value": "faucet connector"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "16 mm"}], "name": "Viega Flexible Profipress 1M1-Z71 Valve and Connector faucet connector 32mm 1/2 inch", "path": "/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0003_2ezvw9r4/PLB-2DIHLJ4G.json", "prop_matches": 1, "props": {"connection_type": ["press", ""], "connector_type": ["faucet connector", ""], "diameter_mm": ["32", "32"], "material": ["chrome plated brass", ""], "thread_type": ["1/2 inch", ""]}, "sku": "PLB-2DIHLJ4G"}, {"line_score": 8, "matched": [{"keys": ["connector_type"], "matched": false, "value": "faucet connector"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "16 mm"}], "name": "Viega Flexible Profipress 1M1-Z71 Valve and Connector seal ring 25mm 1/2 inch", "path": "/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0003_2ezvw9r4/PLB-1SBU1X6T.json", "prop_matches": 0, "props": {"connection_type": ["press", ""], "connector_type": ["seal ring", ""], "diameter_mm": ["25", "25"], "material": ["chrome plated brass", ""], "thread_type": ["1/2 inch", ""]}, "sku": "PLB-1SBU1X6T"}, {"line_score": 8, "matched": [{"keys": ["connector_type"], "matched": false, "value": "faucet connector"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "16 mm"}], "name": "Viega Flexible Profipress 1M1-Z71 Valve and Connector seal ring 20mm 3/4 inch", "path": "/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0003_2ezvw9r4/PLB-1UWF60TX.json", "prop_matches": 0, "props": {"connection_type": ["press", ""], "connector_type": ["seal ring", ""], "diameter_mm": ["20", "20"], "material": ["chrome plated brass", ""], "thread_type": ["3/4 inch", ""]}, "sku": "PLB-1UWF60TX"}, {"line_score": 8, "matched": [{"keys": ["connector_type"], "matched": false, "value": "faucet connector"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "16 mm"}], "name": "Viega Flexible Profipress 1M1-Z71 Valve and Connector ball valve 12mm 3/4 inch", "path": "/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0003_2ezvw9r4/PLB-23H8GWB5.json", "prop_matches": 0, "props": {"connection_type": ["press", ""], "connector_type": ["ball valve", ""], "diameter_mm": ["12", "12"], "material": ["chrome plated brass", ""], "thread_type": ["3/4 inch", ""]}, "sku": "PLB-23H8GWB5"}, {"line_score": 8, "matched": [{"keys": ["connector_type"], "matched": false, "value": "faucet connector"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "16 mm"}], "name": "Viega Flexible Profipress 1M1-Z71 Valve and Connector thread adapter 20mm M22", "path": "/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0003_2ezvw9r4/PLB-2AE0BI1V.json", "prop_matches": 0, "props": {"connection_type": ["press", ""], "connector_type": ["thread adapter", ""], "diameter_mm": ["20", "20"], "material": ["chrome plated brass", ""], "thread_type": ["M22", ""]}, "sku": "PLB-2AE0BI1V"}, {"line_score": 8, "matched": [{"keys": ["connector_type"], "matched": false, "value": "faucet connector"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "16 mm"}], "name": "Viega Flexible Profipress 1M1-Z71 Valve and Connector ball valve 32mm M22", "path": "/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0003_2ezvw9r4/PLB-2FLG90Y4.json", "prop_matches": 0, "props": {"connection_type": ["press", ""], "connector_type": ["ball valve", ""], "diameter_mm": ["32", "32"], "material": ["chrome plated brass", ""], "thread_type": ["M22", ""]}, "sku": "PLB-2FLG90Y4"}], "kind": "Valve and Connector", "line": "Viega Flexible Profipress 1M1-Z71 Valve and Connector", "props": [{"keys": ["connector_type"], "value": "faucet connector"}, {"keys": ["diameter", "diameter_mm"], "value": "16 mm"}], "reason": "fallback_single", "selected": {"path": "/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0003_2ezvw9r4/PLB-1AKYYNF3.json", "sku": "PLB-1AKYYNF3"}, "store_id": "store_vienna_meidling", "threshold": 4}
+INVENTORY_DIAG {"brand": "Bosch", "exact_candidates": [{"path": "/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0008_2a3t96ey/GRD-1V3009A3.json", "sku": "GRD-1V3009A3"}], "inventory": [{"available_today": "0", "sku": "GRD-1V3009A3"}], "kind": "Lawn Mower", "line": "Bosch Home & Garden GWS OJL-YK7 Lawn Mower", "props": [{"keys": ["power_source"], "value": "battery"}, {"keys": ["cutting_width", "cutting_width_cm"], "value": "32 cm"}], "reason": "exact_group", "selected": null, "store_id": "store_vienna_meidling", "threshold": 4}
+INVENTORY_DIAG {"brand": "Stanley", "exact_candidates": [{"path": "/proc/catalog/hand_tools/pliers_wrenches/fam_hand_tools_pliers_wrenches_0011_3u1rylkk/HND-2P7YRLWO.json", "sku": "HND-2P7YRLWO"}], "inventory": [{"available_today": "0", "sku": "HND-2P7YRLWO"}], "kind": "Pliers and Wrenches", "line": "Stanley Professional SX 2DI-420 Pliers and Wrenches", "props": [{"keys": ["tool_type"], "value": "pipe wrench"}, {"keys": ["length", "length_mm"], "value": "200 mm"}], "reason": "exact_group", "selected": null, "store_id": "store_vienna_meidling", "threshold": 4}
+INVENTORY_DIAG {"brand": "Raaco", "exact_candidates": [{"path": "/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0007_3hb9btpk/STO-2XC7M135.json", "sku": "STO-2XC7M135"}], "inventory": [{"available_today": "0", "sku": "STO-2XC7M135"}], "kind": "Storage Bin and Organizer", "line": "Raaco Clear Lid CarryLite 2PF-6FB Storage Bin and Organizer", "props": [{"keys": ["storage_type"], "value": "parts case"}, {"keys": ["color_family", "color", "colour_family", "colour"], "value": "red"}], "reason": "exact_group", "selected": null, "store_id": "store_vienna_meidling", "threshold": 4}
+INVENTORY_DIAG {"brand": "Ansell", "candidates": [{"line_score": 7, "matched": [{"keys": ["size"], "matched": false, "value": "l"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": true, "value": "black"}, {"keys": ["protection_class"], "matched": false, "value": "chemical"}], "name": "Ansell HyFlex ActivArmr 1UK-HW2 Work Gloves basic M Black", "path": "/proc/catalog/safety_gear/work_gloves/fam_safety_gear_work_gloves_0017_1xnz0ssb/SFE-1103KD5P.json", "prop_matches": 1, "props": {"color_family": ["black", ""], "protection_class": ["basic", ""], "size": ["M", ""], "standard": ["EN 388", ""]}, "sku": "SFE-1103KD5P"}, {"line_score": 7, "matched": [{"keys": ["size"], "matched": false, "value": "l"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": true, "value": "black"}, {"keys": ["protection_class"], "matched": false, "value": "chemical"}], "name": "Ansell HyFlex ActivArmr 1UK-HW2 Work Gloves thermal M Black", "path": "/proc/catalog/safety_gear/work_gloves/fam_safety_gear_work_gloves_0017_1xnz0ssb/SFE-1R6IHCXK.json", "prop_matches": 1, "props": {"color_family": ["black", ""], "protection_class": ["thermal", ""], "size": ["M", ""], "standard": ["EN 388", ""]}, "sku": "SFE-1R6IHCXK"}, {"line_score": 7, "matched": [{"keys": ["size"], "matched": true, "value": "l"}, {"keys": ["color_family", "color", "colour_family", "colour"], "matched": false, "value": "black"}, {"keys": ["protection_class"], "matched": false, "value": "chemical"}], "name": "Ansell HyFlex ActivArmr 1UK-HW2 Work Gloves thermal XL Orange", "path": "/proc/catalog/safety_gear/work_gloves/fam_safety_gear_work_gloves_0017_1xnz0ssb/SFE-1UVWR4PH.json", "prop_matches": 1, "props": {"color_family": ["orange", ""], "protection_class": ["thermal", ""], "size": ["XL", ""], "standard": ["EN 374", ""]}, "sku": "SFE-1UVWR4PH"}], "kind": "Work Gloves", "line": "Ansell HyFlex ActivArmr 1UK-HW2 Work Gloves", "props": [{"keys": ["size"], "value": "l"}, {"keys": ["color_family", "color", "colour_family", "colour"], "value": "black"}, {"keys": ["protection_class"], "value": "chemical"}], "reason": "fallback_single", "selected": {"path": "/proc/catalog/safety_gear/work_gloves/fam_safety_gear_work_gloves_0017_1xnz0ssb/SFE-1103KD5P.json", "sku": "SFE-1103KD5P"}, "store_id": "store_vienna_meidling", "threshold": 4}
+[32mdeterministic solver[0m: _try_inventory_count
+[32magent OUTCOME_OK[0m. Summary:
+- deterministic store inventory count via SQL
+
+[34mAGENT SUMMARY: <COUNT:0>[0m
+- [34m/proc/stores/store_vienna_meidling.json[0m

@@ -1,0 +1,316 @@
+TASK t07 (model codex:gpt-5.3-codex)
+INSTRUCTION: A support note claims we stock the Sealant from Bostik in the Bostik Flexible Fix 3S9-FF7 Sealant line that has sealant type sanitary sealant and color family Gray and has color family clear. Check the actual catalogue item, cite the exact product record, and if the base product exists but that extra catalogue claim is absent, answer with <NO> and include the checked SKU.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2024-07-17T20:49:48Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query products + product_properties for brand/series/model/kind and relevant keys (sealant type, color family). (11654 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind, pp.key, pp.value_text\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE lower(p.brand)='bostik'\n  AND lower(p.series)='flexible fix'\n  AND lower(p.model)='3s9-ff7'\n  AND lower(pk.name)='sealant'\n  AND pp.key IN ('sealant_type','color_family')\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind, pp.key, pp.value_text
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE lower(p.brand)='bostik'
+  AND lower(p.series)='flexible fix'
+  AND lower(p.model)='3s9-ff7'
+  AND lower(pk.name)='sealant'
+  AND pp.key IN ('sealant_type','color_family')
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,kind,key,value_text
+Next step_2... Run a broader SQL lookup on products to find Bostik and 3S9-FF7 candidates with real series/model/kind values and paths. (11279 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nWHERE lower(p.brand)='bostik'\n  AND (\n    lower(p.series) LIKE '%flexible%'\n    OR lower(p.model) LIKE '%3s9-ff7%'\n    OR lower(p.name) LIKE '%3s9-ff7%'\n    OR lower(p.name) LIKE '%flexible fix%'\n  )\nORDER BY p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+WHERE lower(p.brand)='bostik'
+  AND (
+    lower(p.series) LIKE '%flexible%'
+    OR lower(p.model) LIKE '%3s9-ff7%'
+    OR lower(p.name) LIKE '%3s9-ff7%'
+    OR lower(p.name) LIKE '%flexible fix%'
+  )
+ORDER BY p.sku;
+SQL
+sku,path,brand,series,model,name,kind
+ADH-171RRSVI,/proc/catalog/adhesives_sealants/sealants/ADH-171RRSVI.json,Bostik,Flexible,Fix 3S9-FF7,Bostik Flexible Fix 3S9-FF7 Sealant acrylic sealant Clear 300ml,Sealant
+ADH-1ADBNMVR,/proc/catalog/adhesives_sealants/sealants/ADH-1ADBNMVR.json,Bostik,Flexible,Fix 3S9-FF7,Bostik Flexible Fix 3S9-FF7 Sealant hybrid sealant White 300ml,Sealant
+ADH-1KGN7N7B,/proc/catalog/adhesives_sealants/sealants/ADH-1KGN7N7B.json,Bostik,Flexible,Fix 3S9-FF7,Bostik Flexible Fix 3S9-FF7 Sealant silicone sealant Gray 280ml,Sealant
+ADH-1QVUR1QW,/proc/catalog/adhesives_sealants/sealants/ADH-1QVUR1QW.json,Bostik,Flexible,Fix 3S9-FF7,Bostik Flexible Fix 3S9-FF7 Sealant acrylic sealant White 300ml,Sealant
+ADH-1S1IJGCH,/proc/catalog/adhesives_sealants/sealants/ADH-1S1IJGCH.json,Bostik,Flexible,Fix 3S9-FF7,Bostik Flexible Fix 3S9-FF7 Sealant acrylic sealant White 280ml,Sealant
+ADH-1WLOPZCM,/proc/catalog/adhesives_sealants/sealants/ADH-1WLOPZCM.json,Bostik,Flexible,Fix 3S9-FF7,Bostik Flexible Fix 3S9-FF7 Sealant sanitary sealant Clear 300ml,Sealant
+ADH-1WLPXSH6,/proc/catalog/adhesives_sealants/sealants/ADH-1WLPXSH6.json,Bostik,Flexible,Fix 3S9-FF7,Bostik Flexible Fix 3S9-FF7 Sealant sanitary sealant Gray 300ml,Sealant
+ADH-1XHB3BZH,/proc/catalog/adhesives_sealants/sealants/ADH-1XHB3BZH.json,Bostik,Flexible,Fix 3S9-FF7,Bostik Flexible Fix 3S9-FF7 Sealant acrylic sealant Black 500ml,Sealant
+ADH-1ZM12N1A,/proc/catalog/adhesives_sealants/sealants/ADH-1ZM12N1A.json,Bostik,Flexible,Fix 3S9-FF7,Bostik Flexible Fix 3S9-FF7 Sealant sanitary sealant White 500ml,Sealant
+ADH-2NCDZ1W4,/proc/catalog/adhesives_sealants/sealants/ADH-2NCDZ1W4.json,Bostik,Flexible,Fix 3S9-FF7,Bostik Flexible Fix 3S9-FF7 Sealant acrylic sealant Brown 300ml,Sealant
+ADH-5KH2IFYM,/proc/catalog/adhesives_sealants/sealants/ADH-5KH2IFYM.json,Bostik,Flexible,Fix 3S9-FF7,Bostik Flexible Fix 3S9-FF7 Sealant hybrid sealant Clear 300ml,Sealant
+ADH-Q140PF6A,/proc/catalog/adhesives_sealants/sealants/ADH-Q140PF6A.json,Bostik,Flexible,Fix 3S9-FF7,Bostik Flexible Fix 3S9-FF7 Sealant silicone sealant White 310ml,Sealant
+Next step_3... Query product_properties for the resolved candidate SKUs. (13209 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, pp.key, pp.value_text\nFROM products p\nJOIN product_properties pp ON pp.sku = p.sku\nWHERE p.sku IN ('ADH-1WLPXSH6','ADH-1WLOPZCM')\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, pp.key, pp.value_text
+FROM products p
+JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.sku IN ('ADH-1WLPXSH6','ADH-1WLOPZCM')
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,key,value_text
+ADH-1WLOPZCM,/proc/catalog/adhesives_sealants/sealants/ADH-1WLOPZCM.json,chemistry,silicone
+ADH-1WLOPZCM,/proc/catalog/adhesives_sealants/sealants/ADH-1WLOPZCM.json,color_family,clear
+ADH-1WLOPZCM,/proc/catalog/adhesives_sealants/sealants/ADH-1WLOPZCM.json,sealant_type,sanitary sealant
+ADH-1WLOPZCM,/proc/catalog/adhesives_sealants/sealants/ADH-1WLOPZCM.json,use_area,kitchen
+ADH-1WLOPZCM,/proc/catalog/adhesives_sealants/sealants/ADH-1WLOPZCM.json,volume_ml,300
+ADH-1WLPXSH6,/proc/catalog/adhesives_sealants/sealants/ADH-1WLPXSH6.json,chemistry,silicone
+ADH-1WLPXSH6,/proc/catalog/adhesives_sealants/sealants/ADH-1WLPXSH6.json,color_family,gray
+ADH-1WLPXSH6,/proc/catalog/adhesives_sealants/sealants/ADH-1WLPXSH6.json,sealant_type,sanitary sealant
+ADH-1WLPXSH6,/proc/catalog/adhesives_sealants/sealants/ADH-1WLPXSH6.json,use_area,kitchen
+ADH-1WLPXSH6,/proc/catalog/adhesives_sealants/sealants/ADH-1WLPXSH6.json,volume_ml,300
+Next step_4... Report the final verified result. (12638 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved real Bostik Flexible Fix 3S9-FF7 Sealant SKUs', 'Verified product_properties for sanitary gray and sanitary clear variants', 'Confirmed the extra combined-color claim is absent on a single SKU'] message='<NO> ADH-1WLPXSH6' grounding_refs=['/proc/catalog/adhesives_sealants/sealants/ADH-1WLPXSH6.json', '/proc/catalog/adhesives_sealants/sealants/ADH-1WLOPZCM.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved real Bostik Flexible Fix 3S9-FF7 Sealant SKUs
+- Verified product_properties for sanitary gray and sanitary clear variants
+- Confirmed the extra combined-color claim is absent on a single SKU
+
+[34mAGENT SUMMARY: <NO> ADH-1WLPXSH6[0m
+- [34m/proc/catalog/adhesives_sealants/sealants/ADH-1WLPXSH6.json[0m
+- [34m/proc/catalog/adhesives_sealants/sealants/ADH-1WLOPZCM.json[0m

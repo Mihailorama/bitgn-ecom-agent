@@ -1,0 +1,256 @@
+TASK t16 (model codex:gpt-5.3-codex)
+INSTRUCTION: How many of these products have at least 3 items available in the Lend district PowerTool store today: the Engine Oil from Castrol in the Castrol Synthetic EDGE TPJ-FNT Engine Oil line that has volume 1000 ml and viscosity 15W-40,the Cleaning Machine from Nilfisk in the Nilfisk Pro Buddy WJ8-60U Cleaning Machine line that has machine type floor cleaner and power 1400 W,the Pipe Fitting from Geberit in the Geberit Mapress Mapress 5D7-TSX Pipe Fitting line that has fitting type pipe clamp and diameter 16 mm,the Anchor and Wall Plug from Heco in the Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug line that has anchor type cavity fixing and diameter 5 mm,the Sealant from Sika in the Sika Professional Sika 2Q3-PZ3 Sealant line that has sealant type acrylic sealant,the Cloth Mop and Wipe from Tork in the Tork Eco W 2IQ-AYI Cloth Mop and Wipe line that has cleaning type microfiber cloth and pack count 1 pcs? Answer in exactly format "count : %d" (no quotes)
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+INVENTORY_DIAG {"brand": "Castrol", "exact_candidates": [{"path": "/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0014_2uqbg4nu/AUT-1B7FOQUN.json", "sku": "AUT-1B7FOQUN"}], "inventory": [], "kind": "Engine Oil", "line": "Castrol Synthetic EDGE TPJ-FNT Engine Oil", "props": [{"keys": ["volume", "volume_ml"], "value": "1000 ml"}, {"keys": ["viscosity"], "value": "15w-40"}], "reason": "exact_group", "selected": null, "store_id": "store_graz_lend", "threshold": 3}
+INVENTORY_DIAG {"brand": "Nilfisk", "candidates": [{"line_score": 7, "matched": [{"keys": ["machine_type"], "matched": false, "value": "floor cleaner"}, {"keys": ["power", "power_w"], "matched": true, "value": "1400 w"}], "name": "Nilfisk Pro Buddy WJ8-60U Cleaning Machine steam cleaner 1400W 12l", "path": "/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0002_35d9oapm/CLN-1CQZTRQZ.json", "prop_matches": 1, "props": {"machine_type": ["steam cleaner", ""], "power_w": ["1400", "1400"], "surface": ["metal", ""], "tank_volume_l": ["12", "12"]}, "sku": "CLN-1CQZTRQZ"}, {"line_score": 7, "matched": [{"keys": ["machine_type"], "matched": true, "value": "floor cleaner"}, {"keys": ["power", "power_w"], "matched": false, "value": "1400 w"}], "name": "Nilfisk Pro Buddy WJ8-60U Cleaning Machine floor cleaner 1000W 12l", "path": "/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0002_35d9oapm/CLN-1WWEVVJA.json", "prop_matches": 1, "props": {"machine_type": ["floor cleaner", ""], "power_w": ["1000", "1000"], "surface": ["stone", ""], "tank_volume_l": ["12", "12"]}, "sku": "CLN-1WWEVVJA"}, {"line_score": 7, "matched": [{"keys": ["machine_type"], "matched": false, "value": "floor cleaner"}, {"keys": ["power", "power_w"], "matched": true, "value": "1400 w"}], "name": "Nilfisk Pro Buddy WJ8-60U Cleaning Machine steam cleaner 1400W 1l", "path": "/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0002_35d9oapm/CLN-2N6PEXTI.json", "prop_matches": 1, "props": {"machine_type": ["steam cleaner", ""], "power_w": ["1400", "1400"], "surface": ["wood", ""], "tank_volume_l": ["1", "1"]}, "sku": "CLN-2N6PEXTI"}, {"line_score": 7, "matched": [{"keys": ["machine_type"], "matched": false, "value": "floor cleaner"}, {"keys": ["power", "power_w"], "matched": false, "value": "1400 w"}], "name": "Nilfisk Pro Buddy WJ8-60U Cleaning Machine wet dry vacuum 3000W 30l", "path": "/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0002_35d9oapm/CLN-2FXXZI42.json", "prop_matches": 0, "props": {"machine_type": ["wet dry vacuum", ""], "power_w": ["3000", "3000"], "surface": ["stone", ""], "tank_volume_l": ["30", "30"]}, "sku": "CLN-2FXXZI42"}, {"line_score": 7, "matched": [{"keys": ["machine_type"], "matched": false, "value": "floor cleaner"}, {"keys": ["power", "power_w"], "matched": false, "value": "1400 w"}], "name": "Nilfisk Pro Buddy WJ8-60U Cleaning Machine steam cleaner 1000W 30l", "path": "/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0002_35d9oapm/CLN-2V0MMBDM.json", "prop_matches": 0, "props": {"machine_type": ["steam cleaner", ""], "power_w": ["1000", "1000"], "surface": ["wood", ""], "tank_volume_l": ["30", "30"]}, "sku": "CLN-2V0MMBDM"}, {"line_score": 7, "matched": [{"keys": ["machine_type"], "matched": false, "value": "floor cleaner"}, {"keys": ["power", "power_w"], "matched": false, "value": "1400 w"}], "name": "Nilfisk Pro Buddy WJ8-60U Cleaning Machine wet dry vacuum 500W 12l", "path": "/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0002_35d9oapm/CLN-30EU0BGP.json", "prop_matches": 0, "props": {"machine_type": ["wet dry vacuum", ""], "power_w": ["500", "500"], "surface": ["wood", ""], "tank_volume_l": ["12", "12"]}, "sku": "CLN-30EU0BGP"}, {"line_score": 7, "matched": [{"keys": ["machine_type"], "matched": false, "value": "floor cleaner"}, {"keys": ["power", "power_w"], "matched": false, "value": "1400 w"}], "name": "Nilfisk Pro Buddy WJ8-60U Cleaning Machine steam cleaner 2200W 0l", "path": "/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0002_35d9oapm/CLN-36C4LTCJ.json", "prop_matches": 0, "props": {"machine_type": ["steam cleaner", ""], "power_w": ["2200", "2200"], "surface": ["stone", ""], "tank_volume_l": ["0", "0"]}, "sku": "CLN-36C4LTCJ"}, {"line_score": 7, "matched": [{"keys": ["machine_type"], "matched": false, "value": "floor cleaner"}, {"keys": ["power", "power_w"], "matched": false, "value": "1400 w"}], "name": "Nilfisk Pro Buddy WJ8-60U Cleaning Machine wet dry vacuum 2200W 30l", "path": "/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0002_35d9oapm/CLN-3OL8IPWS.json", "prop_matches": 0, "props": {"machine_type": ["wet dry vacuum", ""], "power_w": ["2200", "2200"], "surface": ["metal", ""], "tank_volume_l": ["30", "30"]}, "sku": "CLN-3OL8IPWS"}], "kind": "Cleaning Machine", "line": "Nilfisk Pro Buddy WJ8-60U Cleaning Machine", "props": [{"keys": ["machine_type"], "value": "floor cleaner"}, {"keys": ["power", "power_w"], "value": "1400 w"}], "reason": "fallback_single", "selected": {"path": "/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0002_35d9oapm/CLN-1CQZTRQZ.json", "sku": "CLN-1CQZTRQZ"}, "store_id": "store_graz_lend", "threshold": 3}
+INVENTORY_DIAG {"brand": "Geberit", "candidates": [{"line_score": 7, "matched": [{"keys": ["fitting_type"], "matched": false, "value": "pipe clamp"}, {"keys": ["diameter", "diameter_mm"], "matched": true, "value": "16 mm"}], "name": "Geberit Mapress Mapress 5D7-TSX Pipe Fitting pipe fitting 16mm hose", "path": "/proc/catalog/plumbing/pipe_fittings/fam_plumbing_pipe_fittings_0007_22yhx6fo/PLB-1772RJRO.json", "prop_matches": 1, "props": {"connection_type": ["hose", ""], "diameter_mm": ["16", "16"], "fitting_type": ["pipe fitting", ""], "material": ["plastic", ""], "thread_type": ["3/4 inch", ""]}, "sku": "PLB-1772RJRO"}, {"line_score": 7, "matched": [{"keys": ["fitting_type"], "matched": false, "value": "pipe clamp"}, {"keys": ["diameter", "diameter_mm"], "matched": true, "value": "16 mm"}], "name": "Geberit Mapress Mapress 5D7-TSX Pipe Fitting thread adapter 16mm compression", "path": "/proc/catalog/plumbing/pipe_fittings/fam_plumbing_pipe_fittings_0007_22yhx6fo/PLB-1UPECY3C.json", "prop_matches": 1, "props": {"connection_type": ["compression", ""], "diameter_mm": ["16", "16"], "fitting_type": ["thread adapter", ""], "material": ["plastic", ""], "thread_type": ["3/4 inch", ""]}, "sku": "PLB-1UPECY3C"}, {"line_score": 7, "matched": [{"keys": ["fitting_type"], "matched": false, "value": "pipe clamp"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "16 mm"}], "name": "Geberit Mapress Mapress 5D7-TSX Pipe Fitting pipe fitting 12mm compression", "path": "/proc/catalog/plumbing/pipe_fittings/fam_plumbing_pipe_fittings_0007_22yhx6fo/PLB-12M4GQKX.json", "prop_matches": 0, "props": {"connection_type": ["compression", ""], "diameter_mm": ["12", "12"], "fitting_type": ["pipe fitting", ""], "material": ["plastic", ""], "thread_type": ["1/2 inch", ""]}, "sku": "PLB-12M4GQKX"}, {"line_score": 7, "matched": [{"keys": ["fitting_type"], "matched": false, "value": "pipe clamp"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "16 mm"}], "name": "Geberit Mapress Mapress 5D7-TSX Pipe Fitting pipe fitting 12mm threaded", "path": "/proc/catalog/plumbing/pipe_fittings/fam_plumbing_pipe_fittings_0007_22yhx6fo/PLB-149588Y0.json", "prop_matches": 0, "props": {"connection_type": ["threaded", ""], "diameter_mm": ["12", "12"], "fitting_type": ["pipe fitting", ""], "material": ["plastic", ""], "thread_type": ["none", ""]}, "sku": "PLB-149588Y0"}, {"line_score": 7, "matched": [{"keys": ["fitting_type"], "matched": false, "value": "pipe clamp"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "16 mm"}], "name": "Geberit Mapress Mapress 5D7-TSX Pipe Fitting thread adapter 40mm compression", "path": "/proc/catalog/plumbing/pipe_fittings/fam_plumbing_pipe_fittings_0007_22yhx6fo/PLB-1LA2HIBA.json", "prop_matches": 0, "props": {"connection_type": ["compression", ""], "diameter_mm": ["40", "40"], "fitting_type": ["thread adapter", ""], "material": ["plastic", ""], "thread_type": ["none", ""]}, "sku": "PLB-1LA2HIBA"}, {"line_score": 7, "matched": [{"keys": ["fitting_type"], "matched": false, "value": "pipe clamp"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "16 mm"}], "name": "Geberit Mapress Mapress 5D7-TSX Pipe Fitting pipe fitting 15mm threaded", "path": "/proc/catalog/plumbing/pipe_fittings/fam_plumbing_pipe_fittings_0007_22yhx6fo/PLB-1RXF3F4T.json", "prop_matches": 0, "props": {"connection_type": ["threaded", ""], "diameter_mm": ["15", "15"], "fitting_type": ["pipe fitting", ""], "material": ["plastic", ""], "thread_type": ["1/2 inch", ""]}, "sku": "PLB-1RXF3F4T"}, {"line_score": 7, "matched": [{"keys": ["fitting_type"], "matched": false, "value": "pipe clamp"}, {"keys": ["diameter", "diameter_mm"], "matched": false, "value": "16 mm"}], "name": "Geberit Mapress Mapress 5D7-TSX Pipe Fitting thread adapter 32mm threaded", "path": "/proc/catalog/plumbing/pipe_fittings/fam_plumbing_pipe_fittings_0007_22yhx6fo/PLB-1SRD3HM3.json", "prop_matches": 0, "props": {"connection_type": ["threaded", ""], "diameter_mm": ["32", "32"], "fitting_type": ["thread adapter", ""], "material": ["plastic", ""], "thread_type": ["M24", ""]}, "sku": "PLB-1SRD3HM3"}], "kind": "Pipe Fitting", "line": "Geberit Mapress Mapress 5D7-TSX Pipe Fitting", "props": [{"keys": ["fitting_type"], "value": "pipe clamp"}, {"keys": ["diameter", "diameter_mm"], "value": "16 mm"}], "reason": "fallback_single", "selected": {"path": "/proc/catalog/plumbing/pipe_fittings/fam_plumbing_pipe_fittings_0007_22yhx6fo/PLB-1772RJRO.json", "sku": "PLB-1772RJRO"}, "store_id": "store_graz_lend", "threshold": 3}
+INVENTORY_DIAG {"brand": "Heco", "exact_candidates": [{"path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-1PP0P3I8.json", "sku": "FST-1PP0P3I8"}], "inventory": [{"available_today": "5", "sku": "FST-1PP0P3I8"}], "kind": "Anchor and Wall Plug", "line": "Heco Heavy Duty HECO 6IT-PBI Anchor and Wall Plug", "props": [{"keys": ["anchor_type"], "value": "cavity fixing"}, {"keys": ["diameter", "diameter_mm"], "value": "5 mm"}], "reason": "exact_group", "selected": {"path": "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-1PP0P3I8.json", "sku": "FST-1PP0P3I8"}, "store_id": "store_graz_lend", "threshold": 3}
+INVENTORY_DIAG {"brand": "Sika", "candidates": [{"line_score": 6, "matched": [{"keys": ["sealant_type"], "matched": false, "value": "acrylic sealant"}], "name": "Sika Professional Sika 2Q3-PZ3 Sealant hybrid sealant White 310ml", "path": "/proc/catalog/adhesives_sealants/sealants/fam_adhesives_sealants_sealants_0005_ro4nyqh4/ADH-1CV2TPM0.json", "prop_matches": 0, "props": {"chemistry": ["hybrid polymer", ""], "color_family": ["white", ""], "sealant_type": ["hybrid sealant", ""], "use_area": ["masonry", ""], "volume_ml": ["310", "310"]}, "sku": "ADH-1CV2TPM0"}], "kind": "Sealant", "line": "Sika Professional Sika 2Q3-PZ3 Sealant", "props": [{"keys": ["sealant_type"], "value": "acrylic sealant"}], "reason": "fallback_single", "selected": {"path": "/proc/catalog/adhesives_sealants/sealants/fam_adhesives_sealants_sealants_0005_ro4nyqh4/ADH-1CV2TPM0.json", "sku": "ADH-1CV2TPM0"}, "store_id": "store_graz_lend", "threshold": 3}
+INVENTORY_DIAG {"brand": "Tork", "candidates": [{"line_score": 8, "matched": [{"keys": ["cleaning_type"], "matched": true, "value": "microfiber cloth"}, {"keys": ["pack_count"], "matched": false, "value": "1 pcs"}], "name": "Tork Eco W 2IQ-AYI Cloth Mop and Wipe microfiber cloth 5pc multi surface", "path": "/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0023_37ngu51n/CLN-1I7SMFU6.json", "prop_matches": 1, "props": {"cleaning_type": ["microfiber cloth", ""], "fragrance": ["citrus", ""], "pack_count": ["5", "5"], "surface": ["multi surface", ""]}, "sku": "CLN-1I7SMFU6"}, {"line_score": 8, "matched": [{"keys": ["cleaning_type"], "matched": false, "value": "microfiber cloth"}, {"keys": ["pack_count"], "matched": false, "value": "1 pcs"}], "name": "Tork Eco W 2IQ-AYI Cloth Mop and Wipe workshop wipes 50pc multi surface", "path": "/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0023_37ngu51n/CLN-12FBNDLH.json", "prop_matches": 0, "props": {"cleaning_type": ["workshop wipes", ""], "fragrance": ["citrus", ""], "pack_count": ["50", "50"], "surface": ["multi surface", ""]}, "sku": "CLN-12FBNDLH"}, {"line_score": 8, "matched": [{"keys": ["cleaning_type"], "matched": false, "value": "microfiber cloth"}, {"keys": ["pack_count"], "matched": false, "value": "1 pcs"}], "name": "Tork Eco W 2IQ-AYI Cloth Mop and Wipe workshop wipes 5pc stone", "path": "/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0023_37ngu51n/CLN-1H4OL6VH.json", "prop_matches": 0, "props": {"cleaning_type": ["workshop wipes", ""], "fragrance": ["citrus", ""], "pack_count": ["5", "5"], "surface": ["stone", ""]}, "sku": "CLN-1H4OL6VH"}, {"line_score": 8, "matched": [{"keys": ["cleaning_type"], "matched": false, "value": "microfiber cloth"}, {"keys": ["pack_count"], "matched": false, "value": "1 pcs"}], "name": "Tork Eco W 2IQ-AYI Cloth Mop and Wipe workshop wipes 10pc stone", "path": "/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0023_37ngu51n/CLN-1HNDUTRD.json", "prop_matches": 0, "props": {"cleaning_type": ["workshop wipes", ""], "fragrance": ["citrus", ""], "pack_count": ["10", "10"], "surface": ["stone", ""]}, "sku": "CLN-1HNDUTRD"}], "kind": "Cloth Mop and Wipe", "line": "Tork Eco W 2IQ-AYI Cloth Mop and Wipe", "props": [{"keys": ["cleaning_type"], "value": "microfiber cloth"}, {"keys": ["pack_count"], "value": "1 pcs"}], "reason": "fallback_single", "selected": {"path": "/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0023_37ngu51n/CLN-1I7SMFU6.json", "sku": "CLN-1I7SMFU6"}, "store_id": "store_graz_lend", "threshold": 3}
+[32mdeterministic solver[0m: _try_inventory_count
+[32magent OUTCOME_OK[0m. Summary:
+- deterministic store inventory count via SQL
+
+[34mAGENT SUMMARY: count : 1[0m
+- [34m/proc/stores/store_graz_lend.json[0m
+- [34m/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0013_2fj8kkom/FST-1PP0P3I8.json[0m
