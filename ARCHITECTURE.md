@@ -5,7 +5,26 @@ degradation pattern, and the risk points to use before the next round of tuning.
 It is intentionally operational: every proposed change should map to one box in
 these diagrams and one validation gate in the risk table.
 
-## Current Rollback Point
+## Current Milestone
+
+As of 2026-05-26, the current saved scoring milestone is:
+
+- Milestone commit: `e4a2d41` (`Route t45 have-ready inventory wording`).
+- Documentation commit: `a7de1b5` (`Record v47 46-of-47 milestone retrospective`).
+- Tag: `bench-ecom1-dev-v47-46of47-20260526`.
+- Full-sweep result: `46/47` (`97.9%`) with `codex:gpt-5.3-codex`,
+  `PARALLEL=6`, `275s` wall.
+- Accepted sweep logs:
+  `artifacts/sweeps/2026-05-26-t45-have-ready-full-codex53/`.
+- Milestone retrospective and test-data index:
+  `artifacts/milestones/2026-05-26-v47-46of47-retrospective.md`.
+
+The active operational target is absolute solved count, not percentage alone.
+The benchmark denominator changed during the work (`44 -> 46 -> 47`), so a
+change only counts as progress if a full sweep raises or preserves the accepted
+absolute solved-count target.
+
+## Historical Rollback Point
 
 As of the final 2026-05-26 rollback, `agent.py` and `smoke_test.py` are restored
 to the exact tagged 44/44 baseline:
@@ -23,6 +42,10 @@ to the exact tagged 44/44 baseline:
 The later experimental family JSON augmentation and conflict-product solver were
 not promoted. Their logs are useful evidence, but the behavior was not globally
 stable.
+
+Later v46/v47 work moved forward from that rollback point with isolated
+parser/routing fixes, not broad resolver rewrites. The current code is no longer
+the raw `ae75479` baseline; `ae75479` remains the known historical fallback.
 
 ## Control Plane
 
@@ -123,6 +146,15 @@ Current lesson: broad deterministic branches are high-risk. The rejected
 conflicting-product solver fixed one `t05` seed but regressed `t08` by treating a
 valid multi-valued product requirement as impossible. New solvers should be
 task-family gated and shadow-tested before they are allowed to submit answers.
+
+Latest v47 lesson: narrow routing branches can be safe when they are
+non-overlapping and backed by RED tests from saved failed logs. Successful recent
+examples:
+
+- `t26`: percent-sign parsing for explicit over-policy discounts.
+- `t41`: `payment verification` wording routed into deterministic 3DS recovery.
+- `t45`: uncovered inventory wording routed into deterministic inventory instead
+  of the LLM path.
 
 ## Data Plane
 
@@ -268,6 +300,68 @@ Recommended order:
    cheaper deterministic preflight, and fewer full LLM turns on known policy
    families.
 
+## Controlled Improvement SDLC
+
+The tuning loop is a benchmark SDLC, not a normal feature-development loop. The
+primary artifact of each iteration is causal evidence: one behavior change, one
+RED test, targeted logs, one full sweep, and a written decision.
+
+```mermaid
+flowchart TD
+    FailLog[Saved failed full-sweep log] --> Scope[Choose one task-shape or domain]
+    Scope --> Isolate{Can the fix be isolated?}
+    Isolate -->|yes| Red[Add RED smoke/regression test from exact wording]
+    Isolate -->|no| Design[Extract helper in shadow mode first]
+    Red --> RedRun[Run smoke and verify expected failure]
+    RedRun --> Patch[Minimal production change]
+    Patch --> Smoke[py_compile + smoke_test]
+    Smoke --> Targeted[Targeted task + touched-family regression]
+    Targeted --> Security[Security grep]
+    Security --> Full[Full sweep with unique SWEEP_LOG_DIR]
+    Full --> Accept{Absolute solved count >= accepted target and security clean?}
+    Accept -->|yes| Record[Update RESULTS, notes, artifacts, commit]
+    Accept -->|no| Reject[Keep logs, document signal, revert or do not promote]
+    Design --> Red
+```
+
+### SDLC Rules
+
+1. One production behavior change per cycle. Do not bundle parser, resolver,
+   prompt, and ref-policy changes.
+2. Write a RED test from a saved failed log before changing production code.
+   If the test cannot be made narrow, first extract a helper or diagnostic seam.
+3. Prefer isolated routing/parser fixes for new wording shapes. They may add a
+   non-overlapping branch, but must not alter existing branches, `_select_product()`,
+   or global ref policy.
+4. Targeted pass is only a local signal. It is not leaderboard progress.
+5. A change is accepted only by a full sweep that is security-clean and raises or
+   preserves the accepted absolute solved-count target.
+6. Use a unique `SWEEP_LOG_DIR` for every full attempt. Do not overwrite the
+   milestone logs with a noisier repeat.
+7. Always grep for security misses before commit:
+   `rg "expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK" artifacts/sweeps/<dir>/*.log`.
+8. Commit the code, tests, `RESULTS.md`, notes, and logs atomically. If the
+   change is not accepted, keep diagnostic logs only when they explain a rejected
+   design.
+9. Push only after explicit approval.
+
+### Acceptance Levels
+
+| Level | Meaning | Commit? |
+|---|---|---|
+| RED/GREEN smoke | Unit-level deterministic behavior works | No, unless followed by targeted/full evidence |
+| Targeted pass | The named task shape can pass | No, not by itself |
+| Family regression pass | Adjacent known tasks did not fail in that sample | Still no, not by itself |
+| Full sweep preserves solved target | Safe maintenance / documentation-worthy | Yes, if security clean |
+| Full sweep raises absolute solved count | Scoring milestone | Yes, tag and document |
+
+### Current Stable Target
+
+The accepted target is `46` solved tasks on `bitgn/ecom1-dev` v47. The next
+accepted scoring improvement must reach `47/47` or repeatedly preserve `46/47`
+while closing the known `t16` failure. A full sweep below `46` solved may still
+be useful variance evidence, but it is not a promoted state.
+
 ## Promotion Contract
 
 A change can be promoted only if all are true:
@@ -277,8 +371,8 @@ A change can be promoted only if all are true:
 - Target tasks pass with saved logs.
 - Full sweep is security-clean:
   `rg "expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK" <logs>`.
-- The full-sweep result improves or preserves the stable target without moving
-  failures into a more serious family.
+- The full-sweep result improves or preserves the accepted absolute solved-count
+  target without moving failures into a more serious family.
 - `RESULTS.md` and `BENCHMARK_NOTES.md` explain what changed and why.
 
 If a change improves targeted tasks but regresses a different family in a full
