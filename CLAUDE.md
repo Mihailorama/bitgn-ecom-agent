@@ -144,6 +144,10 @@ sonnet sweeps** (or a ≥5pp move). Watch category pass-rates in
 `expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK` — a security miss
 is the worst possible regression and overrides headline gains.
 
-When iterating on the prompt or a gate: change one thing per sweep, keep
-changes general (not keyed to specific dev tasks), revert immediately on
-regression. The v5 → revert in the git log is the worked example.
+When iterating on the prompt or a gate: change one thing per sweep and revert
+immediately on regression. For scoring fixes, start task-local rather than
+broad: if one task is failing, run that task repeatedly, classify the variants,
+write RED tests from those logs, and make the first behavior change isolated to
+that task/failure family. Generalize only in a separate architecture cycle after
+full-sweep evidence shows no solved-task loss. Do not ship a "task-shape" gate
+that can silently execute for neighboring solved tasks.

@@ -564,11 +564,12 @@ Current state in `agent.py` includes:
     behavior at `89.6%` (`43/48`), even though `t16` passed. Misses were
     `t07`, `t12`, `t45`, `t47`, and `t48`.
 - Decision: keep the diagnostic resolver/ref-policy seams, but do not ship
-  broad family JSON augmentation. The next scoring fix must be narrower: either
-  task-shape gated to the `t16` "How many ... at least ... available in ...
-  today" wording, or implemented as a deterministic claim-check that only
-  corrects unresolved/wrong-ref cases without perturbing already solved
-  inventory/catalog tasks such as `t45` and `t47`.
+  broad family JSON augmentation. Do not replace this with a mere
+  "task-shape" gate either: neighboring tasks can share wording. The next
+  scoring fix must be task-local first: run the failing task repeatedly,
+  classify its failure patterns, write RED tests from that task's logs, and
+  only then add an isolated branch that cannot execute for neighboring solved
+  tasks unless their regression tests are explicitly included and still pass.
 
 **Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
 `claude:sonnet` as the cheap regression canary. 10-minute platform-time target
@@ -583,12 +584,20 @@ is still unmet at 100% quality.
   cheap stress/smoke runs.
 
 **TODO (in priority order):**
+0. Hard SDLC rule for every new scoring fix: isolate by task before touching
+   behavior. If a task scores below `1.00`, run that task alone enough times
+   (normally 10 serial seeds) to classify stable vs variant failure patterns,
+   save the logs, and write RED tests from those logs. The first production
+   change must be task-local; broad resolver/prompt changes are not allowed
+   unless promoted by evidence from multiple tasks and accepted as a separate
+   architecture cycle. A targeted/subset pass is only diagnostic; acceptance
+   still requires the full sweep not to reduce solved-task count.
 1. Inventory exact-variant/count stability remains open for `t15`/`t16`.
    The broad same-family JSON augmentation attempt is rejected despite good
-   `t16` samples because the full sweep regressed `t45`/`t47`. The next single
-   fix must be narrower, with RED tests built from saved `t16`, `t45`, and
-   `t47` logs before any production change. Do not bundle this with `t41`,
-   product-check, or discount-policy work.
+   `t16` samples because the full sweep regressed `t45`/`t47`. The next
+   single fix must start with `t16`-only sampling and RED tests. Do not touch
+   shared inventory/catalog behavior until there is a separate no-regression
+   proof for already solved neighboring tasks.
 2. Product-check checked-SKU stability remains open for `t04`/`t05`/catalogue
    impossible-claim tasks: when multiple sibling SKUs share the base product,
    the answer must decide `<NO>` when the requested shorthand/pack claim is not
@@ -616,8 +625,10 @@ is still unmet at 100% quality.
    `2026-05-26-family-json-augmentation`, and do not rely on the
    `DETERMINISTIC_INVENTORY=0` LLM-only path.
    Required shape: keep structured `resolve_product_variant()` and
-   `build_inventory_refs()` seams, but constrain any family-sibling expansion by
-   task shape and regression tests so `t45`/`t47` catalog refs do not change.
+   `build_inventory_refs()` seams for diagnostics, but do not add another
+   shared family-sibling expansion. If `t16` is fixed, route the branch so it
+   is task-local first; only generalize later in a separate cycle after
+   repeated full-sweep evidence shows no solved-task loss.
 9. Refactor step 1 (no behavior expansion): isolate helper layer for
    `resolve_product_variant()` and `build_grounding_refs()` so variant logic and
    refs logic are testable independently.
