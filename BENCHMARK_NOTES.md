@@ -571,6 +571,23 @@ Current state in `agent.py` includes:
   only then add an isolated branch that cannot execute for neighboring solved
   tasks unless their regression tests are explicitly included and still pass.
 
+**2026-05-26 t16 isolated sample (10 runs, no code changes).**
+- Ran `t16` in isolation with `PARALLEL=1`, `MODEL_ID=codex:gpt-5.3-codex`,
+  logs under `artifacts/sweeps/2026-05-26-t16-isolated-sample-r*/`.
+- Result: `1/10` pass (`r10`), `9/10` fail.
+- Dominant failure class: missing required
+  `/proc/catalog/.../fam_.../<SKU>.json` reference (`7/10`).
+- Secondary class: count mismatch (`2/10`), both with mixed
+  `exact_group`/`fallback_single` diagnostics.
+- Pattern: pass run had `exact=6, fallback=0`; fail runs typically included
+  `fallback_single` items for one or more requested products.
+- Analysis artifact:
+  `artifacts/diagnostics/2026-05-26-t16-isolated-sample-analysis.md`.
+- Decision: next cycle begins with RED tests from this sample set (at least one
+  missing-required-ref case and one count-mismatch case), then one task-local
+  fix path for `t16` only. No shared inventory/catalog resolver change in that
+  cycle.
+
 **Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
 `claude:sonnet` as the cheap regression canary. 10-minute platform-time target
 is still unmet at 100% quality.
