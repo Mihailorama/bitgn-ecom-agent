@@ -252,7 +252,7 @@ Current state in `agent.py` includes:
 - Checkout-task auto-cite: `_submit_completion` now auto-adds `/docs/checkout.md`
   alongside `/docs/security.md` for checkout-style instructions.
 
-### 2026-05-26 degradation audit and rollback
+### 2026-05-26 degradation audit and exact-tag rollback
 
 - Audit time: `2026-05-26 11:54 CEST`. `RESULTS.md` has no 44/44 row in the
   preceding two-hour window. The latest local 44/44 row remains
@@ -273,10 +273,17 @@ Current state in `agent.py` includes:
   invariants were proved. Recent changes fixed local inventory and product-check
   seeds but moved failures into adjacent product-check/count tasks. This is a
   design issue, not just model variance.
-- Rollback decision: restore `agent.py` and `smoke_test.py` behavior to
-  `10c2e71` (`Add exact inventory candidate grouping`), the last code point with
-  a recorded 44/44 row after it, while preserving all later docs, results, and
-  sweep logs.
+- Initial rollback to `10c2e71` did not reproduce stability: a fresh validation
+  hit `t16: 0.00`, so that was not the desired restoration point.
+- Final rollback decision: restore `agent.py` and `smoke_test.py` behavior to
+  exact tag `ae75479` (`bench-ecom1-dev-codex53-44of44-20260525`), while
+  preserving all later docs, results, and sweep logs.
+- Fresh validation of the exact restored tag:
+  `artifacts/sweeps/2026-05-26-ae75479-restored-validation-codex53/` scored
+  `97.7%` (`43/44`) at `268s`, security clean. Only miss: `t05`, where the
+  model answered `<YES>` because two sibling SKUs had the two requested
+  `storage_type` values, but the grader expected `<NO>` for a single catalogue
+  item claim.
 - Architecture and risk map were captured in `ARCHITECTURE.md`. Next iteration
   should start with a shadow-mode typed `resolve_product_variant()` and
   per-task diagnostic JSON, not another broad resolver mutation.
@@ -296,7 +303,7 @@ is still unmet at 100% quality.
 **TODO (in priority order):**
 1. Do not continue broad class-split refactors from `167c1f3` directly. They
    captured useful evidence but reduced the headline score. Start from restored
-   `10c2e71` algorithm state, with later diagnostics preserved as evidence.
+   `ae75479` tagged 44/44 baseline, with later diagnostics preserved as evidence.
 2. Close the restored-baseline `t16` inventory grounding miss with a narrow
    resolver, but do not revive either rejected branch verbatim:
    `2026-05-25-t16-exact-variant-rejected` or

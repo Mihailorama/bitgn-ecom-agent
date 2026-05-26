@@ -7,13 +7,16 @@ these diagrams and one validation gate in the risk table.
 
 ## Current Rollback Point
 
-As of 2026-05-26, code is rolled back to the last code point with a recorded
-44/44 run in `RESULTS.md`:
+As of the final 2026-05-26 rollback, `agent.py` and `smoke_test.py` are restored
+to the exact tagged 44/44 baseline:
 
-- Code source for `agent.py` and `smoke_test.py`: `10c2e71` (`Add exact inventory
-  candidate grouping`).
-- Best recorded run after that code point: `2026-05-25 21:49`,
-  `codex:gpt-5.3-codex`, `100.0%`, `44/44`, `226s`, `PARALLEL=6`.
+- Code source for `agent.py` and `smoke_test.py`: `ae75479`
+  (`bench-ecom1-dev-codex53-44of44-20260525`).
+- Historical recorded run for that tag: `2026-05-25 13:40`,
+  `codex:gpt-5.3-codex`, `100.0%`, `44/44`, `270s`, `PARALLEL=6`.
+- Fresh validation after restoring that exact code on 2026-05-26 scored
+  `97.7%` (`43/44`) at `268s`; only `t05` missed by answering `<YES>` where the
+  grader expected `<NO>`.
 - Newer diagnostic rows and sweep logs are preserved so rejected experiments can
   still inform the next design.
 
@@ -190,9 +193,11 @@ Recent full sweeps after the last recorded 44/44:
 - `2026-05-26 09:26`: `41/44`
 - `2026-05-26 09:46`: `43/44`
 - `2026-05-26 09:52`: `42/44`
+- `2026-05-26 11:39`: `43/44` after restoring exact `ae75479` tagged baseline
 
 No local `RESULTS.md` row in the last two hours of the 2026-05-26 11:54 CEST
-audit was 44/44. The last recorded 44/44 row remains `2026-05-25 21:49`.
+audit was 44/44. The last recorded 44/44 row remains historical, not freshly
+reproduced.
 
 Observed causes:
 

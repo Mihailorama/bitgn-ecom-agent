@@ -283,23 +283,6 @@ def test_format_enforcement():
     print("ok: format detection + safe coercion + conservative re-prompt")
 
 
-def test_product_property_parser_variant_labels():
-    props = agent._parse_properties(
-        "machine type compressor, voltage 400 V, power 750 W, tank volume 6 l, "
-        "grip type rubberized, fit regular, and colour temperature 6500 K"
-    )
-    by_value = {value: keys for keys, value in props}
-    assert "6 l" in by_value and "tank_volume_l" in by_value["6 l"], \
-        "tank volume must be parsed for exact compressor variants"
-    assert "rubberized" in by_value and "grip_type" in by_value["rubberized"], \
-        "grip type must be parsed for exact hand-tool variants"
-    assert "regular" in by_value and "fit" in by_value["regular"], \
-        "fit must be parsed for exact workwear variants"
-    assert "6500 k" in by_value and "color_temperature_k" in by_value["6500 k"], \
-        "colour temperature must be parsed for exact lighting variants"
-    print("ok: product parser recognizes high-density variant labels")
-
-
 def test_verify_refs_drop_safety():
     vm = FakeVM()
     vm.stat_not_found = {"/proc/baskets/ghost.json"}
@@ -507,7 +490,6 @@ def main():
     test_connect_error_recovery()
     test_sql_path_extraction()
     test_format_enforcement()
-    test_product_property_parser_variant_labels()
     test_verify_refs_drop_safety()
     test_format_loopback()
     test_fabrication_gate()

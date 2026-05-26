@@ -1,0 +1,283 @@
+TASK t08 (model codex:gpt-5.3-codex)
+INSTRUCTION: A support note claims we stock the Wiring Device from Wago in the Wago 221 222 DLX-KMG Wiring Device line that has device type socket outlet, color family Gray, and ip rating IP20 and has current 32 A. Check the actual catalogue item, cite the exact product record, and if the base product exists but that extra catalogue claim is absent, answer with <NO> and include the checked SKU.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query products joined with product_properties for Wago 221/222 DLX-KMG Wiring Device candidates and required properties, returning sku and path. (21002 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       MAX(CASE WHEN pp.key='device_type' THEN pp.value_text END) AS device_type,\n       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family,\n       MAX(CASE WHEN pp.key='ip_rating' THEN pp.value_text END) AS ip_rating,\n       MAX(CASE WHEN pp.key='current_a' THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS current_a\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE (p.brand='Wago' OR p.name LIKE '%Wago%')\n  AND (p.series LIKE '%221%' OR p.model LIKE '%221%' OR p.name LIKE '%221%')\n  AND (p.series LIKE '%222%' OR p.model LIKE '%222%' OR p.name LIKE '%222%')\n  AND (p.series LIKE '%DLX-KMG%' OR p.model LIKE '%DLX-KMG%' OR p.name LIKE '%DLX-KMG%')\n  AND (p.kind_id IN (SELECT id FROM product_kinds WHERE name='Wiring Device') OR p.name LIKE '%Wiring Device%')\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name\nORDER BY p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       MAX(CASE WHEN pp.key='device_type' THEN pp.value_text END) AS device_type,
+       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family,
+       MAX(CASE WHEN pp.key='ip_rating' THEN pp.value_text END) AS ip_rating,
+       MAX(CASE WHEN pp.key='current_a' THEN COALESCE(pp.value_text, CAST(pp.value_number AS TEXT)) END) AS current_a
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE (p.brand='Wago' OR p.name LIKE '%Wago%')
+  AND (p.series LIKE '%221%' OR p.model LIKE '%221%' OR p.name LIKE '%221%')
+  AND (p.series LIKE '%222%' OR p.model LIKE '%222%' OR p.name LIKE '%222%')
+  AND (p.series LIKE '%DLX-KMG%' OR p.model LIKE '%DLX-KMG%' OR p.name LIKE '%DLX-KMG%')
+  AND (p.kind_id IN (SELECT id FROM product_kinds WHERE name='Wiring Device') OR p.name LIKE '%Wiring Device%')
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name
+ORDER BY p.sku;
+SQL
+sku,path,brand,series,model,name,device_type,color_family,ip_rating,current_a
+ELC-16LKRQYK,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0012_z59c34l3/ELC-16LKRQYK.json,Wago,221,222 DLX-KMG,Wago 221 222 DLX-KMG Wiring Device junction box Gray IP44,junction box,gray,IP44,6
+ELC-1A3753YT,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0012_z59c34l3/ELC-1A3753YT.json,Wago,221,222 DLX-KMG,Wago 221 222 DLX-KMG Wiring Device work light Black IP54,work light,black,IP54,6
+ELC-1FSHUFCL,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0012_z59c34l3/ELC-1FSHUFCL.json,Wago,221,222 DLX-KMG,Wago 221 222 DLX-KMG Wiring Device terminal clamp White IP20,terminal clamp,white,IP20,6
+ELC-2IDBAXV2,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0012_z59c34l3/ELC-2IDBAXV2.json,Wago,221,222 DLX-KMG,Wago 221 222 DLX-KMG Wiring Device socket outlet White IP20,socket outlet,white,IP20,6
+ELC-2UKK64II,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0012_z59c34l3/ELC-2UKK64II.json,Wago,221,222 DLX-KMG,Wago 221 222 DLX-KMG Wiring Device socket outlet Gray IP20,socket outlet,gray,IP20,6
+ELC-32ZDCZRA,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0012_z59c34l3/ELC-32ZDCZRA.json,Wago,221,222 DLX-KMG,Wago 221 222 DLX-KMG Wiring Device junction box White IP44,junction box,white,IP44,6
+ELC-3W48U08T,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0012_z59c34l3/ELC-3W48U08T.json,Wago,221,222 DLX-KMG,Wago 221 222 DLX-KMG Wiring Device terminal clamp White IP54,terminal clamp,white,IP54,6
+ELC-5JY09YJK,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0012_z59c34l3/ELC-5JY09YJK.json,Wago,221,222 DLX-KMG,Wago 221 222 DLX-KMG Wiring Device junction box Green IP20,junction box,green,IP20,6
+ELC-B4SBWKTK,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0012_z59c34l3/ELC-B4SBWKTK.json,Wago,221,222 DLX-KMG,Wago 221 222 DLX-KMG Wiring Device socket outlet Black IP44,socket outlet,black,IP44,6
+ELC-B87FDHXN,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0012_z59c34l3/ELC-B87FDHXN.json,Wago,221,222 DLX-KMG,Wago 221 222 DLX-KMG Wiring Device switch White IP20,switch,white,IP20,6
+ELC-I6KJA748,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0012_z59c34l3/ELC-I6KJA748.json,Wago,221,222 DLX-KMG,Wago 221 222 DLX-KMG Wiring Device socket outlet Gray IP54,socket outlet,gray,IP54,6
+ELC-PEWWS0QS,/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0012_z59c34l3/ELC-PEWWS0QS.json,Wago,221,222 DLX-KMG,Wago 221 222 DLX-KMG Wiring Device terminal clamp Green IP44,terminal clamp,green,IP44,6
+Next step_2... Report completion with <NO> and include checked SKU, citing the verified product record path. (17232 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Matched Wago 221 222 DLX-KMG Wiring Device candidates in SQL.', 'Identified exact variant for socket outlet + gray + IP20 as ELC-2UKK64II.', 'Confirmed current is 6A, so 32A claim is absent.'] message='<NO> ELC-2UKK64II' grounding_refs=['/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0012_z59c34l3/ELC-2UKK64II.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Matched Wago 221 222 DLX-KMG Wiring Device candidates in SQL.
+- Identified exact variant for socket outlet + gray + IP20 as ELC-2UKK64II.
+- Confirmed current is 6A, so 32A claim is absent.
+
+[34mAGENT SUMMARY: <NO> ELC-2UKK64II[0m
+- [34m/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0012_z59c34l3/ELC-2UKK64II.json[0m
