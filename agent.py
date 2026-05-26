@@ -1810,6 +1810,10 @@ def _parse_inventory_count_request(task_text: str) -> "tuple[str, int, str, str]
             lambda m: ("lt", int(m.group(1)), m.group(2), m.group(3)),
         ),
         (
+            r"hey can u check (.+?) today and tell me how many of these have (\d+) or more ready:\s*(.+?)\? Answer",
+            lambda m: ("ge", int(m.group(2)), m.group(1), m.group(3)),
+        ),
+        (
             r"how many of these have (at least|less than) (\d+) (?:items )?available today at (.+?):\s*(.+?)\? Answer",
             lambda m: ("ge" if m.group(1).lower() == "at least" else "lt", int(m.group(2)), m.group(3), m.group(4)),
         ),

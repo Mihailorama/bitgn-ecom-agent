@@ -1,0 +1,397 @@
+TASK t08 (model codex:gpt-5.3-codex)
+INSTRUCTION: A support note claims we stock the Cloth Mop and Wipe from Vileda in the Vileda Pro Easy 1XB-2OF Cloth Mop and Wipe line that has cleaning type sponge and pack count 1 pcs and has surface plastic. Check the actual catalogue item, cite the exact product record, and if the base product exists but that extra catalogue claim is absent, answer with <NO> and include the checked SKU.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query products joined with product_properties for brand/series/model/name and the stated property keys/values. (14324 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pp.key, pp.value_text, pp.value_number\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE (\n  p.brand LIKE '%Vileda%'\n  OR p.series LIKE '%Vileda Pro Easy 1XB-2OF%'\n  OR p.model LIKE '%1XB-2OF%'\n  OR p.name LIKE '%Cloth Mop and Wipe%'\n)\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pp.key, pp.value_text, pp.value_number
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE (
+  p.brand LIKE '%Vileda%'
+  OR p.series LIKE '%Vileda Pro Easy 1XB-2OF%'
+  OR p.model LIKE '%1XB-2OF%'
+  OR p.name LIKE '%Cloth Mop and Wipe%'
+)
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,key,value_text,value_number
+CLN-109W6QK6,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0002_2pxgznp9/CLN-109W6QK6.json,Vileda,Concentrate,Turbo 1DQ-PV9,Vileda Concentrate Turbo 1DQ-PV9 Cleaning Liquid interior cleaner 750ml citrus,cleaner_type,interior cleaner,
+CLN-109W6QK6,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0002_2pxgznp9/CLN-109W6QK6.json,Vileda,Concentrate,Turbo 1DQ-PV9,Vileda Concentrate Turbo 1DQ-PV9 Cleaning Liquid interior cleaner 750ml citrus,concentrate,no,
+CLN-109W6QK6,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0002_2pxgznp9/CLN-109W6QK6.json,Vileda,Concentrate,Turbo 1DQ-PV9,Vileda Concentrate Turbo 1DQ-PV9 Cleaning Liquid interior cleaner 750ml citrus,fragrance,citrus,
+CLN-109W6QK6,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0002_2pxgznp9/CLN-109W6QK6.json,Vileda,Concentrate,Turbo 1DQ-PV9,Vileda Concentrate Turbo 1DQ-PV9 Cleaning Liquid interior cleaner 750ml citrus,surface,multi surface,
+CLN-109W6QK6,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0002_2pxgznp9/CLN-109W6QK6.json,Vileda,Concentrate,Turbo 1DQ-PV9,Vileda Concentrate Turbo 1DQ-PV9 Cleaning Liquid interior cleaner 750ml citrus,volume_ml,750,750
+CLN-10SRIVO6,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0019_2a6tkgqs/CLN-10SRIVO6.json,Vileda,Heavy Duty,UltraMax EF4-IDF,Vileda Heavy Duty UltraMax EF4-IDF Cleaning Machine floor cleaner 3000W 20l,machine_type,floor cleaner,
+CLN-10SRIVO6,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0019_2a6tkgqs/CLN-10SRIVO6.json,Vileda,Heavy Duty,UltraMax EF4-IDF,Vileda Heavy Duty UltraMax EF4-IDF Cleaning Machine floor cleaner 3000W 20l,power_w,3000,3000
+CLN-10SRIVO6,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0019_2a6tkgqs/CLN-10SRIVO6.json,Vileda,Heavy Duty,UltraMax EF4-IDF,Vileda Heavy Duty UltraMax EF4-IDF Cleaning Machine floor cleaner 3000W 20l,surface,plastic,
+CLN-10SRIVO6,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0019_2a6tkgqs/CLN-10SRIVO6.json,Vileda,Heavy Duty,UltraMax EF4-IDF,Vileda Heavy Duty UltraMax EF4-IDF Cleaning Machine floor cleaner 3000W 20l,tank_volume_l,20,20
+CLN-111W9O14,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0011_32smgfyz/CLN-111W9O14.json,Spontex,Microfibre,SPX 2AV-3TN,Spontex Microfibre SPX 2AV-3TN Cloth Mop and Wipe microfiber cloth 5pc multi surface,cleaning_type,microfiber cloth,
+CLN-111W9O14,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0011_32smgfyz/CLN-111W9O14.json,Spontex,Microfibre,SPX 2AV-3TN,Spontex Microfibre SPX 2AV-3TN Cloth Mop and Wipe microfiber cloth 5pc multi surface,fragrance,none,
+CLN-111W9O14,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0011_32smgfyz/CLN-111W9O14.json,Spontex,Microfibre,SPX 2AV-3TN,Spontex Microfibre SPX 2AV-3TN Cloth Mop and Wipe microfiber cloth 5pc multi surface,pack_count,5,5
+CLN-111W9O14,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0011_32smgfyz/CLN-111W9O14.json,Spontex,Microfibre,SPX 2AV-3TN,Spontex Microfibre SPX 2AV-3TN Cloth Mop and Wipe microfiber cloth 5pc multi surface,surface,multi surface,
+CLN-11AFZ7F8,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0007_3rggwfnz/CLN-11AFZ7F8.json,Ajax,Universal,AJ 3BI-1X6,Ajax Universal AJ 3BI-1X6 Cloth Mop and Wipe mop system 1pc plastic,cleaning_type,mop system,
+CLN-11AFZ7F8,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0007_3rggwfnz/CLN-11AFZ7F8.json,Ajax,Universal,AJ 3BI-1X6,Ajax Universal AJ 3BI-1X6 Cloth Mop and Wipe mop system 1pc plastic,fragrance,none,
+CLN-11AFZ7F8,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0007_3rggwfnz/CLN-11AFZ7F8.json,Ajax,Universal,AJ 3BI-1X6,Ajax Universal AJ 3BI-1X6 Cloth Mop and Wipe mop system 1pc plastic,pack_count,1,1
+CLN-11AFZ7F8,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0007_3rggwfnz/CLN-11AFZ7F8.json,Ajax,Universal,AJ 3BI-1X6,Ajax Universal AJ 3BI-1X6 Cloth Mop and Wipe mop system 1pc plastic,surface,plastic,
+CLN-11MDJPZC,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0006_1rc3cvbj/CLN-11MDJPZC.json,Tork,Fresh,T 372-URA,Tork Fresh T 372-URA Cloth Mop and Wipe microfiber cloth 1pc multi surface,cleaning_type,microfiber cloth,
+CLN-11MDJPZC,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0006_1rc3cvbj/CLN-11MDJPZC.json,Tork,Fresh,T 372-URA,Tork Fresh T 372-URA Cloth Mop and Wipe microfiber cloth 1pc multi surface,fragrance,citrus,
+CLN-11MDJPZC,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0006_1rc3cvbj/CLN-11MDJPZC.json,Tork,Fresh,T 372-URA,Tork Fresh T 372-URA Cloth Mop and Wipe microfiber cloth 1pc multi surface,pack_count,1,1
+CLN-11MDJPZC,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0006_1rc3cvbj/CLN-11MDJPZC.json,Tork,Fresh,T 372-URA,Tork Fresh T 372-URA Cloth Mop and Wipe microfiber cloth 1pc multi surface,surface,multi surface,
+CLN-11WW5RR5,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0020_3vpodlpd/CLN-11WW5RR5.json,Tork,Eco,M 2SN-PPA,Tork Eco M 2SN-PPA Cloth Mop and Wipe mop system 10pc metal,cleaning_type,mop system,
+CLN-11WW5RR5,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0020_3vpodlpd/CLN-11WW5RR5.json,Tork,Eco,M 2SN-PPA,Tork Eco M 2SN-PPA Cloth Mop and Wipe mop system 10pc metal,fragrance,fresh,
+CLN-11WW5RR5,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0020_3vpodlpd/CLN-11WW5RR5.json,Tork,Eco,M 2SN-PPA,Tork Eco M 2SN-PPA Cloth Mop and Wipe mop system 10pc metal,pack_count,10,10
+CLN-11WW5RR5,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0020_3vpodlpd/CLN-11WW5RR5.json,Tork,Eco,M 2SN-PPA,Tork Eco M 2SN-PPA Cloth Mop and Wipe mop system 10pc metal,surface,metal,
+CLN-12CFB7AW,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0005_38hgmto0/CLN-12CFB7AW.json,Leifheit,Clean Twist,Profi 1SY-SM8,Leifheit Clean Twist Profi 1SY-SM8 Cloth Mop and Wipe broom set 50pc multi surface,cleaning_type,broom set,
+CLN-12CFB7AW,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0005_38hgmto0/CLN-12CFB7AW.json,Leifheit,Clean Twist,Profi 1SY-SM8,Leifheit Clean Twist Profi 1SY-SM8 Cloth Mop and Wipe broom set 50pc multi surface,fragrance,citrus,
+CLN-12CFB7AW,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0005_38hgmto0/CLN-12CFB7AW.json,Leifheit,Clean Twist,Profi 1SY-SM8,Leifheit Clean Twist Profi 1SY-SM8 Cloth Mop and Wipe broom set 50pc multi surface,pack_count,50,50
+CLN-12CFB7AW,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0005_38hgmto0/CLN-12CFB7AW.json,Leifheit,Clean Twist,Profi 1SY-SM8,Leifheit Clean Twist Profi 1SY-SM8 Cloth Mop and Wipe broom set 50pc multi surface,surface,multi surface,
+CLN-12FBNDLH,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0023_37ngu51n/CLN-12FBNDLH.json,Tork,Eco,W 2IQ-AYI,Tork Eco W 2IQ-AYI Cloth Mop and Wipe workshop wipes 50pc multi surface,cleaning_type,workshop wipes,
+CLN-12FBNDLH,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0023_37ngu51n/CLN-12FBNDLH.json,Tork,Eco,W 2IQ-AYI,Tork Eco W 2IQ-AYI Cloth Mop and Wipe workshop wipes 50pc multi surface,fragrance,citrus,
+CLN-12FBNDLH,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0023_37ngu51n/CLN-12FBNDLH.json,Tork,Eco,W 2IQ-AYI,Tork Eco W 2IQ-AYI Cloth Mop and Wipe workshop wipes 50pc multi surface,pack_count,50,50
+CLN-12FBNDLH,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0023_37ngu51n/CLN-12FBNDLH.json,Tork,Eco,W 2IQ-AYI,Tork Eco W 2IQ-AYI Cloth Mop and Wipe workshop wipes 50pc multi surface,surface,multi surface,
+CLN-12W2DLOR,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0022_24lhs0bq/CLN-12W2DLOR.json,Frosch,Eco,FRO 1DA-0E2,Frosch Eco FRO 1DA-0E2 Cloth Mop and Wipe microfiber cloth 2pc metal,cleaning_type,microfiber cloth,
+CLN-12W2DLOR,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0022_24lhs0bq/CLN-12W2DLOR.json,Frosch,Eco,FRO 1DA-0E2,Frosch Eco FRO 1DA-0E2 Cloth Mop and Wipe microfiber cloth 2pc metal,fragrance,citrus,
+CLN-12W2DLOR,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0022_24lhs0bq/CLN-12W2DLOR.json,Frosch,Eco,FRO 1DA-0E2,Frosch Eco FRO 1DA-0E2 Cloth Mop and Wipe microfiber cloth 2pc metal,pack_count,2,2
+CLN-12W2DLOR,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0022_24lhs0bq/CLN-12W2DLOR.json,Frosch,Eco,FRO 1DA-0E2,Frosch Eco FRO 1DA-0E2 Cloth Mop and Wipe microfiber cloth 2pc metal,surface,metal,
+CLN-13IMGCXU,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-13IMGCXU.json,Vileda,Pro,Easy 1XB-2OF,Vileda Pro Easy 1XB-2OF Cloth Mop and Wipe broom set 5pc multi surface,cleaning_type,broom set,
+CLN-13IMGCXU,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-13IMGCXU.json,Vileda,Pro,Easy 1XB-2OF,Vileda Pro Easy 1XB-2OF Cloth Mop and Wipe broom set 5pc multi surface,fragrance,none,
+CLN-13IMGCXU,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-13IMGCXU.json,Vileda,Pro,Easy 1XB-2OF,Vileda Pro Easy 1XB-2OF Cloth Mop and Wipe broom set 5pc multi surface,pack_count,5,5
+CLN-13IMGCXU,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-13IMGCXU.json,Vileda,Pro,Easy 1XB-2OF,Vileda Pro Easy 1XB-2OF Cloth Mop and Wipe broom set 5pc multi surface,surface,multi surface,
+CLN-13PK04XC,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0012_19qzo3ey/CLN-13PK04XC.json,Vileda,Universal,Easy 1M5-RFU,Vileda Universal Easy 1M5-RFU Cloth Mop and Wipe broom set 3pc plastic,cleaning_type,broom set,
+CLN-13PK04XC,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0012_19qzo3ey/CLN-13PK04XC.json,Vileda,Universal,Easy 1M5-RFU,Vileda Universal Easy 1M5-RFU Cloth Mop and Wipe broom set 3pc plastic,fragrance,fresh,
+CLN-13PK04XC,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0012_19qzo3ey/CLN-13PK04XC.json,Vileda,Universal,Easy 1M5-RFU,Vileda Universal Easy 1M5-RFU Cloth Mop and Wipe broom set 3pc plastic,pack_count,3,3
+CLN-13PK04XC,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0012_19qzo3ey/CLN-13PK04XC.json,Vileda,Universal,Easy 1M5-RFU,Vileda Universal Easy 1M5-RFU Cloth Mop and Wipe broom set 3pc plastic,surface,plastic,
+CLN-13RPMKRG,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0001_1nb1vn9l/CLN-13RPMKRG.json,Tork,Universal,M 2I4-MPL,Tork Universal M 2I4-MPL Cloth Mop and Wipe sponge 50pc glass,cleaning_type,sponge,
+CLN-13RPMKRG,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0001_1nb1vn9l/CLN-13RPMKRG.json,Tork,Universal,M 2I4-MPL,Tork Universal M 2I4-MPL Cloth Mop and Wipe sponge 50pc glass,fragrance,none,
+CLN-13RPMKRG,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0001_1nb1vn9l/CLN-13RPMKRG.json,Tork,Universal,M 2I4-MPL,Tork Universal M 2I4-MPL Cloth Mop and Wipe sponge 50pc glass,pack_count,50,50
+CLN-13RPMKRG,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0001_1nb1vn9l/CLN-13RPMKRG.json,Tork,Universal,M 2I4-MPL,Tork Universal M 2I4-MPL Cloth Mop and Wipe sponge 50pc glass,surface,glass,
+CLN-13UMEO7Y,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0016_3lorkmhu/CLN-13UMEO7Y.json,Leifheit,Profi,Clean 2MA-6XY,Leifheit Profi Clean 2MA-6XY Cloth Mop and Wipe microfiber cloth 100pc wood,cleaning_type,microfiber cloth,
+CLN-13UMEO7Y,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0016_3lorkmhu/CLN-13UMEO7Y.json,Leifheit,Profi,Clean 2MA-6XY,Leifheit Profi Clean 2MA-6XY Cloth Mop and Wipe microfiber cloth 100pc wood,fragrance,fresh,
+CLN-13UMEO7Y,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0016_3lorkmhu/CLN-13UMEO7Y.json,Leifheit,Profi,Clean 2MA-6XY,Leifheit Profi Clean 2MA-6XY Cloth Mop and Wipe microfiber cloth 100pc wood,pack_count,100,100
+CLN-13UMEO7Y,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0016_3lorkmhu/CLN-13UMEO7Y.json,Leifheit,Profi,Clean 2MA-6XY,Leifheit Profi Clean 2MA-6XY Cloth Mop and Wipe microfiber cloth 100pc wood,surface,wood,
+CLN-159AF10M,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0013_3pqaobx5/CLN-159AF10M.json,Tork,Pro,W E6H-UD5,Tork Pro W E6H-UD5 Cloth Mop and Wipe sponge 5pc plastic,cleaning_type,sponge,
+CLN-159AF10M,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0013_3pqaobx5/CLN-159AF10M.json,Tork,Pro,W E6H-UD5,Tork Pro W E6H-UD5 Cloth Mop and Wipe sponge 5pc plastic,fragrance,citrus,
+CLN-159AF10M,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0013_3pqaobx5/CLN-159AF10M.json,Tork,Pro,W E6H-UD5,Tork Pro W E6H-UD5 Cloth Mop and Wipe sponge 5pc plastic,pack_count,5,5
+CLN-159AF10M,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0013_3pqaobx5/CLN-159AF10M.json,Tork,Pro,W E6H-UD5,Tork Pro W E6H-UD5 Cloth Mop and Wipe sponge 5pc plastic,surface,plastic,
+CLN-15I81IAY,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0012_15w9i2gj/CLN-15I81IAY.json,Vileda,Concentrate,Turbo 212-TYB,Vileda Concentrate Turbo 212-TYB Cleaning Liquid drain cleaner 2500ml none,cleaner_type,drain cleaner,
+CLN-15I81IAY,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0012_15w9i2gj/CLN-15I81IAY.json,Vileda,Concentrate,Turbo 212-TYB,Vileda Concentrate Turbo 212-TYB Cleaning Liquid drain cleaner 2500ml none,concentrate,no,
+CLN-15I81IAY,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0012_15w9i2gj/CLN-15I81IAY.json,Vileda,Concentrate,Turbo 212-TYB,Vileda Concentrate Turbo 212-TYB Cleaning Liquid drain cleaner 2500ml none,fragrance,none,
+CLN-15I81IAY,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0012_15w9i2gj/CLN-15I81IAY.json,Vileda,Concentrate,Turbo 212-TYB,Vileda Concentrate Turbo 212-TYB Cleaning Liquid drain cleaner 2500ml none,surface,wood,
+CLN-15I81IAY,/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0012_15w9i2gj/CLN-15I81IAY.json,Vileda,Concentrate,Turbo 212-TYB,Vileda Concentrate Turbo 212-TYB Cleaning Liquid drain cleaner 2500ml none,volume_ml,2500,2500
+CLN-15SR9MD9,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0003_wh858yas/CLN-15SR9MD9.json,Leifheit,Profi,Profi C8L-G62,Leifheit Profi Profi C8L-G62 Cloth Mop and Wipe microfiber cloth 1pc metal,cleaning_type,microfiber cloth,
+CLN-15SR9MD9,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0003_wh858yas/CLN-15SR9MD9.json,Leifheit,Profi,Profi C8L-G62,Leifheit Profi Profi C8L-G62 Cloth Mop and Wipe microfiber cloth 1pc metal,fragrance,none,
+CLN-15SR9MD9,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0003_wh858yas/CLN-15SR9MD9.json,Leifheit,Profi,Profi C8L-G62,Leifheit Profi Profi C8L-G62 Cloth Mop and Wipe microfiber cloth 1pc metal,pack_count,1,1
+CLN-15SR9MD9,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0003_wh858yas/CLN-15SR9MD9.json,Leifheit,Profi,Profi C8L-G62,Leifheit Profi Profi C8L-G62 Cloth Mop and Wipe microfiber cloth 1pc metal,surface,metal,
+CLN-15VF8YBK,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0009_1tfvr81p/CLN-15VF8YBK.json,Vileda,Eco,Easy 2R1-KS3,Vileda Eco Easy 2R1-KS3 Cloth Mop and Wipe microfiber cloth 50pc glass,cleaning_type,microfiber cloth,
+CLN-15VF8YBK,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0009_1tfvr81p/CLN-15VF8YBK.json,Vileda,Eco,Easy 2R1-KS3,Vileda Eco Easy 2R1-KS3 Cloth Mop and Wipe microfiber cloth 50pc glass,fragrance,fresh,
+CLN-15VF8YBK,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0009_1tfvr81p/CLN-15VF8YBK.json,Vileda,Eco,Easy 2R1-KS3,Vileda Eco Easy 2R1-KS3 Cloth Mop and Wipe microfiber cloth 50pc glass,pack_count,50,50
+CLN-15VF8YBK,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0009_1tfvr81p/CLN-15VF8YBK.json,Vileda,Eco,Easy 2R1-KS3,Vileda Eco Easy 2R1-KS3 Cloth Mop and Wipe microfiber cloth 50pc glass,surface,glass,
+CLN-15Z7YHS8,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0019_15skvij4/CLN-15Z7YHS8.json,Frosch,Eco,Citrus 1Q6-OAB,Frosch Eco Citrus 1Q6-OAB Cloth Mop and Wipe sponge 50pc plastic,cleaning_type,sponge,
+CLN-15Z7YHS8,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0019_15skvij4/CLN-15Z7YHS8.json,Frosch,Eco,Citrus 1Q6-OAB,Frosch Eco Citrus 1Q6-OAB Cloth Mop and Wipe sponge 50pc plastic,fragrance,fresh,
+CLN-15Z7YHS8,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0019_15skvij4/CLN-15Z7YHS8.json,Frosch,Eco,Citrus 1Q6-OAB,Frosch Eco Citrus 1Q6-OAB Cloth Mop and Wipe sponge 50pc plastic,pack_count,50,50
+CLN-15Z7YHS8,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0019_15skvij4/CLN-15Z7YHS8.json,Frosch,Eco,Citrus 1Q6-OAB,Frosch Eco Citrus 1Q6-OAB Cloth Mop and Wipe sponge 50pc plastic,surface,plastic,
+CLN-16E2NUD1,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0018_3glmbb9s/CLN-16E2NUD1.json,Spontex,Fresh,Micro 1U2-MSL,Spontex Fresh Micro 1U2-MSL Cloth Mop and Wipe broom set 3pc multi surface,cleaning_type,broom set,
+CLN-16E2NUD1,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0018_3glmbb9s/CLN-16E2NUD1.json,Spontex,Fresh,Micro 1U2-MSL,Spontex Fresh Micro 1U2-MSL Cloth Mop and Wipe broom set 3pc multi surface,fragrance,none,
+CLN-16E2NUD1,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0018_3glmbb9s/CLN-16E2NUD1.json,Spontex,Fresh,Micro 1U2-MSL,Spontex Fresh Micro 1U2-MSL Cloth Mop and Wipe broom set 3pc multi surface,pack_count,3,3
+CLN-16E2NUD1,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0018_3glmbb9s/CLN-16E2NUD1.json,Spontex,Fresh,Micro 1U2-MSL,Spontex Fresh Micro 1U2-MSL Cloth Mop and Wipe broom set 3pc multi surface,surface,multi surface,
+CLN-17OI5OS1,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0007_3rggwfnz/CLN-17OI5OS1.json,Ajax,Universal,AJ 3BI-1X6,Ajax Universal AJ 3BI-1X6 Cloth Mop and Wipe workshop wipes 10pc stone,cleaning_type,workshop wipes,
+CLN-17OI5OS1,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0007_3rggwfnz/CLN-17OI5OS1.json,Ajax,Universal,AJ 3BI-1X6,Ajax Universal AJ 3BI-1X6 Cloth Mop and Wipe workshop wipes 10pc stone,fragrance,none,
+CLN-17OI5OS1,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0007_3rggwfnz/CLN-17OI5OS1.json,Ajax,Universal,AJ 3BI-1X6,Ajax Universal AJ 3BI-1X6 Cloth Mop and Wipe workshop wipes 10pc stone,pack_count,10,10
+CLN-17OI5OS1,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0007_3rggwfnz/CLN-17OI5OS1.json,Ajax,Universal,AJ 3BI-1X6,Ajax Universal AJ 3BI-1X6 Cloth Mop and Wipe workshop wipes 10pc stone,surface,stone,
+CLN-17OZI1AK,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0011_32smgfyz/CLN-17OZI1AK.json,Spontex,Microfibre,SPX 2AV-3TN,Spontex Microfibre SPX 2AV-3TN Cloth Mop and Wipe mop system 1pc multi surface,cleaning_type,mop system,
+CLN-17OZI1AK,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0011_32smgfyz/CLN-17OZI1AK.json,Spontex,Microfibre,SPX 2AV-3TN,Spontex Microfibre SPX 2AV-3TN Cloth Mop and Wipe mop system 1pc multi surface,fragrance,none,
+CLN-17OZI1AK,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0011_32smgfyz/CLN-17OZI1AK.json,Spontex,Microfibre,SPX 2AV-3TN,Spontex Microfibre SPX 2AV-3TN Cloth Mop and Wipe mop system 1pc multi surface,pack_count,1,1
+CLN-17OZI1AK,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0011_32smgfyz/CLN-17OZI1AK.json,Spontex,Microfibre,SPX 2AV-3TN,Spontex Microfibre SPX 2AV-3TN Cloth Mop and Wipe mop system 1pc multi surface,surface,multi surface,
+CLN-17Y8XWMV,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0021_3drc31i1/CLN-17Y8XWMV.json,Leifheit,Profi,Clean 82J-3JB,Leifheit Profi Clean 82J-3JB Cloth Mop and Wipe workshop wipes 50pc plastic,cleaning_type,workshop wipes,
+CLN-17Y8XWMV,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0021_3drc31i1/CLN-17Y8XWMV.json,Leifheit,Profi,Clean 82J-3JB,Leifheit Profi Clean 82J-3JB Cloth Mop and Wipe workshop wipes 50pc plastic,fragrance,none,
+CLN-17Y8XWMV,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0021_3drc31i1/CLN-17Y8XWMV.json,Leifheit,Profi,Clean 82J-3JB,Leifheit Profi Clean 82J-3JB Cloth Mop and Wipe workshop wipes 50pc plastic,pack_count,50,50
+CLN-17Y8XWMV,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0021_3drc31i1/CLN-17Y8XWMV.json,Leifheit,Profi,Clean 82J-3JB,Leifheit Profi Clean 82J-3JB Cloth Mop and Wipe workshop wipes 50pc plastic,surface,plastic,
+CLN-17YSJ6OG,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0001_1nb1vn9l/CLN-17YSJ6OG.json,Tork,Universal,M 2I4-MPL,Tork Universal M 2I4-MPL Cloth Mop and Wipe broom set 10pc stone,cleaning_type,broom set,
+CLN-17YSJ6OG,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0001_1nb1vn9l/CLN-17YSJ6OG.json,Tork,Universal,M 2I4-MPL,Tork Universal M 2I4-MPL Cloth Mop and Wipe broom set 10pc stone,fragrance,none,
+CLN-17YSJ6OG,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0001_1nb1vn9l/CLN-17YSJ6OG.json,Tork,Universal,M 2I4-MPL,Tork Universal M 2I4-MPL Cloth Mop and Wipe broom set 10pc stone,pack_count,10,10
+CLN-17YSJ6OG,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0001_1nb1vn9l/CLN-17YSJ6OG.json,Tork,Universal,M 2I4-MPL,Tork Universal M 2I4-MPL Cloth Mop and Wipe broom set 10pc stone,surface,stone,
+CLN-18AXSJOS,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0015_307ualmd/CLN-18AXSJOS.json,Tork,Wiping,W 2RU-ZDO,Tork Wiping W 2RU-ZDO Cloth Mop and Wipe microfiber cloth 1pc wood,cleaning_type,microfiber cloth,
+CLN-18AXSJOS,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0015_307ualmd/CLN-18AXSJOS.json,Tork,Wiping,W 2RU-ZDO,Tork Wiping W 2RU-ZDO Cloth Mop and Wipe microfiber cloth 1pc wood,fragrance,none,
+CLN-18AXSJOS,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0015_307ualmd/CLN-18AXSJOS.json,Tork,Wiping,W 2RU-ZDO,Tork Wiping W 2RU-ZDO Cloth Mop and Wipe microfiber cloth 1pc wood,pack_count,1,1
+CLN-18AXSJOS,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0015_307ualmd/CLN-18AXSJOS.json,Tork,Wiping,W 2RU-ZDO,Tork Wiping W 2RU-ZDO Cloth Mop and Wipe microfiber cloth 1pc wood,surface,wood,
+CLN-18SPJR0G,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0016_3lorkmhu/CLN-18SPJR0G.json,Leifheit,Profi,Clean 2MA-6XY,Leifheit Profi Clean 2MA-6XY Cloth Mop and Wipe broom set 100pc wood,cleaning_type,broom set,
+CLN-18SPJR0G,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0016_3lorkmhu/CLN-18SPJR0G.json,Leifheit,Profi,Clean 2MA-6XY,Leifheit Profi Clean 2MA-6XY Cloth Mop and Wipe broom set 100pc wood,fragrance,fresh,
+warning: result truncated at 100 rows
+Next step_2... Run a focused SQL query on brand/series/model/name to list candidate SKUs and property values for cleaning_type, pack_count, and surface. (17395 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path,\n       MAX(CASE WHEN pp.key='cleaning_type' THEN pp.value_text END) AS cleaning_type,\n       MAX(CASE WHEN pp.key='pack_count' THEN pp.value_text END) AS pack_count,\n       MAX(CASE WHEN pp.key='surface' THEN pp.value_text END) AS surface\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand='Vileda'\n  AND p.series='Pro'\n  AND p.model='Easy 1XB-2OF'\n  AND p.name LIKE '%Cloth Mop and Wipe%'\nGROUP BY p.sku, p.path\nORDER BY p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path,
+       MAX(CASE WHEN pp.key='cleaning_type' THEN pp.value_text END) AS cleaning_type,
+       MAX(CASE WHEN pp.key='pack_count' THEN pp.value_text END) AS pack_count,
+       MAX(CASE WHEN pp.key='surface' THEN pp.value_text END) AS surface
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand='Vileda'
+  AND p.series='Pro'
+  AND p.model='Easy 1XB-2OF'
+  AND p.name LIKE '%Cloth Mop and Wipe%'
+GROUP BY p.sku, p.path
+ORDER BY p.sku;
+SQL
+sku,path,cleaning_type,pack_count,surface
+CLN-13IMGCXU,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-13IMGCXU.json,broom set,5,multi surface
+CLN-1UJ9AK3Q,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-1UJ9AK3Q.json,sponge,1,glass
+CLN-2AUZYTB4,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-2AUZYTB4.json,mop system,5,multi surface
+CLN-2B3SN9IC,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-2B3SN9IC.json,workshop wipes,2,multi surface
+CLN-2BKW1J6G,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-2BKW1J6G.json,sponge,100,metal
+CLN-2O8FNCMV,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-2O8FNCMV.json,microfiber cloth,50,multi surface
+CLN-31NZSGQV,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-31NZSGQV.json,microfiber cloth,1,multi surface
+CLN-3DPSAW3R,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-3DPSAW3R.json,mop system,3,multi surface
+CLN-3JF5S0P6,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-3JF5S0P6.json,sponge,10,plastic
+CLN-3REMR8VE,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-3REMR8VE.json,broom set,1,glass
+CLN-9DG6MIV6,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-9DG6MIV6.json,workshop wipes,1,metal
+CLN-MCSJKHTK,/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-MCSJKHTK.json,broom set,5,glass
+Next step_3... Report completion with <NO> and include checked SKU. (19084 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Queried exact Vileda Pro Easy 1XB-2OF Cloth Mop and Wipe SKUs', 'Compared cleaning_type, pack_count, and surface against claimed variant', 'Confirmed claimed sponge/1/plastic variant is absent'] message='<NO> checked SKU: CLN-1UJ9AK3Q' grounding_refs=['/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-1UJ9AK3Q.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Queried exact Vileda Pro Easy 1XB-2OF Cloth Mop and Wipe SKUs
+- Compared cleaning_type, pack_count, and surface against claimed variant
+- Confirmed claimed sponge/1/plastic variant is absent
+
+[34mAGENT SUMMARY: <NO> checked SKU: CLN-1UJ9AK3Q[0m
+- [34m/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0002_35i49mzg/CLN-1UJ9AK3Q.json[0m

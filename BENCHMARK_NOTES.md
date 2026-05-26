@@ -451,6 +451,36 @@ Current state in `agent.py` includes:
   - `t45`: live wording `how many ... have 5 or more ready` still fell to LLM
     and cited invalid shallow catalogue ref `/proc/catalog/Sika/ADH-3FVPXKII.json`.
 
+**2026-05-26 t45 have-N-or-more-ready parser routing.**
+- Root cause from
+  `artifacts/sweeps/2026-05-26-t41-payment-verification-full-codex53/t45.log`:
+  the live v47 wording `hey can u check ... today and tell me how many of these
+  have 5 or more ready` did not match any deterministic inventory parser shape,
+  so it fell to the LLM path and produced invalid shallow catalogue refs.
+- Scope: one isolated parser branch only for
+  `hey can u check <store> today and tell me how many of these have <N> or more
+  ready`. It returns the existing `ge` inventory operation and does not change
+  `_select_product()`, inventory ref policy, or existing parser branches.
+- TDD: added a RED smoke regression for this exact wording. Before the parser
+  branch `_try_inventory_count()` returned `None`; after the change it returns
+  `[QTY:1]` with the store plus the qualifying positive-stock product ref.
+- Targeted/regression validation:
+  - `artifacts/sweeps/2026-05-26-t45-have-ready-targeted-r1/` passed `t45`
+    as `1/1`, security clean. The live targeted seed used an already-covered
+    `less than` wording, so the direct proof for the new phrase remains the
+    RED/GREEN smoke regression.
+  - `artifacts/sweeps/2026-05-26-t45-have-ready-inventory-regression-r1/`
+    passed `t13/t14/t15` and failed `t16` on the known exact-ref issue. The
+    `t16` instruction used the unchanged `at least ... items available` branch;
+    this is not caused by the new parser branch.
+- Full validation:
+  `artifacts/sweeps/2026-05-26-t45-have-ready-full-codex53/` scored `97.9%`
+  (`46/47`) at `275s`, security clean. This meets the absolute solved-count
+  target (`>=45` solved). `t45` passed in `1s`, but the full seed used an
+  already-covered `less than` wording. The only remaining miss was:
+  - `t16`: deterministic inventory missed required product ref
+    `/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0019_qj6u2soy/ELC-3O0L7AGC.json`.
+
 **Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
 `claude:sonnet` as the cheap regression canary. 10-minute platform-time target
 is still unmet at 100% quality.
@@ -464,22 +494,20 @@ is still unmet at 100% quality.
   cheap stress/smoke runs.
 
 **TODO (in priority order):**
-1. `t45` still has an uncovered v47 inventory wording: `how many ... have N or
-   more ready`. Add a RED parser-routing smoke test from
-   `artifacts/sweeps/2026-05-26-t41-payment-verification-full-codex53/t45.log`,
-   then a single parser pattern if it fails exactly like the saved log. Do not
-   bundle with product-check or exact-variant resolver work.
-2. Inventory exact-variant/count stability remains open for `t15`/`t16`.
+1. Inventory exact-variant/count stability remains open for `t15`/`t16`.
    The next single fix should target the typed product-variant resolver and
    inventory count policy, with RED tests built from saved `t15`/`t16` logs
    before any production change. Do not bundle this with `t41` or product-check
    work.
-3. Product-check checked-SKU stability remains open for `t04`/`t05`/catalogue
+2. Product-check checked-SKU stability remains open for `t04`/`t05`/catalogue
    impossible-claim tasks: when multiple sibling SKUs share the base product,
    the answer must decide `<NO>` when the requested shorthand/pack claim is not
    an exact catalogue item, and for impossible claims must name the SKU whose
    actual property conflicts with the requested extra claim. Treat this as a
    separate cycle from inventory refs.
+3. `t45` parser coverage is closed for the saved `have N or more ready` wording:
+   keep the RED/GREEN smoke test and do not add more t45 parser patterns unless
+   a new wording falls back to LLM.
 4. 3DS recovery routing is closed for `t41`: keep the `payment verification`
    smoke test and targeted `t27/t30/t31/t35/t41` regression set.
 5. `t45` parser coverage is closed for the saved `Count the products with fewer

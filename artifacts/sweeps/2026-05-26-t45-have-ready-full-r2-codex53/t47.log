@@ -1,0 +1,466 @@
+TASK t47 (model codex:gpt-5.3-codex)
+INSTRUCTION: I'm preparing a quote for a customer from this pasted product list. Check each row against our exact catalogue and my store's same-day availability.
+
+Input format:
+RowID	description	quantity
+
+Return exactly this tab-separated output table, including the header, with rows in the same order:
+RowID	SKU	in_stock	match
+
+If the description is not an exact catalogue product, leave SKU and in_stock empty and set match=false. If the product exists, set in_stock to the quantity available today in my store. match is true only when the exact product exists and in_stock is at least the requested quantity.
+
+Rows:
+TCM8r	the Cleaning Liquid from Mellerud in the Mellerud Bio MEL 233-MOB Cleaning Liquid line that has cleaner type interior cleaner	10
+W4cUt	the Automotive Cleaner from Sonax in the Sonax Workshop XTREME 218-FC5 Automotive Cleaner line that has cleaner type polish	4
+aE5K6	the Work Jacket from Mascot in the Mascot Advanced ACC 35W-IIS Work Jacket line that has color family Blue and has color family purple	2
+6wHVg	the Engine Oil from Mobil in the Mobil All Season Super 1ZE-TCR Engine Oil line that has volume 5000 ml and viscosity 15W-40	3
+h1wZK	the Wiper Blade from Sonax in the Sonax Premium Gloss 304-ZK0 Wiper Blade line that has length 500 mm	3
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2025-10-08T16:53:18Z
+[32mAUTO[0m: /bin/id
+user: emp_021
+roles: employee, store_manager, discount_manager, refund_manager, inventory_viewer, fulfillment_viewer, customer_service
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query SQL to map all candidate products and required properties for the five rows. (32778 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH actor_store AS (\n  SELECT e.store_id\n  FROM employees e\n  WHERE e.id = 'emp_021'\n),\nreq(row_id, brand, series, model, name, qty, p1k, p1t, p1n, p2k, p2t, p2n) AS (\n  VALUES\n    ('TCM8r','Mellerud','Bio','MEL 233-MOB','Cleaning Liquid',10,'cleaner_type','interior cleaner',NULL,NULL,NULL,NULL),\n    ('W4cUt','Sonax','Workshop','XTREME 218-FC5','Automotive Cleaner',4,'cleaner_type','polish',NULL,NULL,NULL,NULL),\n    ('aE5K6','Mascot','Advanced','ACC 35W-IIS','Work Jacket',2,'color_family','Blue',NULL,'color_family','purple',NULL),\n    ('6wHVg','Mobil','All Season','Super 1ZE-TCR','Engine Oil',3,'volume_ml',NULL,5000,'viscosity','15W-40',NULL),\n    ('h1wZK','Sonax','Premium','Gloss 304-ZK0','Wiper Blade',3,'length_mm',NULL,500,NULL,NULL,NULL)\n),\nbase AS (\n  SELECT r.*, p.sku, p.path\n  FROM req r\n  LEFT JOIN products p\n    ON p.brand = r.brand\n   AND p.series = r.series\n   AND p.model = r.model\n   AND p.name = r.name\n),\nprop_ok AS (\n  SELECT b.row_id, b.sku,\n         CASE\n           WHEN b.sku IS NULL THEN 0\n           WHEN b.p1k IS NULL THEN 1\n           WHEN b.p1t IS NOT NULL THEN EXISTS (\n             SELECT 1 FROM product_properties pp\n             WHERE pp.sku=b.sku AND pp.key=b.p1k AND lower(pp.value_text)=lower(b.p1t)\n           )\n           ELSE EXISTS (\n             SELECT 1 FROM product_properties pp\n             WHERE pp.sku=b.sku AND pp.key=b.p1k AND pp.value_number=b.p1n\n           )\n         END AS p1_ok,\n         CASE\n           WHEN b.p2k IS NULL THEN 1\n           WHEN b.p2t IS NOT NULL THEN EXISTS (\n             SELECT 1 FROM product_properties pp\n             WHERE pp.sku=b.sku AND pp.key=b.p2k AND lower(pp.value_text)=lower(b.p2t)\n           )\n           ELSE EXISTS (\n             SELECT 1 FROM product_properties pp\n             WHERE pp.sku=b.sku AND pp.key=b.p2k AND pp.value_number=b.p2n\n           )\n         END AS p2_ok\n  FROM base b\n),\nqualified AS (\n  SELECT b.row_id, b.qty, b.sku, b.path\n  FROM base b\n  JOIN prop_ok po ON po.row_id=b.row_id AND po.sku=b.sku\n  WHERE po.p1_ok=1 AND po.p2_ok=1\n),\nunique_match AS (\n  SELECT q.row_id,\n         CASE WHEN COUNT(*)=1 THEN MAX(q.sku) END AS sku\n  FROM qualified q\n  GROUP BY q.row_id\n)\nSELECT r.row_id,\n       um.sku,\n       CASE WHEN um.sku IS NOT NULL THEN COALESCE(i.available_today,0) END AS in_stock,\n       CASE WHEN um.sku IS NOT NULL AND COALESCE(i.available_today,0) >= r.qty THEN 1 ELSE 0 END AS match\nFROM req r\nLEFT JOIN unique_match um ON um.row_id=r.row_id\nLEFT JOIN actor_store s ON 1=1\nLEFT JOIN inventory i ON i.store_id=s.store_id AND i.sku=um.sku\nORDER BY CASE r.row_id\n  WHEN 'TCM8r' THEN 1\n  WHEN 'W4cUt' THEN 2\n  WHEN 'aE5K6' THEN 3\n  WHEN '6wHVg' THEN 4\n  WHEN 'h1wZK' THEN 5\n  ELSE 999 END;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH actor_store AS (
+  SELECT e.store_id
+  FROM employees e
+  WHERE e.id = 'emp_021'
+),
+req(row_id, brand, series, model, name, qty, p1k, p1t, p1n, p2k, p2t, p2n) AS (
+  VALUES
+    ('TCM8r','Mellerud','Bio','MEL 233-MOB','Cleaning Liquid',10,'cleaner_type','interior cleaner',NULL,NULL,NULL,NULL),
+    ('W4cUt','Sonax','Workshop','XTREME 218-FC5','Automotive Cleaner',4,'cleaner_type','polish',NULL,NULL,NULL,NULL),
+    ('aE5K6','Mascot','Advanced','ACC 35W-IIS','Work Jacket',2,'color_family','Blue',NULL,'color_family','purple',NULL),
+    ('6wHVg','Mobil','All Season','Super 1ZE-TCR','Engine Oil',3,'volume_ml',NULL,5000,'viscosity','15W-40',NULL),
+    ('h1wZK','Sonax','Premium','Gloss 304-ZK0','Wiper Blade',3,'length_mm',NULL,500,NULL,NULL,NULL)
+),
+base AS (
+  SELECT r.*, p.sku, p.path
+  FROM req r
+  LEFT JOIN products p
+    ON p.brand = r.brand
+   AND p.series = r.series
+   AND p.model = r.model
+   AND p.name = r.name
+),
+prop_ok AS (
+  SELECT b.row_id, b.sku,
+         CASE
+           WHEN b.sku IS NULL THEN 0
+           WHEN b.p1k IS NULL THEN 1
+           WHEN b.p1t IS NOT NULL THEN EXISTS (
+             SELECT 1 FROM product_properties pp
+             WHERE pp.sku=b.sku AND pp.key=b.p1k AND lower(pp.value_text)=lower(b.p1t)
+           )
+           ELSE EXISTS (
+             SELECT 1 FROM product_properties pp
+             WHERE pp.sku=b.sku AND pp.key=b.p1k AND pp.value_number=b.p1n
+           )
+         END AS p1_ok,
+         CASE
+           WHEN b.p2k IS NULL THEN 1
+           WHEN b.p2t IS NOT NULL THEN EXISTS (
+             SELECT 1 FROM product_properties pp
+             WHERE pp.sku=b.sku AND pp.key=b.p2k AND lower(pp.value_text)=lower(b.p2t)
+           )
+           ELSE EXISTS (
+             SELECT 1 FROM product_properties pp
+             WHERE pp.sku=b.sku AND pp.key=b.p2k AND pp.value_number=b.p2n
+           )
+         END AS p2_ok
+  FROM base b
+),
+qualified AS (
+  SELECT b.row_id, b.qty, b.sku, b.path
+  FROM base b
+  JOIN prop_ok po ON po.row_id=b.row_id AND po.sku=b.sku
+  WHERE po.p1_ok=1 AND po.p2_ok=1
+),
+unique_match AS (
+  SELECT q.row_id,
+         CASE WHEN COUNT(*)=1 THEN MAX(q.sku) END AS sku
+  FROM qualified q
+  GROUP BY q.row_id
+)
+SELECT r.row_id,
+       um.sku,
+       CASE WHEN um.sku IS NOT NULL THEN COALESCE(i.available_today,0) END AS in_stock,
+       CASE WHEN um.sku IS NOT NULL AND COALESCE(i.available_today,0) >= r.qty THEN 1 ELSE 0 END AS match
+FROM req r
+LEFT JOIN unique_match um ON um.row_id=r.row_id
+LEFT JOIN actor_store s ON 1=1
+LEFT JOIN inventory i ON i.store_id=s.store_id AND i.sku=um.sku
+ORDER BY CASE r.row_id
+  WHEN 'TCM8r' THEN 1
+  WHEN 'W4cUt' THEN 2
+  WHEN 'aE5K6' THEN 3
+  WHEN '6wHVg' THEN 4
+  WHEN 'h1wZK' THEN 5
+  ELSE 999 END;
+SQL
+row_id,sku,in_stock,match
+TCM8r,,,0
+W4cUt,,,0
+aE5K6,,,0
+6wHVg,,,0
+h1wZK,,,0
+Next step_2... Run a broad SQL discovery query for candidate products and their properties for Mellerud/Sonax/Mascot/Mobil and relevant names. (16437 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH req(row_id, brand, target_name) AS (\n  VALUES\n    ('TCM8r','Mellerud','Cleaning Liquid'),\n    ('W4cUt','Sonax','Automotive Cleaner'),\n    ('aE5K6','Mascot','Work Jacket'),\n    ('6wHVg','Mobil','Engine Oil'),\n    ('h1wZK','Sonax','Wiper Blade')\n)\nSELECT r.row_id,\n       p.sku,\n       p.path,\n       p.brand,\n       p.series,\n       p.model,\n       p.name,\n       pp.key,\n       pp.value_text,\n       pp.value_number\nFROM req r\nJOIN products p\n  ON lower(p.brand)=lower(r.brand)\n AND lower(p.name)=lower(r.target_name)\nLEFT JOIN product_properties pp\n  ON pp.sku=p.sku\nORDER BY r.row_id, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH req(row_id, brand, target_name) AS (
+  VALUES
+    ('TCM8r','Mellerud','Cleaning Liquid'),
+    ('W4cUt','Sonax','Automotive Cleaner'),
+    ('aE5K6','Mascot','Work Jacket'),
+    ('6wHVg','Mobil','Engine Oil'),
+    ('h1wZK','Sonax','Wiper Blade')
+)
+SELECT r.row_id,
+       p.sku,
+       p.path,
+       p.brand,
+       p.series,
+       p.model,
+       p.name,
+       pp.key,
+       pp.value_text,
+       pp.value_number
+FROM req r
+JOIN products p
+  ON lower(p.brand)=lower(r.brand)
+ AND lower(p.name)=lower(r.target_name)
+LEFT JOIN product_properties pp
+  ON pp.sku=p.sku
+ORDER BY r.row_id, p.sku, pp.key;
+SQL
+row_id,sku,path,brand,series,model,name,key,value_text,value_number
+Next step_3... Query distinct products for brands Mellerud/Sonax/Mascot/Mobil to discover real names/series/models. (15814 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH brands(brand) AS (\n  VALUES ('Mellerud'),('Sonax'),('Mascot'),('Mobil')\n)\nSELECT p.brand,\n       p.name,\n       p.series,\n       p.model,\n       p.sku,\n       p.path,\n       pp.key,\n       pp.value_text,\n       pp.value_number\nFROM products p\nJOIN brands b ON lower(p.brand)=lower(b.brand)\nLEFT JOIN product_properties pp ON pp.sku=p.sku\nORDER BY p.brand, p.name, p.series, p.model, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH brands(brand) AS (
+  VALUES ('Mellerud'),('Sonax'),('Mascot'),('Mobil')
+)
+SELECT p.brand,
+       p.name,
+       p.series,
+       p.model,
+       p.sku,
+       p.path,
+       pp.key,
+       pp.value_text,
+       pp.value_number
+FROM products p
+JOIN brands b ON lower(p.brand)=lower(b.brand)
+LEFT JOIN product_properties pp ON pp.sku=p.sku
+ORDER BY p.brand, p.name, p.series, p.model, p.sku, pp.key;
+SQL
+brand,name,series,model,sku,path,key,value_text,value_number
+Mascot,Mascot Advanced ACC 35W-IIS Work Jacket Black S waterproof,Advanced,ACC 35W-IIS,WRK-3QX06WWQ,/proc/catalog/Mascot/WRK-3QX06WWQ.json,color_family,black,
+Mascot,Mascot Advanced ACC 35W-IIS Work Jacket Black S waterproof,Advanced,ACC 35W-IIS,WRK-3QX06WWQ,/proc/catalog/Mascot/WRK-3QX06WWQ.json,fabric_weight_gsm,300,300
+Mascot,Mascot Advanced ACC 35W-IIS Work Jacket Black S waterproof,Advanced,ACC 35W-IIS,WRK-3QX06WWQ,/proc/catalog/Mascot/WRK-3QX06WWQ.json,fit,regular,
+Mascot,Mascot Advanced ACC 35W-IIS Work Jacket Black S waterproof,Advanced,ACC 35W-IIS,WRK-3QX06WWQ,/proc/catalog/Mascot/WRK-3QX06WWQ.json,size,S,
+Mascot,Mascot Advanced ACC 35W-IIS Work Jacket Black S waterproof,Advanced,ACC 35W-IIS,WRK-3QX06WWQ,/proc/catalog/Mascot/WRK-3QX06WWQ.json,weather_rating,waterproof,
+Mascot,Mascot Advanced ACC 35W-IIS Work Jacket Blue XL waterproof,Advanced,ACC 35W-IIS,WRK-1A7JZ7P3,/proc/catalog/Mascot/WRK-1A7JZ7P3.json,color_family,blue,
+Mascot,Mascot Advanced ACC 35W-IIS Work Jacket Blue XL waterproof,Advanced,ACC 35W-IIS,WRK-1A7JZ7P3,/proc/catalog/Mascot/WRK-1A7JZ7P3.json,fabric_weight_gsm,300,300
+Mascot,Mascot Advanced ACC 35W-IIS Work Jacket Blue XL waterproof,Advanced,ACC 35W-IIS,WRK-1A7JZ7P3,/proc/catalog/Mascot/WRK-1A7JZ7P3.json,fit,slim,
+Mascot,Mascot Advanced ACC 35W-IIS Work Jacket Blue XL waterproof,Advanced,ACC 35W-IIS,WRK-1A7JZ7P3,/proc/catalog/Mascot/WRK-1A7JZ7P3.json,size,XL,
+Mascot,Mascot Advanced ACC 35W-IIS Work Jacket Blue XL waterproof,Advanced,ACC 35W-IIS,WRK-1A7JZ7P3,/proc/catalog/Mascot/WRK-1A7JZ7P3.json,weather_rating,waterproof,
+Mascot,Mascot Advanced ACC 35W-IIS Work Jacket Purple S waterproof,Advanced,ACC 35W-IIS,WRK-3JV3G2YY,/proc/catalog/Mascot/WRK-3JV3G2YY.json,color_family,purple,
+Mascot,Mascot Advanced ACC 35W-IIS Work Jacket Purple S waterproof,Advanced,ACC 35W-IIS,WRK-3JV3G2YY,/proc/catalog/Mascot/WRK-3JV3G2YY.json,fabric_weight_gsm,300,300
+Mascot,Mascot Advanced ACC 35W-IIS Work Jacket Purple S waterproof,Advanced,ACC 35W-IIS,WRK-3JV3G2YY,/proc/catalog/Mascot/WRK-3JV3G2YY.json,fit,unisex,
+Mascot,Mascot Advanced ACC 35W-IIS Work Jacket Purple S waterproof,Advanced,ACC 35W-IIS,WRK-3JV3G2YY,/proc/catalog/Mascot/WRK-3JV3G2YY.json,size,S,
+Mascot,Mascot Advanced ACC 35W-IIS Work Jacket Purple S waterproof,Advanced,ACC 35W-IIS,WRK-3JV3G2YY,/proc/catalog/Mascot/WRK-3JV3G2YY.json,weather_rating,waterproof,
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid degreaser 500ml citrus,Bio,MEL 233-MOB,CLN-3Q19VP4J,/proc/catalog/Mellerud/CLN-3Q19VP4J.json,cleaner_type,degreaser,
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid degreaser 500ml citrus,Bio,MEL 233-MOB,CLN-3Q19VP4J,/proc/catalog/Mellerud/CLN-3Q19VP4J.json,concentrate,no,
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid degreaser 500ml citrus,Bio,MEL 233-MOB,CLN-3Q19VP4J,/proc/catalog/Mellerud/CLN-3Q19VP4J.json,fragrance,citrus,
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid degreaser 500ml citrus,Bio,MEL 233-MOB,CLN-3Q19VP4J,/proc/catalog/Mellerud/CLN-3Q19VP4J.json,surface,glass,
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid degreaser 500ml citrus,Bio,MEL 233-MOB,CLN-3Q19VP4J,/proc/catalog/Mellerud/CLN-3Q19VP4J.json,volume_ml,500,500
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid floor cleaner 1000ml fresh,Bio,MEL 233-MOB,CLN-15KJ3KVR,/proc/catalog/Mellerud/CLN-15KJ3KVR.json,cleaner_type,floor cleaner,
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid floor cleaner 1000ml fresh,Bio,MEL 233-MOB,CLN-15KJ3KVR,/proc/catalog/Mellerud/CLN-15KJ3KVR.json,concentrate,no,
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid floor cleaner 1000ml fresh,Bio,MEL 233-MOB,CLN-15KJ3KVR,/proc/catalog/Mellerud/CLN-15KJ3KVR.json,fragrance,fresh,
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid floor cleaner 1000ml fresh,Bio,MEL 233-MOB,CLN-15KJ3KVR,/proc/catalog/Mellerud/CLN-15KJ3KVR.json,surface,glass,
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid floor cleaner 1000ml fresh,Bio,MEL 233-MOB,CLN-15KJ3KVR,/proc/catalog/Mellerud/CLN-15KJ3KVR.json,volume_ml,1000,1000
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid interior cleaner 5000ml citrus,Bio,MEL 233-MOB,CLN-3AIT54S2,/proc/catalog/Mellerud/CLN-3AIT54S2.json,cleaner_type,interior cleaner,
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid interior cleaner 5000ml citrus,Bio,MEL 233-MOB,CLN-3AIT54S2,/proc/catalog/Mellerud/CLN-3AIT54S2.json,concentrate,no,
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid interior cleaner 5000ml citrus,Bio,MEL 233-MOB,CLN-3AIT54S2,/proc/catalog/Mellerud/CLN-3AIT54S2.json,fragrance,citrus,
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid interior cleaner 5000ml citrus,Bio,MEL 233-MOB,CLN-3AIT54S2,/proc/catalog/Mellerud/CLN-3AIT54S2.json,surface,drains,
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid interior cleaner 5000ml citrus,Bio,MEL 233-MOB,CLN-3AIT54S2,/proc/catalog/Mellerud/CLN-3AIT54S2.json,volume_ml,5000,5000
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid multi surface cleaner 5000ml none,Bio,MEL 233-MOB,CLN-G49YK0ZE,/proc/catalog/Mellerud/CLN-G49YK0ZE.json,cleaner_type,multi surface cleaner,
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid multi surface cleaner 5000ml none,Bio,MEL 233-MOB,CLN-G49YK0ZE,/proc/catalog/Mellerud/CLN-G49YK0ZE.json,concentrate,no,
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid multi surface cleaner 5000ml none,Bio,MEL 233-MOB,CLN-G49YK0ZE,/proc/catalog/Mellerud/CLN-G49YK0ZE.json,fragrance,none,
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid multi surface cleaner 5000ml none,Bio,MEL 233-MOB,CLN-G49YK0ZE,/proc/catalog/Mellerud/CLN-G49YK0ZE.json,surface,multi surface,
+Mellerud,Mellerud Bio MEL 233-MOB Cleaning Liquid multi surface cleaner 5000ml none,Bio,MEL 233-MOB,CLN-G49YK0ZE,/proc/catalog/Mellerud/CLN-G49YK0ZE.json,volume_ml,5000,5000
+Mobil,Mobil All Season Super 1ZE-TCR Engine Oil 10W-40 1000ml universal,All Season,Super 1ZE-TCR,AUT-3Q0TOB17,/proc/catalog/Mobil/AUT-3Q0TOB17.json,season,summer,
+Mobil,Mobil All Season Super 1ZE-TCR Engine Oil 10W-40 1000ml universal,All Season,Super 1ZE-TCR,AUT-3Q0TOB17,/proc/catalog/Mobil/AUT-3Q0TOB17.json,vehicle_type,universal,
+Mobil,Mobil All Season Super 1ZE-TCR Engine Oil 10W-40 1000ml universal,All Season,Super 1ZE-TCR,AUT-3Q0TOB17,/proc/catalog/Mobil/AUT-3Q0TOB17.json,viscosity,10W-40,
+Mobil,Mobil All Season Super 1ZE-TCR Engine Oil 10W-40 1000ml universal,All Season,Super 1ZE-TCR,AUT-3Q0TOB17,/proc/catalog/Mobil/AUT-3Q0TOB17.json,volume_ml,1000,1000
+Mobil,Mobil All Season Super 1ZE-TCR Engine Oil 10W-40 5000ml truck,All Season,Super 1ZE-TCR,AUT-142031HX,/proc/catalog/Mobil/AUT-142031HX.json,season,summer,
+Mobil,Mobil All Season Super 1ZE-TCR Engine Oil 10W-40 5000ml truck,All Season,Super 1ZE-TCR,AUT-142031HX,/proc/catalog/Mobil/AUT-142031HX.json,vehicle_type,truck,
+Mobil,Mobil All Season Super 1ZE-TCR Engine Oil 10W-40 5000ml truck,All Season,Super 1ZE-TCR,AUT-142031HX,/proc/catalog/Mobil/AUT-142031HX.json,viscosity,10W-40,
+Mobil,Mobil All Season Super 1ZE-TCR Engine Oil 10W-40 5000ml truck,All Season,Super 1ZE-TCR,AUT-142031HX,/proc/catalog/Mobil/AUT-142031HX.json,volume_ml,5000,5000
+Mobil,Mobil All Season Super 1ZE-TCR Engine Oil 15W-40 5000ml car,All Season,Super 1ZE-TCR,AUT-3TE8KXP4,/proc/catalog/Mobil/AUT-3TE8KXP4.json,season,summer,
+Mobil,Mobil All Season Super 1ZE-TCR Engine Oil 15W-40 5000ml car,All Season,Super 1ZE-TCR,AUT-3TE8KXP4,/proc/catalog/Mobil/AUT-3TE8KXP4.json,vehicle_type,car,
+Mobil,Mobil All Season Super 1ZE-TCR Engine Oil 15W-40 5000ml car,All Season,Super 1ZE-TCR,AUT-3TE8KXP4,/proc/catalog/Mobil/AUT-3TE8KXP4.json,viscosity,15W-40,
+Mobil,Mobil All Season Super 1ZE-TCR Engine Oil 15W-40 5000ml car,All Season,Super 1ZE-TCR,AUT-3TE8KXP4,/proc/catalog/Mobil/AUT-3TE8KXP4.json,volume_ml,5000,5000
+Sonax,Sonax Premium Gloss 304-ZK0 Wiper Blade 450mm side lock all season,Premium,Gloss 304-ZK0,AUT-3UP372ID,/proc/catalog/Sonax/AUT-3UP372ID.json,adapter_type,side lock,
+Sonax,Sonax Premium Gloss 304-ZK0 Wiper Blade 450mm side lock all season,Premium,Gloss 304-ZK0,AUT-3UP372ID,/proc/catalog/Sonax/AUT-3UP372ID.json,length_mm,450,450
+Sonax,Sonax Premium Gloss 304-ZK0 Wiper Blade 450mm side lock all season,Premium,Gloss 304-ZK0,AUT-3UP372ID,/proc/catalog/Sonax/AUT-3UP372ID.json,season,all season,
+Sonax,Sonax Premium Gloss 304-ZK0 Wiper Blade 450mm side lock all season,Premium,Gloss 304-ZK0,AUT-3UP372ID,/proc/catalog/Sonax/AUT-3UP372ID.json,vehicle_type,car,
+Sonax,Sonax Premium Gloss 304-ZK0 Wiper Blade 500mm hook all season,Premium,Gloss 304-ZK0,AUT-EFU34IM8,/proc/catalog/Sonax/AUT-EFU34IM8.json,adapter_type,hook,
+Sonax,Sonax Premium Gloss 304-ZK0 Wiper Blade 500mm hook all season,Premium,Gloss 304-ZK0,AUT-EFU34IM8,/proc/catalog/Sonax/AUT-EFU34IM8.json,length_mm,500,500
+Sonax,Sonax Premium Gloss 304-ZK0 Wiper Blade 500mm hook all season,Premium,Gloss 304-ZK0,AUT-EFU34IM8,/proc/catalog/Sonax/AUT-EFU34IM8.json,season,all season,
+Sonax,Sonax Premium Gloss 304-ZK0 Wiper Blade 500mm hook all season,Premium,Gloss 304-ZK0,AUT-EFU34IM8,/proc/catalog/Sonax/AUT-EFU34IM8.json,vehicle_type,universal,
+Sonax,Sonax Premium Gloss 304-ZK0 Wiper Blade 650mm bayonet all season,Premium,Gloss 304-ZK0,AUT-160WP2PB,/proc/catalog/Sonax/AUT-160WP2PB.json,adapter_type,bayonet,
+Sonax,Sonax Premium Gloss 304-ZK0 Wiper Blade 650mm bayonet all season,Premium,Gloss 304-ZK0,AUT-160WP2PB,/proc/catalog/Sonax/AUT-160WP2PB.json,length_mm,650,650
+Sonax,Sonax Premium Gloss 304-ZK0 Wiper Blade 650mm bayonet all season,Premium,Gloss 304-ZK0,AUT-160WP2PB,/proc/catalog/Sonax/AUT-160WP2PB.json,season,all season,
+Sonax,Sonax Premium Gloss 304-ZK0 Wiper Blade 650mm bayonet all season,Premium,Gloss 304-ZK0,AUT-160WP2PB,/proc/catalog/Sonax/AUT-160WP2PB.json,vehicle_type,car,
+Sonax,Sonax Workshop XTREME 218-FC5 Automotive Cleaner interior cleaner 4000ml all season,Workshop,XTREME 218-FC5,AUT-3M4PQR2Y,/proc/catalog/Sonax/AUT-3M4PQR2Y.json,cleaner_type,interior cleaner,
+Sonax,Sonax Workshop XTREME 218-FC5 Automotive Cleaner interior cleaner 4000ml all season,Workshop,XTREME 218-FC5,AUT-3M4PQR2Y,/proc/catalog/Sonax/AUT-3M4PQR2Y.json,season,all season,
+Sonax,Sonax Workshop XTREME 218-FC5 Automotive Cleaner interior cleaner 4000ml all season,Workshop,XTREME 218-FC5,AUT-3M4PQR2Y,/proc/catalog/Sonax/AUT-3M4PQR2Y.json,vehicle_type,universal,
+Sonax,Sonax Workshop XTREME 218-FC5 Automotive Cleaner interior cleaner 4000ml all season,Workshop,XTREME 218-FC5,AUT-3M4PQR2Y,/proc/catalog/Sonax/AUT-3M4PQR2Y.json,volume_ml,4000,4000
+Sonax,Sonax Workshop XTREME 218-FC5 Automotive Cleaner polish 5000ml all season,Workshop,XTREME 218-FC5,AUT-3GTNI5W7,/proc/catalog/Sonax/AUT-3GTNI5W7.json,cleaner_type,polish,
+Sonax,Sonax Workshop XTREME 218-FC5 Automotive Cleaner polish 5000ml all season,Workshop,XTREME 218-FC5,AUT-3GTNI5W7,/proc/catalog/Sonax/AUT-3GTNI5W7.json,season,all season,
+Sonax,Sonax Workshop XTREME 218-FC5 Automotive Cleaner polish 5000ml all season,Workshop,XTREME 218-FC5,AUT-3GTNI5W7,/proc/catalog/Sonax/AUT-3GTNI5W7.json,vehicle_type,car,
+Sonax,Sonax Workshop XTREME 218-FC5 Automotive Cleaner polish 5000ml all season,Workshop,XTREME 218-FC5,AUT-3GTNI5W7,/proc/catalog/Sonax/AUT-3GTNI5W7.json,volume_ml,5000,5000
+Sonax,Sonax Workshop XTREME 218-FC5 Automotive Cleaner screen wash 5000ml all season,Workshop,XTREME 218-FC5,AUT-2LHXWOM4,/proc/catalog/Sonax/AUT-2LHXWOM4.json,cleaner_type,screen wash,
+Sonax,Sonax Workshop XTREME 218-FC5 Automotive Cleaner screen wash 5000ml all season,Workshop,XTREME 218-FC5,AUT-2LHXWOM4,/proc/catalog/Sonax/AUT-2LHXWOM4.json,season,all season,
+Sonax,Sonax Workshop XTREME 218-FC5 Automotive Cleaner screen wash 5000ml all season,Workshop,XTREME 218-FC5,AUT-2LHXWOM4,/proc/catalog/Sonax/AUT-2LHXWOM4.json,vehicle_type,van,
+Sonax,Sonax Workshop XTREME 218-FC5 Automotive Cleaner screen wash 5000ml all season,Workshop,XTREME 218-FC5,AUT-2LHXWOM4,/proc/catalog/Sonax/AUT-2LHXWOM4.json,volume_ml,5000,5000

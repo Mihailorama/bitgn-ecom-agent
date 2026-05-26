@@ -700,6 +700,27 @@ def test_inventory_solver_handles_count_products_fewer_units_from_list_shape():
     print("ok: inventory solver handles count-products fewer-units from-list prompts")
 
 
+def test_inventory_solver_handles_have_n_or_more_ready_shape():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["FROM inventory"] = "sku,available_today\nFST-LOW,1\nWRK-HIGH,5\n"
+    task = (
+        "hey can u check the central Brno PowerTool shop today and tell me how many of these have 5 or more ready: "
+        "the Nut Bolt and Washer from Heco in the Heco Unix HECO 2VD-VNA Nut Bolt and Washer line "
+        "that has fastener type threaded rod,the Work Jacket from Mascot in the Mascot Advanced ACC 35W-IIS Work Jacket line "
+        'that has color family Blue? Answer in exactly format "[QTY:%d]" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None, "v47 t45 have-N-or-more-ready wording must stay on deterministic inventory path"
+    assert fn.message == "[QTY:1]"
+    assert fn.grounding_refs == [
+        "/proc/stores/store_brno_veveri.json",
+        "/proc/catalog/workwear/work_jackets/WRK-HIGH.json",
+    ]
+    print("ok: inventory solver handles have-N-or-more-ready prompts")
+
+
 def test_inventory_solver_does_not_cite_zero_stock_products_for_below_threshold():
     vm = _inventory_solver_vm()
     vm.sql_outputs["FROM inventory"] = (
@@ -816,6 +837,7 @@ def main():
     test_inventory_solver_handles_less_than_available_today_shape()
     test_inventory_solver_handles_fewer_than_items_available_in_shape()
     test_inventory_solver_handles_count_products_fewer_units_from_list_shape()
+    test_inventory_solver_handles_have_n_or_more_ready_shape()
     test_inventory_solver_does_not_cite_zero_stock_products_for_below_threshold()
     test_inventory_solver_handles_below_available_today_shape()
     test_inventory_solver_handles_none_available_today_shape()
