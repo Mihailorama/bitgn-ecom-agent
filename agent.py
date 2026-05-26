@@ -1928,7 +1928,7 @@ WHERE lower(s.city)=lower({_sql_quote(city)});
 
 
 def _try_3ds(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
-    if not re.search(r"\b(3DS|bank verification|card verification|card security)\b", task_text, re.I):
+    if not re.search(r"\b(3DS|bank verification|card verification|payment verification|card security)\b", task_text, re.I):
         return None
     basket_ids = _task_ids(task_text, "basket")
     pay_ids = _task_ids(task_text, "pay")

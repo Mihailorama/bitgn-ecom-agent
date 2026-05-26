@@ -578,6 +578,37 @@ def test_discount_desk_coverage_denial_names_required_token():
     print("ok: Graz Lend desk coverage denial names required token")
 
 
+def test_payment_verification_recovery_cites_current_update_doc():
+    vm = FakeVM()
+    vm.tool_outputs["/bin/id"] = "user: cust_082\nroles: customer\n"
+    vm.tool_outputs["/bin/date"] = "2024-07-17T12:00:00Z\n"
+    vm.tool_outputs["/bin/payments"] = "3ds_recovery_started pay_044\n"
+    vm.sql_outputs["FROM payments p JOIN baskets b"] = (
+        "payment_id,payment_path,payment_customer_id,basket_id,payment_status,three_ds_status,"
+        "three_ds_attempts,three_ds_max_attempts,basket_path,basket_customer_id,basket_status\n"
+        "pay_044,/proc/payments/pay_044.json,cust_082,basket_244,requires_3ds_action,"
+        "3ds-status3,1,3,/proc/baskets/basket_244.json,cust_082,checked_out\n"
+    )
+    vm.list_outputs["/docs/current-updates"] = [
+        SimpleNamespace(name="2024-07-17-payment-verification.md", kind=_Enum.NODE_KIND_FILE)
+    ]
+
+    fn = agent._try_3ds(
+        vm,
+        "The payment verification screen froze while I was checking out basket basket_244. "
+        "Please help me finish the order.",
+    )
+
+    assert fn is not None, "payment verification wording must use deterministic 3DS recovery"
+    assert fn.outcome == "OUTCOME_OK"
+    assert "/docs/current-updates/2024-07-17-payment-verification.md" in fn.grounding_refs
+    assert "/proc/baskets/basket_244.json" in fn.grounding_refs
+    assert "/proc/payments/pay_044.json" in fn.grounding_refs
+    assert [call for call in vm.exec_calls if call[0] == "/bin/payments"], \
+        "eligible payment verification recovery must call /bin/payments recover-3ds"
+    print("ok: payment verification recovery cites current update doc")
+
+
 def _inventory_solver_vm() -> FakeVM:
     vm = FakeVM()
     vm.sql_outputs["SELECT id,path,name,city,is_open FROM stores ORDER BY id;"] = (
@@ -781,6 +812,7 @@ def main():
     test_discount_denial_requires_subject_and_update_doc()
     test_discount_explicit_over_policy_percent_is_unsupported()
     test_discount_desk_coverage_denial_names_required_token()
+    test_payment_verification_recovery_cites_current_update_doc()
     test_inventory_solver_handles_less_than_available_today_shape()
     test_inventory_solver_handles_fewer_than_items_available_in_shape()
     test_inventory_solver_handles_count_products_fewer_units_from_list_shape()
