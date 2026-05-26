@@ -544,6 +544,32 @@ Current state in `agent.py` includes:
   or otherwise query same-family SKUs before declaring the requested variant
   unresolved or selecting an unrelated fallback.
 
+**2026-05-26 rejected family-JSON augmentation.**
+- Tested same-family catalog JSON sibling augmentation for the deterministic
+  inventory resolver after diagnostics showed required refs can be same-family
+  siblings of the SQL-selected candidate.
+- TDD covered both fallback sibling augmentation and exact-group sibling
+  augmentation. The live code was reverted after validation; the rejected diff
+  is preserved at
+  `artifacts/rejected/2026-05-26-family-json-augmentation/wip.diff`.
+- Validation:
+  - `uv run python -m py_compile agent.py llm.py && uv run python smoke_test.py`
+    passed.
+  - Ten serial `t16` samples passed `10/10` under
+    `artifacts/sweeps/2026-05-26-family-json-t16-sample-r*/`.
+  - Inventory subset r2 (`t13 t14 t15 t16 t45`) passed `5/5` under
+    `artifacts/sweeps/2026-05-26-family-json-inventory-regression-r2/`.
+  - Full sweep
+    `artifacts/sweeps/2026-05-26-family-json-full-codex53/` rejected the
+    behavior at `89.6%` (`43/48`), even though `t16` passed. Misses were
+    `t07`, `t12`, `t45`, `t47`, and `t48`.
+- Decision: keep the diagnostic resolver/ref-policy seams, but do not ship
+  broad family JSON augmentation. The next scoring fix must be narrower: either
+  task-shape gated to the `t16` "How many ... at least ... available in ...
+  today" wording, or implemented as a deterministic claim-check that only
+  corrects unresolved/wrong-ref cases without perturbing already solved
+  inventory/catalog tasks such as `t45` and `t47`.
+
 **Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
 `claude:sonnet` as the cheap regression canary. 10-minute platform-time target
 is still unmet at 100% quality.
@@ -558,10 +584,11 @@ is still unmet at 100% quality.
 
 **TODO (in priority order):**
 1. Inventory exact-variant/count stability remains open for `t15`/`t16`.
-   The next single fix should target the typed product-variant resolver and
-   inventory count policy, with RED tests built from saved `t15`/`t16` logs
-   before any production change. Do not bundle this with `t41` or product-check
-   work.
+   The broad same-family JSON augmentation attempt is rejected despite good
+   `t16` samples because the full sweep regressed `t45`/`t47`. The next single
+   fix must be narrower, with RED tests built from saved `t16`, `t45`, and
+   `t47` logs before any production change. Do not bundle this with `t41`,
+   product-check, or discount-policy work.
 2. Product-check checked-SKU stability remains open for `t04`/`t05`/catalogue
    impossible-claim tasks: when multiple sibling SKUs share the base product,
    the answer must decide `<NO>` when the requested shorthand/pack claim is not
@@ -583,15 +610,14 @@ is still unmet at 100% quality.
    captured useful evidence but reduced the headline score. Start from restored
    `ae75479` tagged 44/44 baseline, with later diagnostics preserved as evidence.
 8. Close the restored-baseline `t16` inventory grounding miss with a narrow
-   resolver, but do not revive either rejected branch verbatim:
+   resolver, but do not revive any rejected branch verbatim:
    `2026-05-25-t16-exact-variant-rejected` or
-   `2026-05-26-rejected-strict-only-41of44`, and do not rely on the
+   `2026-05-26-rejected-strict-only-41of44`, or
+   `2026-05-26-family-json-augmentation`, and do not rely on the
    `DETERMINISTIC_INVENTORY=0` LLM-only path.
-   Required shape: structured `resolve_product_variant()` returning exact
-   candidate groups plus reason codes (`exact`, `ambiguous`, `unresolved`), then
-   a separate `build_inventory_refs()` policy that can be unit-tested against
-   saved `t16` logs. It must merge SQL rows with catalog JSON siblings from
-   candidate `family_id` directories before using any relaxed fallback.
+   Required shape: keep structured `resolve_product_variant()` and
+   `build_inventory_refs()` seams, but constrain any family-sibling expansion by
+   task shape and regression tests so `t45`/`t47` catalog refs do not change.
 9. Refactor step 1 (no behavior expansion): isolate helper layer for
    `resolve_product_variant()` and `build_grounding_refs()` so variant logic and
    refs logic are testable independently.

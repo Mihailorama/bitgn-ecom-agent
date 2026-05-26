@@ -1,0 +1,395 @@
+TASK t08 (model codex:gpt-5.3-codex)
+INSTRUCTION: A support note claims we stock the Anchor and Wall Plug from Rawlplug in the Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug line that has anchor type concrete anchor, diameter 8 mm, and length 50 mm and has anchor type frame fixing. Check the actual catalogue item, cite the exact product record, and if the base product exists but that extra catalogue claim is absent, answer with <NO> and include the checked SKU.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query SQL for candidate Rawlplug Rapid RAW 2YZ-I6T products and their properties (anchor_type, diameter_mm, length_mm). (16180 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       pp.key, pp.value_text, pp.value_number\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE LOWER(p.brand) = 'rawlplug'\n  AND (\n    LOWER(p.series) LIKE '%rapid raw 2yz-i6t%'\n    OR LOWER(p.model) LIKE '%rapid raw 2yz-i6t%'\n    OR LOWER(p.name) LIKE '%rapid raw 2yz-i6t%'\n  )\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       pp.key, pp.value_text, pp.value_number
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE LOWER(p.brand) = 'rawlplug'
+  AND (
+    LOWER(p.series) LIKE '%rapid raw 2yz-i6t%'
+    OR LOWER(p.model) LIKE '%rapid raw 2yz-i6t%'
+    OR LOWER(p.name) LIKE '%rapid raw 2yz-i6t%'
+  )
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,key,value_text,value_number
+FST-15Z8J68X,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-15Z8J68X.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 5mm 40mm 100pc,anchor_type,wall plug,
+FST-15Z8J68X,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-15Z8J68X.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 5mm 40mm 100pc,diameter_mm,5,5
+FST-15Z8J68X,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-15Z8J68X.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 5mm 40mm 100pc,length_mm,40,40
+FST-15Z8J68X,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-15Z8J68X.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 5mm 40mm 100pc,material,nylon,
+FST-15Z8J68X,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-15Z8J68X.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 5mm 40mm 100pc,pack_count,100,100
+FST-1HSFWAEN,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1HSFWAEN.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 8mm 100mm 100pc,anchor_type,concrete anchor,
+FST-1HSFWAEN,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1HSFWAEN.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 8mm 100mm 100pc,diameter_mm,8,8
+FST-1HSFWAEN,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1HSFWAEN.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 8mm 100mm 100pc,length_mm,100,100
+FST-1HSFWAEN,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1HSFWAEN.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 8mm 100mm 100pc,material,nylon,
+FST-1HSFWAEN,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1HSFWAEN.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 8mm 100mm 100pc,pack_count,100,100
+FST-1IV1IJZW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1IV1IJZW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug frame fixing 10mm 120mm 100pc,anchor_type,frame fixing,
+FST-1IV1IJZW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1IV1IJZW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug frame fixing 10mm 120mm 100pc,diameter_mm,10,10
+FST-1IV1IJZW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1IV1IJZW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug frame fixing 10mm 120mm 100pc,length_mm,120,120
+FST-1IV1IJZW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1IV1IJZW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug frame fixing 10mm 120mm 100pc,material,nylon,
+FST-1IV1IJZW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1IV1IJZW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug frame fixing 10mm 120mm 100pc,pack_count,100,100
+FST-1LJU6HPW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1LJU6HPW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug frame fixing 8mm 30mm 100pc,anchor_type,frame fixing,
+FST-1LJU6HPW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1LJU6HPW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug frame fixing 8mm 30mm 100pc,diameter_mm,8,8
+FST-1LJU6HPW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1LJU6HPW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug frame fixing 8mm 30mm 100pc,length_mm,30,30
+FST-1LJU6HPW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1LJU6HPW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug frame fixing 8mm 30mm 100pc,material,nylon,
+FST-1LJU6HPW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1LJU6HPW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug frame fixing 8mm 30mm 100pc,pack_count,100,100
+FST-1X0PJJJU,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1X0PJJJU.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 10mm 100mm 100pc,anchor_type,cavity fixing,
+FST-1X0PJJJU,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1X0PJJJU.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 10mm 100mm 100pc,diameter_mm,10,10
+FST-1X0PJJJU,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1X0PJJJU.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 10mm 100mm 100pc,length_mm,100,100
+FST-1X0PJJJU,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1X0PJJJU.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 10mm 100mm 100pc,material,nylon,
+FST-1X0PJJJU,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1X0PJJJU.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 10mm 100mm 100pc,pack_count,100,100
+FST-1X502PKL,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1X502PKL.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 10mm 50mm 50pc,anchor_type,wall plug,
+FST-1X502PKL,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1X502PKL.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 10mm 50mm 50pc,diameter_mm,10,10
+FST-1X502PKL,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1X502PKL.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 10mm 50mm 50pc,length_mm,50,50
+FST-1X502PKL,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1X502PKL.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 10mm 50mm 50pc,material,nylon,
+FST-1X502PKL,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1X502PKL.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 10mm 50mm 50pc,pack_count,50,50
+FST-27FM81RC,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-27FM81RC.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 12mm 40mm 25pc,anchor_type,wall plug,
+FST-27FM81RC,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-27FM81RC.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 12mm 40mm 25pc,diameter_mm,12,12
+FST-27FM81RC,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-27FM81RC.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 12mm 40mm 25pc,length_mm,40,40
+FST-27FM81RC,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-27FM81RC.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 12mm 40mm 25pc,material,nylon,
+FST-27FM81RC,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-27FM81RC.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 12mm 40mm 25pc,pack_count,25,25
+FST-2B6PP5T1,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2B6PP5T1.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 12mm 100mm 50pc,anchor_type,concrete anchor,
+FST-2B6PP5T1,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2B6PP5T1.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 12mm 100mm 50pc,diameter_mm,12,12
+FST-2B6PP5T1,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2B6PP5T1.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 12mm 100mm 50pc,length_mm,100,100
+FST-2B6PP5T1,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2B6PP5T1.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 12mm 100mm 50pc,material,nylon,
+FST-2B6PP5T1,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2B6PP5T1.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 12mm 100mm 50pc,pack_count,50,50
+FST-2C3Q7XZM,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2C3Q7XZM.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 10mm 30mm 25pc,anchor_type,cavity fixing,
+FST-2C3Q7XZM,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2C3Q7XZM.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 10mm 30mm 25pc,diameter_mm,10,10
+FST-2C3Q7XZM,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2C3Q7XZM.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 10mm 30mm 25pc,length_mm,30,30
+FST-2C3Q7XZM,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2C3Q7XZM.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 10mm 30mm 25pc,material,nylon,
+FST-2C3Q7XZM,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2C3Q7XZM.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 10mm 30mm 25pc,pack_count,25,25
+FST-2HIV517D,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2HIV517D.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 5mm 100mm 100pc,anchor_type,wall plug,
+FST-2HIV517D,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2HIV517D.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 5mm 100mm 100pc,diameter_mm,5,5
+FST-2HIV517D,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2HIV517D.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 5mm 100mm 100pc,length_mm,100,100
+FST-2HIV517D,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2HIV517D.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 5mm 100mm 100pc,material,nylon,
+FST-2HIV517D,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2HIV517D.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 5mm 100mm 100pc,pack_count,100,100
+FST-2OZE7VYH,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2OZE7VYH.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 10mm 80mm 100pc,anchor_type,concrete anchor,
+FST-2OZE7VYH,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2OZE7VYH.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 10mm 80mm 100pc,diameter_mm,10,10
+FST-2OZE7VYH,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2OZE7VYH.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 10mm 80mm 100pc,length_mm,80,80
+FST-2OZE7VYH,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2OZE7VYH.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 10mm 80mm 100pc,material,nylon,
+FST-2OZE7VYH,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2OZE7VYH.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 10mm 80mm 100pc,pack_count,100,100
+FST-2TAG99WW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2TAG99WW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 8mm 30mm 25pc,anchor_type,cavity fixing,
+FST-2TAG99WW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2TAG99WW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 8mm 30mm 25pc,diameter_mm,8,8
+FST-2TAG99WW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2TAG99WW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 8mm 30mm 25pc,length_mm,30,30
+FST-2TAG99WW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2TAG99WW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 8mm 30mm 25pc,material,nylon,
+FST-2TAG99WW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2TAG99WW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 8mm 30mm 25pc,pack_count,25,25
+FST-2XPTE5YB,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2XPTE5YB.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 5mm 30mm 50pc,anchor_type,cavity fixing,
+FST-2XPTE5YB,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2XPTE5YB.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 5mm 30mm 50pc,diameter_mm,5,5
+FST-2XPTE5YB,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2XPTE5YB.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 5mm 30mm 50pc,length_mm,30,30
+FST-2XPTE5YB,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2XPTE5YB.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 5mm 30mm 50pc,material,nylon,
+FST-2XPTE5YB,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-2XPTE5YB.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 5mm 30mm 50pc,pack_count,50,50
+FST-35DK2KAW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-35DK2KAW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 5mm 50mm 100pc,anchor_type,cavity fixing,
+FST-35DK2KAW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-35DK2KAW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 5mm 50mm 100pc,diameter_mm,5,5
+FST-35DK2KAW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-35DK2KAW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 5mm 50mm 100pc,length_mm,50,50
+FST-35DK2KAW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-35DK2KAW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 5mm 50mm 100pc,material,nylon,
+FST-35DK2KAW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-35DK2KAW.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 5mm 50mm 100pc,pack_count,100,100
+FST-38STMEI8,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-38STMEI8.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 8mm 40mm 200pc,anchor_type,concrete anchor,
+FST-38STMEI8,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-38STMEI8.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 8mm 40mm 200pc,diameter_mm,8,8
+FST-38STMEI8,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-38STMEI8.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 8mm 40mm 200pc,length_mm,40,40
+FST-38STMEI8,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-38STMEI8.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 8mm 40mm 200pc,material,nylon,
+FST-38STMEI8,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-38STMEI8.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 8mm 40mm 200pc,pack_count,200,200
+FST-3KCH9F2S,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3KCH9F2S.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 12mm 60mm 50pc,anchor_type,wall plug,
+FST-3KCH9F2S,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3KCH9F2S.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 12mm 60mm 50pc,diameter_mm,12,12
+FST-3KCH9F2S,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3KCH9F2S.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 12mm 60mm 50pc,length_mm,60,60
+FST-3KCH9F2S,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3KCH9F2S.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 12mm 60mm 50pc,material,nylon,
+FST-3KCH9F2S,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3KCH9F2S.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug wall plug 12mm 60mm 50pc,pack_count,50,50
+FST-3LQP9FQP,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3LQP9FQP.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 6mm 40mm 50pc,anchor_type,concrete anchor,
+FST-3LQP9FQP,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3LQP9FQP.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 6mm 40mm 50pc,diameter_mm,6,6
+FST-3LQP9FQP,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3LQP9FQP.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 6mm 40mm 50pc,length_mm,40,40
+FST-3LQP9FQP,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3LQP9FQP.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 6mm 40mm 50pc,material,nylon,
+FST-3LQP9FQP,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3LQP9FQP.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 6mm 40mm 50pc,pack_count,50,50
+FST-3OQ0R5BJ,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3OQ0R5BJ.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 6mm 50mm 200pc,anchor_type,cavity fixing,
+FST-3OQ0R5BJ,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3OQ0R5BJ.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 6mm 50mm 200pc,diameter_mm,6,6
+FST-3OQ0R5BJ,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3OQ0R5BJ.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 6mm 50mm 200pc,length_mm,50,50
+FST-3OQ0R5BJ,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3OQ0R5BJ.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 6mm 50mm 200pc,material,nylon,
+FST-3OQ0R5BJ,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3OQ0R5BJ.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug cavity fixing 6mm 50mm 200pc,pack_count,200,200
+FST-3SKHE78P,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3SKHE78P.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug frame fixing 10mm 80mm 100pc,anchor_type,frame fixing,
+FST-3SKHE78P,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3SKHE78P.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug frame fixing 10mm 80mm 100pc,diameter_mm,10,10
+FST-3SKHE78P,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3SKHE78P.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug frame fixing 10mm 80mm 100pc,length_mm,80,80
+FST-3SKHE78P,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3SKHE78P.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug frame fixing 10mm 80mm 100pc,material,nylon,
+FST-3SKHE78P,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3SKHE78P.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug frame fixing 10mm 80mm 100pc,pack_count,100,100
+FST-3V1UHT84,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3V1UHT84.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 8mm 50mm 10pc,anchor_type,concrete anchor,
+FST-3V1UHT84,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3V1UHT84.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 8mm 50mm 10pc,diameter_mm,8,8
+FST-3V1UHT84,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3V1UHT84.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 8mm 50mm 10pc,length_mm,50,50
+FST-3V1UHT84,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3V1UHT84.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 8mm 50mm 10pc,material,nylon,
+FST-3V1UHT84,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3V1UHT84.json,Rawlplug,Rapid,RAW 2YZ-I6T,Rawlplug Rapid RAW 2YZ-I6T Anchor and Wall Plug concrete anchor 8mm 50mm 10pc,pack_count,10,10
+warning: result truncated at 100 rows
+Next step_2... Run a focused SQL query that pivots properties per SKU and checks exact property combinations. (21162 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH props AS (\n  SELECT p.sku, p.path,\n         MAX(CASE WHEN pp.key='anchor_type' THEN pp.value_text END) AS anchor_type,\n         MAX(CASE WHEN pp.key='diameter_mm' THEN COALESCE(pp.value_number, CAST(pp.value_text AS REAL)) END) AS diameter_mm,\n         MAX(CASE WHEN pp.key='length_mm' THEN COALESCE(pp.value_number, CAST(pp.value_text AS REAL)) END) AS length_mm\n  FROM products p\n  JOIN product_properties pp ON pp.sku = p.sku\n  WHERE LOWER(p.brand)='rawlplug'\n    AND LOWER(p.series)='rapid'\n    AND LOWER(p.model)='raw 2yz-i6t'\n  GROUP BY p.sku, p.path\n)\nSELECT sku, path, anchor_type, diameter_mm, length_mm,\n       CASE WHEN anchor_type='concrete anchor' AND diameter_mm=8 AND length_mm=50 THEN 1 ELSE 0 END AS matches_concrete_8x50,\n       CASE WHEN anchor_type='frame fixing' AND diameter_mm=8 AND length_mm=50 THEN 1 ELSE 0 END AS matches_framefix_8x50\nFROM props\nWHERE diameter_mm=8 AND (length_mm=50 OR anchor_type IN ('concrete anchor','frame fixing'))\nORDER BY sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH props AS (
+  SELECT p.sku, p.path,
+         MAX(CASE WHEN pp.key='anchor_type' THEN pp.value_text END) AS anchor_type,
+         MAX(CASE WHEN pp.key='diameter_mm' THEN COALESCE(pp.value_number, CAST(pp.value_text AS REAL)) END) AS diameter_mm,
+         MAX(CASE WHEN pp.key='length_mm' THEN COALESCE(pp.value_number, CAST(pp.value_text AS REAL)) END) AS length_mm
+  FROM products p
+  JOIN product_properties pp ON pp.sku = p.sku
+  WHERE LOWER(p.brand)='rawlplug'
+    AND LOWER(p.series)='rapid'
+    AND LOWER(p.model)='raw 2yz-i6t'
+  GROUP BY p.sku, p.path
+)
+SELECT sku, path, anchor_type, diameter_mm, length_mm,
+       CASE WHEN anchor_type='concrete anchor' AND diameter_mm=8 AND length_mm=50 THEN 1 ELSE 0 END AS matches_concrete_8x50,
+       CASE WHEN anchor_type='frame fixing' AND diameter_mm=8 AND length_mm=50 THEN 1 ELSE 0 END AS matches_framefix_8x50
+FROM props
+WHERE diameter_mm=8 AND (length_mm=50 OR anchor_type IN ('concrete anchor','frame fixing'))
+ORDER BY sku;
+SQL
+sku,path,anchor_type,diameter_mm,length_mm,matches_concrete_8x50,matches_framefix_8x50
+FST-1HSFWAEN,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1HSFWAEN.json,concrete anchor,8,100,0,0
+FST-1LJU6HPW,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-1LJU6HPW.json,frame fixing,8,30,0,0
+FST-38STMEI8,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-38STMEI8.json,concrete anchor,8,40,0,0
+FST-3V1UHT84,/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3V1UHT84.json,concrete anchor,8,50,1,0
+Next step_3... Report completion with required token and checked SKU. (15935 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Verified exact RAW 2YZ-I6T 8x50 concrete-anchor SKU', 'Confirmed extra frame-fixing claim for same variant is absent'] message='<NO> SKU FST-3V1UHT84' grounding_refs=['/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3V1UHT84.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Verified exact RAW 2YZ-I6T 8x50 concrete-anchor SKU
+- Confirmed extra frame-fixing claim for same variant is absent
+
+[34mAGENT SUMMARY: <NO> SKU FST-3V1UHT84[0m
+- [34m/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0001_1fimm0xb/FST-3V1UHT84.json[0m

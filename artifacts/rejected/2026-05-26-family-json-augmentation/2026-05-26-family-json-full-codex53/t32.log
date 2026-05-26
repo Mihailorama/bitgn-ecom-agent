@@ -1,0 +1,383 @@
+TASK t32 (model codex:gpt-5.3-codex)
+INSTRUCTION: A support note claims we stock the Trimmer and Blower from Husqvarna in the Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower line that has tool type grass trimmer, power source battery, and cutting width 24 cm and supports voice control. Check the actual catalogue item, cite the exact product record, and if the base product exists but that extra capability is absent, answer with <NO> and include the checked SKU.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query products plus product_properties for Husqvarna Aspire K7Q-V7Z trimmer/blower candidates and return SKU/path with relevant properties. (18946 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind, pp.key, pp.value_text, pp.value_number\nFROM products p\nLEFT JOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE lower(p.brand) = 'husqvarna'\n  AND (\n    lower(p.series) LIKE '%aspire%'\n    OR lower(p.model) LIKE '%k7q-v7z%'\n    OR lower(p.name) LIKE '%k7q-v7z%'\n    OR lower(p.name) LIKE '%trimmer and blower%'\n  )\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pk.name AS kind, pp.key, pp.value_text, pp.value_number
+FROM products p
+LEFT JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE lower(p.brand) = 'husqvarna'
+  AND (
+    lower(p.series) LIKE '%aspire%'
+    OR lower(p.model) LIKE '%k7q-v7z%'
+    OR lower(p.name) LIKE '%k7q-v7z%'
+    OR lower(p.name) LIKE '%trimmer and blower%'
+  )
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,kind,key,value_text,value_number
+GRD-16E3LJ1Z,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-16E3LJ1Z.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower pressure sprayer corded 18cm,Trimmer and Blower,battery_platform,corded,
+GRD-16E3LJ1Z,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-16E3LJ1Z.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower pressure sprayer corded 18cm,Trimmer and Blower,cutting_width_cm,18,18
+GRD-16E3LJ1Z,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-16E3LJ1Z.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower pressure sprayer corded 18cm,Trimmer and Blower,power_source,corded,
+GRD-16E3LJ1Z,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-16E3LJ1Z.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower pressure sprayer corded 18cm,Trimmer and Blower,tool_type,pressure sprayer,
+GRD-174WBRCL,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-174WBRCL.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower grass trimmer manual 32cm,Trimmer and Blower,battery_platform,solo,
+GRD-174WBRCL,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-174WBRCL.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower grass trimmer manual 32cm,Trimmer and Blower,cutting_width_cm,32,32
+GRD-174WBRCL,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-174WBRCL.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower grass trimmer manual 32cm,Trimmer and Blower,power_source,manual,
+GRD-174WBRCL,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-174WBRCL.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower grass trimmer manual 32cm,Trimmer and Blower,tool_type,grass trimmer,
+GRD-17G8772L,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-17G8772L.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower water pump corded 32cm,Trimmer and Blower,battery_platform,corded,
+GRD-17G8772L,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-17G8772L.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower water pump corded 32cm,Trimmer and Blower,cutting_width_cm,32,32
+GRD-17G8772L,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-17G8772L.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower water pump corded 32cm,Trimmer and Blower,power_source,corded,
+GRD-17G8772L,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-17G8772L.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower water pump corded 32cm,Trimmer and Blower,tool_type,water pump,
+GRD-19J4FZGT,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-19J4FZGT.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower battery 32cm,Lawn Mower,battery_platform,18v-system,
+GRD-19J4FZGT,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-19J4FZGT.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower battery 32cm,Lawn Mower,collection_bag,yes,
+GRD-19J4FZGT,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-19J4FZGT.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower battery 32cm,Lawn Mower,cutting_width_cm,32,32
+GRD-19J4FZGT,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-19J4FZGT.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower battery 32cm,Lawn Mower,power_source,battery,
+GRD-1IZWSKRN,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-1IZWSKRN.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower grass trimmer battery 32cm,Trimmer and Blower,battery_platform,18v-system,
+GRD-1IZWSKRN,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-1IZWSKRN.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower grass trimmer battery 32cm,Trimmer and Blower,cutting_width_cm,32,32
+GRD-1IZWSKRN,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-1IZWSKRN.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower grass trimmer battery 32cm,Trimmer and Blower,power_source,battery,
+GRD-1IZWSKRN,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-1IZWSKRN.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower grass trimmer battery 32cm,Trimmer and Blower,tool_type,grass trimmer,
+GRD-1MYLUE20,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-1MYLUE20.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower manual 38cm,Lawn Mower,battery_platform,solo,
+GRD-1MYLUE20,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-1MYLUE20.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower manual 38cm,Lawn Mower,collection_bag,yes,
+GRD-1MYLUE20,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-1MYLUE20.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower manual 38cm,Lawn Mower,cutting_width_cm,38,38
+GRD-1MYLUE20,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-1MYLUE20.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower manual 38cm,Lawn Mower,power_source,manual,
+GRD-1QO576PI,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-1QO576PI.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower hedge trimmer corded 24cm,Trimmer and Blower,battery_platform,corded,
+GRD-1QO576PI,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-1QO576PI.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower hedge trimmer corded 24cm,Trimmer and Blower,cutting_width_cm,24,24
+GRD-1QO576PI,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-1QO576PI.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower hedge trimmer corded 24cm,Trimmer and Blower,power_source,corded,
+GRD-1QO576PI,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-1QO576PI.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower hedge trimmer corded 24cm,Trimmer and Blower,tool_type,hedge trimmer,
+GRD-1UPMGCAO,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-1UPMGCAO.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower grass trimmer battery 38cm,Trimmer and Blower,battery_platform,36v-system,
+GRD-1UPMGCAO,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-1UPMGCAO.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower grass trimmer battery 38cm,Trimmer and Blower,cutting_width_cm,38,38
+GRD-1UPMGCAO,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-1UPMGCAO.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower grass trimmer battery 38cm,Trimmer and Blower,power_source,battery,
+GRD-1UPMGCAO,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-1UPMGCAO.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower grass trimmer battery 38cm,Trimmer and Blower,tool_type,grass trimmer,
+GRD-1W93W13L,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-1W93W13L.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower grass trimmer battery 18cm,Trimmer and Blower,battery_platform,18v-system,
+GRD-1W93W13L,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-1W93W13L.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower grass trimmer battery 18cm,Trimmer and Blower,cutting_width_cm,18,18
+GRD-1W93W13L,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-1W93W13L.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower grass trimmer battery 18cm,Trimmer and Blower,power_source,battery,
+GRD-1W93W13L,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-1W93W13L.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower grass trimmer battery 18cm,Trimmer and Blower,tool_type,grass trimmer,
+GRD-1WONWWW4,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-1WONWWW4.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower pressure sprayer corded 42cm,Trimmer and Blower,battery_platform,corded,
+GRD-1WONWWW4,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-1WONWWW4.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower pressure sprayer corded 42cm,Trimmer and Blower,cutting_width_cm,42,42
+GRD-1WONWWW4,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-1WONWWW4.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower pressure sprayer corded 42cm,Trimmer and Blower,power_source,corded,
+GRD-1WONWWW4,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-1WONWWW4.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower pressure sprayer corded 42cm,Trimmer and Blower,tool_type,pressure sprayer,
+GRD-1ZJE5PD3,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-1ZJE5PD3.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower grass trimmer battery 24cm,Trimmer and Blower,battery_platform,36v-system,
+GRD-1ZJE5PD3,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-1ZJE5PD3.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower grass trimmer battery 24cm,Trimmer and Blower,cutting_width_cm,24,24
+GRD-1ZJE5PD3,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-1ZJE5PD3.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower grass trimmer battery 24cm,Trimmer and Blower,power_source,battery,
+GRD-1ZJE5PD3,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-1ZJE5PD3.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower grass trimmer battery 24cm,Trimmer and Blower,tool_type,grass trimmer,
+GRD-23TGWO96,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-23TGWO96.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower battery 51cm,Lawn Mower,battery_platform,18v-system,
+GRD-23TGWO96,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-23TGWO96.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower battery 51cm,Lawn Mower,collection_bag,yes,
+GRD-23TGWO96,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-23TGWO96.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower battery 51cm,Lawn Mower,cutting_width_cm,51,51
+GRD-23TGWO96,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-23TGWO96.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower battery 51cm,Lawn Mower,power_source,battery,
+GRD-247JZMZ2,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-247JZMZ2.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower hedge trimmer battery 38cm,Trimmer and Blower,battery_platform,36v-system,
+GRD-247JZMZ2,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-247JZMZ2.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower hedge trimmer battery 38cm,Trimmer and Blower,cutting_width_cm,38,38
+GRD-247JZMZ2,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-247JZMZ2.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower hedge trimmer battery 38cm,Trimmer and Blower,power_source,battery,
+GRD-247JZMZ2,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-247JZMZ2.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower hedge trimmer battery 38cm,Trimmer and Blower,tool_type,hedge trimmer,
+GRD-257NKHIU,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-257NKHIU.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower pressure sprayer manual 32cm,Trimmer and Blower,battery_platform,solo,
+GRD-257NKHIU,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-257NKHIU.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower pressure sprayer manual 32cm,Trimmer and Blower,cutting_width_cm,32,32
+GRD-257NKHIU,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-257NKHIU.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower pressure sprayer manual 32cm,Trimmer and Blower,power_source,manual,
+GRD-257NKHIU,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-257NKHIU.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower pressure sprayer manual 32cm,Trimmer and Blower,tool_type,pressure sprayer,
+GRD-2A4IPVBN,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-2A4IPVBN.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower battery 46cm,Lawn Mower,battery_platform,36v-system,
+GRD-2A4IPVBN,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-2A4IPVBN.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower battery 46cm,Lawn Mower,collection_bag,yes,
+GRD-2A4IPVBN,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-2A4IPVBN.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower battery 46cm,Lawn Mower,cutting_width_cm,46,46
+GRD-2A4IPVBN,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-2A4IPVBN.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower battery 46cm,Lawn Mower,power_source,battery,
+GRD-2C7O9J5V,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-2C7O9J5V.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower water pump corded 38cm,Trimmer and Blower,battery_platform,corded,
+GRD-2C7O9J5V,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-2C7O9J5V.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower water pump corded 38cm,Trimmer and Blower,cutting_width_cm,38,38
+GRD-2C7O9J5V,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-2C7O9J5V.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower water pump corded 38cm,Trimmer and Blower,power_source,corded,
+GRD-2C7O9J5V,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-2C7O9J5V.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower water pump corded 38cm,Trimmer and Blower,tool_type,water pump,
+GRD-2OWBJ2JZ,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-2OWBJ2JZ.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower battery 42cm,Lawn Mower,battery_platform,18v-system,
+GRD-2OWBJ2JZ,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-2OWBJ2JZ.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower battery 42cm,Lawn Mower,collection_bag,yes,
+GRD-2OWBJ2JZ,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-2OWBJ2JZ.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower battery 42cm,Lawn Mower,cutting_width_cm,42,42
+GRD-2OWBJ2JZ,/proc/catalog/garden_tools/lawn_mowers/fam_garden_tools_lawn_mowers_0016_1sskwi35/GRD-2OWBJ2JZ.json,Husqvarna,Aspire,120 2VX-B6Y,Husqvarna Aspire 120 2VX-B6Y Lawn Mower battery 42cm,Lawn Mower,power_source,battery,
+GRD-2STE9QND,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-2STE9QND.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower hedge trimmer battery 32cm,Trimmer and Blower,battery_platform,18v-system,
+GRD-2STE9QND,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-2STE9QND.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower hedge trimmer battery 32cm,Trimmer and Blower,cutting_width_cm,32,32
+GRD-2STE9QND,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-2STE9QND.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower hedge trimmer battery 32cm,Trimmer and Blower,power_source,battery,
+GRD-2STE9QND,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-2STE9QND.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower hedge trimmer battery 32cm,Trimmer and Blower,tool_type,hedge trimmer,
+GRD-2Z9BRQ8C,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-2Z9BRQ8C.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower hedge trimmer battery 24cm,Trimmer and Blower,battery_platform,18v-system,
+GRD-2Z9BRQ8C,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-2Z9BRQ8C.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower hedge trimmer battery 24cm,Trimmer and Blower,cutting_width_cm,24,24
+GRD-2Z9BRQ8C,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-2Z9BRQ8C.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower hedge trimmer battery 24cm,Trimmer and Blower,power_source,battery,
+GRD-2Z9BRQ8C,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-2Z9BRQ8C.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower hedge trimmer battery 24cm,Trimmer and Blower,tool_type,hedge trimmer,
+GRD-30CVCB26,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-30CVCB26.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower pressure sprayer battery 32cm,Trimmer and Blower,battery_platform,18v-system,
+GRD-30CVCB26,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-30CVCB26.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower pressure sprayer battery 32cm,Trimmer and Blower,cutting_width_cm,32,32
+GRD-30CVCB26,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-30CVCB26.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower pressure sprayer battery 32cm,Trimmer and Blower,power_source,battery,
+GRD-30CVCB26,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-30CVCB26.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower pressure sprayer battery 32cm,Trimmer and Blower,tool_type,pressure sprayer,
+GRD-34IA8CO7,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-34IA8CO7.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower grass trimmer battery 42cm,Trimmer and Blower,battery_platform,18v-system,
+GRD-34IA8CO7,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-34IA8CO7.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower grass trimmer battery 42cm,Trimmer and Blower,cutting_width_cm,42,42
+GRD-34IA8CO7,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-34IA8CO7.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower grass trimmer battery 42cm,Trimmer and Blower,power_source,battery,
+GRD-34IA8CO7,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-34IA8CO7.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower grass trimmer battery 42cm,Trimmer and Blower,tool_type,grass trimmer,
+GRD-34N54QB3,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-34N54QB3.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower hedge trimmer battery 24cm,Trimmer and Blower,battery_platform,18v-system,
+GRD-34N54QB3,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-34N54QB3.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower hedge trimmer battery 24cm,Trimmer and Blower,cutting_width_cm,24,24
+GRD-34N54QB3,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-34N54QB3.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower hedge trimmer battery 24cm,Trimmer and Blower,power_source,battery,
+GRD-34N54QB3,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-34N54QB3.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower hedge trimmer battery 24cm,Trimmer and Blower,tool_type,hedge trimmer,
+GRD-35AZ169Y,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-35AZ169Y.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower grass trimmer battery 18cm,Trimmer and Blower,battery_platform,36v-system,
+GRD-35AZ169Y,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-35AZ169Y.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower grass trimmer battery 18cm,Trimmer and Blower,cutting_width_cm,18,18
+GRD-35AZ169Y,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-35AZ169Y.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower grass trimmer battery 18cm,Trimmer and Blower,power_source,battery,
+GRD-35AZ169Y,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-35AZ169Y.json,Husqvarna,Battery,Aspire K7Q-V7Z,Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower grass trimmer battery 18cm,Trimmer and Blower,tool_type,grass trimmer,
+GRD-3DZTVKH0,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-3DZTVKH0.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower pressure sprayer manual 38cm,Trimmer and Blower,battery_platform,solo,
+GRD-3DZTVKH0,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-3DZTVKH0.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower pressure sprayer manual 38cm,Trimmer and Blower,cutting_width_cm,38,38
+GRD-3DZTVKH0,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-3DZTVKH0.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower pressure sprayer manual 38cm,Trimmer and Blower,power_source,manual,
+GRD-3DZTVKH0,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0011_3unjra73/GRD-3DZTVKH0.json,Husqvarna,Eco,LC 1LS-7W6,Husqvarna Eco LC 1LS-7W6 Trimmer and Blower pressure sprayer manual 38cm,Trimmer and Blower,tool_type,pressure sprayer,
+GRD-3FXX92EA,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-3FXX92EA.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower pressure sprayer petrol 38cm,Trimmer and Blower,battery_platform,petrol,
+GRD-3FXX92EA,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-3FXX92EA.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower pressure sprayer petrol 38cm,Trimmer and Blower,cutting_width_cm,38,38
+GRD-3FXX92EA,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-3FXX92EA.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower pressure sprayer petrol 38cm,Trimmer and Blower,power_source,petrol,
+GRD-3FXX92EA,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0004_fagckfxr/GRD-3FXX92EA.json,Husqvarna,Eco,435 MWU-WT5,Husqvarna Eco 435 MWU-WT5 Trimmer and Blower pressure sprayer petrol 38cm,Trimmer and Blower,tool_type,pressure sprayer,
+warning: result truncated at 100 rows
+Next step_2... Query all product_properties for SKU GRD-1ZJE5PD3 to verify whether any voice-control-related key/value exists. (11130 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, pp.key, pp.value_text, pp.value_number\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.sku = 'GRD-1ZJE5PD3'\nORDER BY pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, pp.key, pp.value_text, pp.value_number
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.sku = 'GRD-1ZJE5PD3'
+ORDER BY pp.key;
+SQL
+sku,path,key,value_text,value_number
+GRD-1ZJE5PD3,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-1ZJE5PD3.json,battery_platform,36v-system,
+GRD-1ZJE5PD3,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-1ZJE5PD3.json,cutting_width_cm,24,24
+GRD-1ZJE5PD3,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-1ZJE5PD3.json,power_source,battery,
+GRD-1ZJE5PD3,/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-1ZJE5PD3.json,tool_type,grass trimmer,
+Next step_3... Return final result with required token and checked SKU. (12490 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Matched the requested Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower variant by properties.', 'Verified the matched SKU GRD-1ZJE5PD3 has no voice-control property.'] message='<NO> GRD-1ZJE5PD3' grounding_refs=['/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-1ZJE5PD3.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Matched the requested Husqvarna Battery Aspire K7Q-V7Z Trimmer and Blower variant by properties.
+- Verified the matched SKU GRD-1ZJE5PD3 has no voice-control property.
+
+[34mAGENT SUMMARY: <NO> GRD-1ZJE5PD3[0m
+- [34m/proc/catalog/garden_tools/trimmers_blowers/fam_garden_tools_trimmers_blowers_0001_1igmh8q8/GRD-1ZJE5PD3.json[0m

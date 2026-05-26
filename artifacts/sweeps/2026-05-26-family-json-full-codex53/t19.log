@@ -1,0 +1,338 @@
+TASK t19 (model codex:gpt-5.3-codex)
+INSTRUCTION: I can visit any PowerTool branch in Vienna today. Across every Vienna branch, including branches with 0 availability, how many units of product (the Shelving and Cabinet from Keter in the Keter Workshop Connect 3K5-2SL Shelving and Cabinet line that has storage type workshop cart and color family Green) are available today? Answer exactly as "%d" and cite every city store record plus the product record.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2024-07-17T20:49:48Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query SQL to uniquely identify the requested product variant and return its sku/path. (17682 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, pk.name AS kind,\n       MAX(CASE WHEN pp.key='storage_type' THEN pp.value_text END) AS storage_type,\n       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nJOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'Keter'\n  AND (p.series = 'Workshop Connect' OR p.name LIKE '%Workshop Connect%')\n  AND (p.model = '3K5-2SL' OR p.name LIKE '%3K5-2SL%')\n  AND pk.name = 'Shelving and Cabinet'\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, pk.name\nHAVING storage_type = 'workshop cart'\n   AND color_family = 'Green';"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, pk.name AS kind,
+       MAX(CASE WHEN pp.key='storage_type' THEN pp.value_text END) AS storage_type,
+       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'Keter'
+  AND (p.series = 'Workshop Connect' OR p.name LIKE '%Workshop Connect%')
+  AND (p.model = '3K5-2SL' OR p.name LIKE '%3K5-2SL%')
+  AND pk.name = 'Shelving and Cabinet'
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, pk.name
+HAVING storage_type = 'workshop cart'
+   AND color_family = 'Green';
+SQL
+sku,path,brand,series,model,kind,storage_type,color_family
+Next step_2... Run a broader SQL query listing Keter Shelving and Cabinet candidates with series/model and storage/color properties. (11153 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       MAX(CASE WHEN pp.key='storage_type' THEN pp.value_text END) AS storage_type,\n       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family,\n       GROUP_CONCAT(pp.key || '=' || pp.value_text, '; ') AS props\nFROM products p\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'Keter'\n  AND pk.name = 'Shelving and Cabinet'\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name\nORDER BY p.series, p.model, p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       MAX(CASE WHEN pp.key='storage_type' THEN pp.value_text END) AS storage_type,
+       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family,
+       GROUP_CONCAT(pp.key || '=' || pp.value_text, '; ') AS props
+FROM products p
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'Keter'
+  AND pk.name = 'Shelving and Cabinet'
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name
+ORDER BY p.series, p.model, p.sku;
+SQL
+sku,path,brand,series,model,name,storage_type,color_family,props
+STO-2R39TZYJ,/proc/catalog/storage/shelving_cabinets/STO-2R39TZYJ.json,Keter,Mobile,KET 3R8-36F,Keter Mobile KET 3R8-36F Shelving and Cabinet drawer cabinet 80l Gray,drawer cabinet,gray,color_family=gray; material=steel; stackable=no; storage_type=drawer cabinet; volume_l=80
+STO-3GYA3CRH,/proc/catalog/storage/shelving_cabinets/STO-3GYA3CRH.json,Keter,Mobile,KET 3R8-36F,Keter Mobile KET 3R8-36F Shelving and Cabinet drawer cabinet 80l Black,drawer cabinet,black,color_family=black; material=steel; stackable=no; storage_type=drawer cabinet; volume_l=80
+STO-3K0IH12O,/proc/catalog/storage/shelving_cabinets/STO-3K0IH12O.json,Keter,Mobile,KET 3R8-36F,Keter Mobile KET 3R8-36F Shelving and Cabinet drawer cabinet 40l Black,drawer cabinet,black,color_family=black; material=steel; stackable=no; storage_type=drawer cabinet; volume_l=40
+STO-3T8IM9QX,/proc/catalog/storage/shelving_cabinets/STO-3T8IM9QX.json,Keter,Mobile,KET 3R8-36F,Keter Mobile KET 3R8-36F Shelving and Cabinet shelving unit 120l Red,shelving unit,red,color_family=red; material=steel; stackable=yes; storage_type=shelving unit; volume_l=120
+STO-506I7GMV,/proc/catalog/storage/shelving_cabinets/STO-506I7GMV.json,Keter,Mobile,KET 3R8-36F,Keter Mobile KET 3R8-36F Shelving and Cabinet shelving unit 40l Blue,shelving unit,blue,color_family=blue; material=steel; stackable=system only; storage_type=shelving unit; volume_l=40
+STO-MR6ZA33E,/proc/catalog/storage/shelving_cabinets/STO-MR6ZA33E.json,Keter,Mobile,KET 3R8-36F,Keter Mobile KET 3R8-36F Shelving and Cabinet shelving unit 25l Black,shelving unit,black,color_family=black; material=steel; stackable=yes; storage_type=shelving unit; volume_l=25
+STO-15YNEJRL,/proc/catalog/storage/shelving_cabinets/STO-15YNEJRL.json,Keter,Workshop,Connect 3K5-2SL,Keter Workshop Connect 3K5-2SL Shelving and Cabinet drawer cabinet 60l Blue,drawer cabinet,blue,color_family=blue; material=polypropylene; stackable=no; storage_type=drawer cabinet; volume_l=60
+STO-1ENB0CT6,/proc/catalog/storage/shelving_cabinets/STO-1ENB0CT6.json,Keter,Workshop,Connect 3K5-2SL,Keter Workshop Connect 3K5-2SL Shelving and Cabinet stacking box 40l Clear,stacking box,clear,color_family=clear; material=polypropylene; stackable=no; storage_type=stacking box; volume_l=40
+STO-1I2IQ53J,/proc/catalog/storage/shelving_cabinets/STO-1I2IQ53J.json,Keter,Workshop,Connect 3K5-2SL,Keter Workshop Connect 3K5-2SL Shelving and Cabinet drawer cabinet 25l Yellow,drawer cabinet,yellow,color_family=yellow; material=polypropylene; stackable=no; storage_type=drawer cabinet; volume_l=25
+STO-1VDIQKBE,/proc/catalog/storage/shelving_cabinets/STO-1VDIQKBE.json,Keter,Workshop,Connect 3K5-2SL,Keter Workshop Connect 3K5-2SL Shelving and Cabinet stacking box 40l Yellow,stacking box,yellow,color_family=yellow; material=polypropylene; stackable=yes; storage_type=stacking box; volume_l=40
+STO-32M2DJ64,/proc/catalog/storage/shelving_cabinets/STO-32M2DJ64.json,Keter,Workshop,Connect 3K5-2SL,Keter Workshop Connect 3K5-2SL Shelving and Cabinet drawer cabinet 80l Black,drawer cabinet,black,color_family=black; material=polypropylene; stackable=no; storage_type=drawer cabinet; volume_l=80
+STO-3LKE50EJ,/proc/catalog/storage/shelving_cabinets/STO-3LKE50EJ.json,Keter,Workshop,Connect 3K5-2SL,Keter Workshop Connect 3K5-2SL Shelving and Cabinet drawer cabinet 40l Red,drawer cabinet,red,color_family=red; material=polypropylene; stackable=no; storage_type=drawer cabinet; volume_l=40
+STO-6F4915IV,/proc/catalog/storage/shelving_cabinets/STO-6F4915IV.json,Keter,Workshop,Connect 3K5-2SL,Keter Workshop Connect 3K5-2SL Shelving and Cabinet shelving unit 25l Yellow,shelving unit,yellow,color_family=yellow; material=polypropylene; stackable=yes; storage_type=shelving unit; volume_l=25
+STO-MNHH64I2,/proc/catalog/storage/shelving_cabinets/STO-MNHH64I2.json,Keter,Workshop,Connect 3K5-2SL,Keter Workshop Connect 3K5-2SL Shelving and Cabinet shelving unit 80l Yellow,shelving unit,yellow,color_family=yellow; material=polypropylene; stackable=system only; storage_type=shelving unit; volume_l=80
+STO-QSJE0US9,/proc/catalog/storage/shelving_cabinets/STO-QSJE0US9.json,Keter,Workshop,Connect 3K5-2SL,Keter Workshop Connect 3K5-2SL Shelving and Cabinet workshop cart 80l Green,workshop cart,green,color_family=green; material=polypropylene; stackable=system only; storage_type=workshop cart; volume_l=80
+STO-UAMOIAXC,/proc/catalog/storage/shelving_cabinets/STO-UAMOIAXC.json,Keter,Workshop,Connect 3K5-2SL,Keter Workshop Connect 3K5-2SL Shelving and Cabinet workshop cart 60l Black,workshop cart,black,color_family=black; material=polypropylene; stackable=system only; storage_type=workshop cart; volume_l=60
+Next step_3... Run SQL with Vienna stores LEFT JOIN inventory for SKU STO-QSJE0US9 to compute total available_today including zero-availability branches and return all Vienna store paths. (11256 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH vienna_stores AS (\n  SELECT id, path\n  FROM stores\n  WHERE city = 'Vienna'\n)\nSELECT COALESCE(SUM(COALESCE(i.available_today, 0)), 0) AS total_available_today,\n       GROUP_CONCAT(v.path, '\\n') AS vienna_store_paths\nFROM vienna_stores v\nLEFT JOIN inventory i\n  ON i.store_id = v.id\n AND i.sku = 'STO-QSJE0US9';"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH vienna_stores AS (
+  SELECT id, path
+  FROM stores
+  WHERE city = 'Vienna'
+)
+SELECT COALESCE(SUM(COALESCE(i.available_today, 0)), 0) AS total_available_today,
+       GROUP_CONCAT(v.path, '\n') AS vienna_store_paths
+FROM vienna_stores v
+LEFT JOIN inventory i
+  ON i.store_id = v.id
+ AND i.sku = 'STO-QSJE0US9';
+SQL
+total_available_today,vienna_store_paths
+10,/proc/stores/store_vienna_praterstern.json\n/proc/stores/store_vienna_meidling.json
+Next step_4... Return final completion with exact numeric message and required citations. (11624 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Identified requested product variant SKU/path', 'Aggregated Vienna-wide available_today including zero-availability stores', 'Collected all Vienna store paths for citation'] message='10' grounding_refs=['/proc/catalog/storage/shelving_cabinets/STO-QSJE0US9.json', '/proc/stores/store_vienna_praterstern.json', '/proc/stores/store_vienna_meidling.json'] outcome='OUTCOME_OK' verified=True
+[33mcorrection 1/2: re-prompting[0m
+Next step_5... Query Vienna stores with LEFT JOIN inventory for SKU STO-QSJE0US9, returning one row per store path and available_today. (15164 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT s.path, COALESCE(i.available_today, 0) AS available_today\nFROM stores s\nLEFT JOIN inventory i\n  ON i.store_id = s.id\n AND i.sku = 'STO-QSJE0US9'\nWHERE s.city = 'Vienna'\nORDER BY s.path;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT s.path, COALESCE(i.available_today, 0) AS available_today
+FROM stores s
+LEFT JOIN inventory i
+  ON i.store_id = s.id
+ AND i.sku = 'STO-QSJE0US9'
+WHERE s.city = 'Vienna'
+ORDER BY s.path;
+SQL
+path,available_today
+/proc/stores/store_vienna_meidling.json,10
+/proc/stores/store_vienna_praterstern.json,0
+Next step_6... Return corrected final completion with exact numeric output and verified grounding refs. (13816 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Confirmed target product path', 'Confirmed each Vienna store path with per-store availability', 'Re-derived total availability from confirmed rows'] message='10' grounding_refs=['/proc/catalog/storage/shelving_cabinets/STO-QSJE0US9.json', '/proc/stores/store_vienna_meidling.json', '/proc/stores/store_vienna_praterstern.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Confirmed target product path
+- Confirmed each Vienna store path with per-store availability
+- Re-derived total availability from confirmed rows
+
+[34mAGENT SUMMARY: 10[0m
+- [34m/proc/catalog/storage/shelving_cabinets/STO-QSJE0US9.json[0m
+- [34m/proc/stores/store_vienna_meidling.json[0m
+- [34m/proc/stores/store_vienna_praterstern.json[0m

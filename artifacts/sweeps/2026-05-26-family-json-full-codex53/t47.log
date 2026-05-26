@@ -1,0 +1,365 @@
+TASK t47 (model codex:gpt-5.3-codex)
+INSTRUCTION: I'm preparing a quote for a customer from this pasted product list. Check each row against our exact catalogue and my store's same-day availability.
+
+Input format:
+RowID	description	quantity
+
+Return exactly this tab-separated output table, including the header, with rows in the same order:
+RowID	SKU	in_stock	match
+
+If the description is not an exact catalogue product, leave SKU and in_stock empty and set match=false. If the product exists, set in_stock to the quantity available today in my store. match is true only when the exact product exists and in_stock is at least the requested quantity.
+
+Rows:
+61x4N	the Anchor and Wall Plug from Fischer in the Fischer SX SX 7UY-G03 Anchor and Wall Plug line that has anchor type cavity fixing	2
+LHQDe	the Tool Box and Bag from Festool in the Festool Modular CTL XPW-76I Tool Box and Bag line that has storage type tool box	3
+GrmZ8	the Work Gloves from Portwest in the Portwest PW3 DX 3TU-ST2 Work Gloves line that has size L	1
+3me98	the Valve and Connector from Geberit in the Geberit Mapress Silent IC5-GU6 Valve and Connector line that has connector type thread adapter	13
+3Lj9N	the LED Bulb from Philips in the Philips Professional Hue 3JS-MSN LED Bulb line that has wattage 10 W and luminous flux 470 lm and has dimmable yes	1
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2025-10-08T16:53:18Z
+[32mAUTO[0m: /bin/id
+user: emp_026
+roles: employee, store_manager, discount_manager, refund_manager, inventory_viewer, fulfillment_viewer, customer_service
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query active employee -> store mapping (store_id and store path) for emp_026. (19387 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT e.id AS employee_id, e.path AS employee_path, e.store_id, s.path AS store_path, s.name AS store_name, s.city\nFROM employees e\nJOIN stores s ON s.id = e.store_id\nWHERE e.id = 'emp_026';"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT e.id AS employee_id, e.path AS employee_path, e.store_id, s.path AS store_path, s.name AS store_name, s.city
+FROM employees e
+JOIN stores s ON s.id = e.store_id
+WHERE e.id = 'emp_026';
+SQL
+employee_id,employee_path,store_id,store_path,store_name,city
+emp_026,/proc/employees/emp_026.json,store_salzburg_elisabeth_vorstadt,/proc/stores/store_salzburg_elisabeth_vorstadt.json,PowerTool Salzburg Elisabeth-Vorstadt,Salzburg
+Next step_2... Resolve exact SKU candidates for all five rows using products + product_kinds + families + product_properties with required attributes. (27445 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH req(row_id, category_name, kind_name, brand, series, model, prop1_key, prop1_text, prop1_num, prop2_key, prop2_text, prop2_num, prop3_key, prop3_text, prop3_num) AS (\n  VALUES\n    ('61x4N','Anchors & Fasteners','Anchor and Wall Plug','Fischer','SX','7UY-G03','anchor_type','cavity fixing',NULL,NULL,NULL,NULL,NULL,NULL,NULL),\n    ('LHQDe','Storage & Organization','Tool Box and Bag','Festool','Modular','CTL XPW-76I','storage_type','tool box',NULL,NULL,NULL,NULL,NULL,NULL,NULL),\n    ('GrmZ8','Safety Equipment','Work Gloves','Portwest','PW3','DX 3TU-ST2','size','L',NULL,NULL,NULL,NULL,NULL,NULL,NULL),\n    ('3me98','Plumbing','Valve and Connector','Geberit','Mapress Silent','IC5-GU6','connector_type','thread adapter',NULL,NULL,NULL,NULL,NULL,NULL,NULL),\n    ('3Lj9N','Lighting','LED Bulb','Philips','Professional Hue','3JS-MSN','dimmable','yes',NULL,'wattage',NULL,10,'luminous_flux',NULL,470)\n)\nSELECT r.row_id, p.sku, p.path AS product_path, pk.name AS kind, p.brand, p.series, p.model,\n       pp1.key AS pp1_key, pp1.value_text AS pp1_text, pp1.value_number AS pp1_num,\n       pp2.key AS pp2_key, pp2.value_text AS pp2_text, pp2.value_number AS pp2_num,\n       pp3.key AS pp3_key, pp3.value_text AS pp3_text, pp3.value_number AS pp3_num\nFROM req r\nJOIN products p\n  ON p.brand = r.brand AND p.series = r.series AND p.model = r.model\nJOIN product_kinds pk ON pk.id = p.kind_id AND pk.name = r.kind_name\nLEFT JOIN product_properties pp1 ON pp1.sku = p.sku AND pp1.key = r.prop1_key\nLEFT JOIN product_properties pp2 ON pp2.sku = p.sku AND pp2.key = r.prop2_key\nLEFT JOIN product_properties pp3 ON pp3.sku = p.sku AND pp3.key = r.prop3_key\nWHERE (r.prop1_key IS NULL OR (pp1.value_text = r.prop1_text OR (r.prop1_num IS NOT NULL AND pp1.value_number = r.prop1_num)))\n  AND (r.prop2_key IS NULL OR (pp2.value_text = r.prop2_text OR (r.prop2_num IS NOT NULL AND pp2.value_number = r.prop2_num)))\n  AND (r.prop3_key IS NULL OR (pp3.value_text = r.prop3_text OR (r.prop3_num IS NOT NULL AND pp3.value_number = r.prop3_num)))\nORDER BY r.row_id, p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH req(row_id, category_name, kind_name, brand, series, model, prop1_key, prop1_text, prop1_num, prop2_key, prop2_text, prop2_num, prop3_key, prop3_text, prop3_num) AS (
+  VALUES
+    ('61x4N','Anchors & Fasteners','Anchor and Wall Plug','Fischer','SX','7UY-G03','anchor_type','cavity fixing',NULL,NULL,NULL,NULL,NULL,NULL,NULL),
+    ('LHQDe','Storage & Organization','Tool Box and Bag','Festool','Modular','CTL XPW-76I','storage_type','tool box',NULL,NULL,NULL,NULL,NULL,NULL,NULL),
+    ('GrmZ8','Safety Equipment','Work Gloves','Portwest','PW3','DX 3TU-ST2','size','L',NULL,NULL,NULL,NULL,NULL,NULL,NULL),
+    ('3me98','Plumbing','Valve and Connector','Geberit','Mapress Silent','IC5-GU6','connector_type','thread adapter',NULL,NULL,NULL,NULL,NULL,NULL,NULL),
+    ('3Lj9N','Lighting','LED Bulb','Philips','Professional Hue','3JS-MSN','dimmable','yes',NULL,'wattage',NULL,10,'luminous_flux',NULL,470)
+)
+SELECT r.row_id, p.sku, p.path AS product_path, pk.name AS kind, p.brand, p.series, p.model,
+       pp1.key AS pp1_key, pp1.value_text AS pp1_text, pp1.value_number AS pp1_num,
+       pp2.key AS pp2_key, pp2.value_text AS pp2_text, pp2.value_number AS pp2_num,
+       pp3.key AS pp3_key, pp3.value_text AS pp3_text, pp3.value_number AS pp3_num
+FROM req r
+JOIN products p
+  ON p.brand = r.brand AND p.series = r.series AND p.model = r.model
+JOIN product_kinds pk ON pk.id = p.kind_id AND pk.name = r.kind_name
+LEFT JOIN product_properties pp1 ON pp1.sku = p.sku AND pp1.key = r.prop1_key
+LEFT JOIN product_properties pp2 ON pp2.sku = p.sku AND pp2.key = r.prop2_key
+LEFT JOIN product_properties pp3 ON pp3.sku = p.sku AND pp3.key = r.prop3_key
+WHERE (r.prop1_key IS NULL OR (pp1.value_text = r.prop1_text OR (r.prop1_num IS NOT NULL AND pp1.value_number = r.prop1_num)))
+  AND (r.prop2_key IS NULL OR (pp2.value_text = r.prop2_text OR (r.prop2_num IS NOT NULL AND pp2.value_number = r.prop2_num)))
+  AND (r.prop3_key IS NULL OR (pp3.value_text = r.prop3_text OR (r.prop3_num IS NOT NULL AND pp3.value_number = r.prop3_num)))
+ORDER BY r.row_id, p.sku;
+SQL
+row_id,sku,product_path,kind,brand,series,model,pp1_key,pp1_text,pp1_num,pp2_key,pp2_text,pp2_num,pp3_key,pp3_text,pp3_num
+GrmZ8,SFE-2WR7B6IJ,/proc/catalog/Portwest/SFE-2WR7B6IJ.json,Work Gloves,Portwest,PW3,DX 3TU-ST2,size,L,,,,,,,
+LHQDe,STO-3DUY38Z9,/proc/catalog/Festool/STO-3DUY38Z9.json,Tool Box and Bag,Festool,Modular,CTL XPW-76I,storage_type,tool box,,,,,,,
+Next step_3... Query candidate products and all properties for the three unmatched descriptions to verify whether exact requested attributes exist. (15301 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH req(row_id, kind_name, brand, series, model) AS (\n  VALUES\n    ('61x4N','Anchor and Wall Plug','Fischer','SX','7UY-G03'),\n    ('3me98','Valve and Connector','Geberit','Mapress Silent','IC5-GU6'),\n    ('3Lj9N','LED Bulb','Philips','Professional Hue','3JS-MSN')\n)\nSELECT r.row_id, p.sku, p.path AS product_path, pk.name AS kind, p.brand, p.series, p.model,\n       pp.key AS property_key, pp.value_text, pp.value_number\nFROM req r\nJOIN products p\n  ON p.brand = r.brand AND p.series = r.series AND p.model = r.model\nJOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE pk.name = r.kind_name\nORDER BY r.row_id, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH req(row_id, kind_name, brand, series, model) AS (
+  VALUES
+    ('61x4N','Anchor and Wall Plug','Fischer','SX','7UY-G03'),
+    ('3me98','Valve and Connector','Geberit','Mapress Silent','IC5-GU6'),
+    ('3Lj9N','LED Bulb','Philips','Professional Hue','3JS-MSN')
+)
+SELECT r.row_id, p.sku, p.path AS product_path, pk.name AS kind, p.brand, p.series, p.model,
+       pp.key AS property_key, pp.value_text, pp.value_number
+FROM req r
+JOIN products p
+  ON p.brand = r.brand AND p.series = r.series AND p.model = r.model
+JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE pk.name = r.kind_name
+ORDER BY r.row_id, p.sku, pp.key;
+SQL
+row_id,sku,product_path,kind,brand,series,model,property_key,value_text,value_number
+Next step_4... Query inventory.available_today for matched SKUs at store_salzburg_elisabeth_vorstadt. (15137 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT i.sku, i.available_today\nFROM inventory i\nWHERE i.store_id = 'store_salzburg_elisabeth_vorstadt'\n  AND i.sku IN ('SFE-2WR7B6IJ','STO-3DUY38Z9')\nORDER BY i.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT i.sku, i.available_today
+FROM inventory i
+WHERE i.store_id = 'store_salzburg_elisabeth_vorstadt'
+  AND i.sku IN ('SFE-2WR7B6IJ','STO-3DUY38Z9')
+ORDER BY i.sku;
+SQL
+sku,available_today
+STO-3DUY38Z9,3
+Next step_5... Run a left-join availability query over both matched SKUs with COALESCE to get definitive in_stock values. (26568 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH matched(row_id, sku) AS (\n  VALUES\n    ('LHQDe','STO-3DUY38Z9'),\n    ('GrmZ8','SFE-2WR7B6IJ')\n)\nSELECT m.row_id, m.sku, COALESCE(i.available_today, 0) AS available_today\nFROM matched m\nLEFT JOIN inventory i\n  ON i.store_id = 'store_salzburg_elisabeth_vorstadt'\n AND i.sku = m.sku\nORDER BY m.row_id;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH matched(row_id, sku) AS (
+  VALUES
+    ('LHQDe','STO-3DUY38Z9'),
+    ('GrmZ8','SFE-2WR7B6IJ')
+)
+SELECT m.row_id, m.sku, COALESCE(i.available_today, 0) AS available_today
+FROM matched m
+LEFT JOIN inventory i
+  ON i.store_id = 'store_salzburg_elisabeth_vorstadt'
+ AND i.sku = m.sku
+ORDER BY m.row_id;
+SQL
+row_id,sku,available_today
+GrmZ8,SFE-2WR7B6IJ,0
+LHQDe,STO-3DUY38Z9,3
+Next step_6... Report completion with the exact tab-separated output. (19368 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved active store for emp_026', 'Matched catalog SKUs exactly by requested descriptors/properties', 'Computed available_today for matched SKUs at the active store', 'Built final TSV in requested row order'] message='RowID\tSKU\tin_stock\tmatch\n61x4N\t\t\tfalse\nLHQDe\tSTO-3DUY38Z9\t3\ttrue\nGrmZ8\tSFE-2WR7B6IJ\t0\tfalse\n3me98\t\t\tfalse\n3Lj9N\t\t\tfalse' grounding_refs=['/proc/employees/emp_026.json', '/proc/stores/store_salzburg_elisabeth_vorstadt.json', '/proc/catalog/Festool/STO-3DUY38Z9.json', '/proc/catalog/Portwest/SFE-2WR7B6IJ.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved active store for emp_026
+- Matched catalog SKUs exactly by requested descriptors/properties
+- Computed available_today for matched SKUs at the active store
+- Built final TSV in requested row order
+
+[34mAGENT SUMMARY: RowID	SKU	in_stock	match
+61x4N			false
+LHQDe	STO-3DUY38Z9	3	true
+GrmZ8	SFE-2WR7B6IJ	0	false
+3me98			false
+3Lj9N			false[0m
+- [34m/proc/employees/emp_026.json[0m
+- [34m/proc/stores/store_salzburg_elisabeth_vorstadt.json[0m
+- [34m/proc/catalog/Festool/STO-3DUY38Z9.json[0m
+- [34m/proc/catalog/Portwest/SFE-2WR7B6IJ.json[0m

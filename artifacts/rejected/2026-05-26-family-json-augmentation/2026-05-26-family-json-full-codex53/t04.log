@@ -1,0 +1,414 @@
+TASK t04 (model codex:gpt-5.3-codex)
+INSTRUCTION: do you have the Storage Bin and Organizer from Stanley in the Stanley Professional FM 1LT-4QA Storage Bin and Organizer line that has storage type storage bin and color family Gray?
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query products joined with product_properties to find Stanley Professional FM 1LT-4QA variants matching storage_type=storage bin and color_family=Gray, returning sku and path. (21024 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       MAX(CASE WHEN pp.key='storage_type' THEN pp.value_text END) AS storage_type,\n       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'Stanley'\n  AND p.series = 'Professional FM'\n  AND p.model = '1LT-4QA'\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name\nHAVING storage_type = 'storage bin'\n   AND color_family = 'Gray';"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       MAX(CASE WHEN pp.key='storage_type' THEN pp.value_text END) AS storage_type,
+       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'Stanley'
+  AND p.series = 'Professional FM'
+  AND p.model = '1LT-4QA'
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name
+HAVING storage_type = 'storage bin'
+   AND color_family = 'Gray';
+SQL
+sku,path,brand,series,model,name,storage_type,color_family
+Next step_2... List candidate Stanley products for series/model and their property key/value pairs to identify exact stored values for storage type and color family. (13877 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pp.key, pp.value_text\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand = 'Stanley'\n  AND (p.series = 'Professional FM' OR p.model = '1LT-4QA' OR p.name LIKE '%Storage Bin and Organizer%')\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pp.key, pp.value_text
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand = 'Stanley'
+  AND (p.series = 'Professional FM' OR p.model = '1LT-4QA' OR p.name LIKE '%Storage Bin and Organizer%')
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,key,value_text
+STO-11K3KEZU,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-11K3KEZU.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 3l Black,color_family,black
+STO-11K3KEZU,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-11K3KEZU.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 3l Black,material,steel
+STO-11K3KEZU,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-11K3KEZU.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 3l Black,stackable,system only
+STO-11K3KEZU,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-11K3KEZU.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 3l Black,storage_type,storage bin
+STO-11K3KEZU,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-11K3KEZU.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 3l Black,volume_l,3
+STO-1AIC269I,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-1AIC269I.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 25l Clear,color_family,clear
+STO-1AIC269I,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-1AIC269I.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 25l Clear,material,steel
+STO-1AIC269I,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-1AIC269I.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 25l Clear,stackable,no
+STO-1AIC269I,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-1AIC269I.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 25l Clear,storage_type,storage bin
+STO-1AIC269I,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-1AIC269I.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 25l Clear,volume_l,25
+STO-1B0Y9AV6,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-1B0Y9AV6.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 5l Blue,color_family,blue
+STO-1B0Y9AV6,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-1B0Y9AV6.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 5l Blue,material,steel
+STO-1B0Y9AV6,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-1B0Y9AV6.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 5l Blue,stackable,system only
+STO-1B0Y9AV6,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-1B0Y9AV6.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 5l Blue,storage_type,stacking box
+STO-1B0Y9AV6,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-1B0Y9AV6.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 5l Blue,volume_l,5
+STO-1GWTKG92,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-1GWTKG92.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 8l Blue,color_family,blue
+STO-1GWTKG92,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-1GWTKG92.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 8l Blue,material,polypropylene
+STO-1GWTKG92,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-1GWTKG92.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 8l Blue,stackable,no
+STO-1GWTKG92,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-1GWTKG92.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 8l Blue,storage_type,organizer
+STO-1GWTKG92,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-1GWTKG92.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 8l Blue,volume_l,8
+STO-1L2PRI6A,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-1L2PRI6A.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 5l Black,color_family,black
+STO-1L2PRI6A,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-1L2PRI6A.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 5l Black,material,steel
+STO-1L2PRI6A,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-1L2PRI6A.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 5l Black,stackable,no
+STO-1L2PRI6A,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-1L2PRI6A.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 5l Black,storage_type,storage bin
+STO-1L2PRI6A,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-1L2PRI6A.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 5l Black,volume_l,5
+STO-1LQ7DQVR,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-1LQ7DQVR.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 12l Red,color_family,red
+STO-1LQ7DQVR,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-1LQ7DQVR.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 12l Red,material,polypropylene
+STO-1LQ7DQVR,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-1LQ7DQVR.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 12l Red,stackable,yes
+STO-1LQ7DQVR,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-1LQ7DQVR.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 12l Red,storage_type,organizer
+STO-1LQ7DQVR,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-1LQ7DQVR.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 12l Red,volume_l,12
+STO-26FTYYXC,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-26FTYYXC.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 25l Black,color_family,black
+STO-26FTYYXC,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-26FTYYXC.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 25l Black,material,steel
+STO-26FTYYXC,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-26FTYYXC.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 25l Black,stackable,no
+STO-26FTYYXC,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-26FTYYXC.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 25l Black,storage_type,storage bin
+STO-26FTYYXC,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-26FTYYXC.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer storage bin 25l Black,volume_l,25
+STO-271AZSNO,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-271AZSNO.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 5l Green,color_family,green
+STO-271AZSNO,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-271AZSNO.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 5l Green,material,steel
+STO-271AZSNO,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-271AZSNO.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 5l Green,stackable,system only
+STO-271AZSNO,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-271AZSNO.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 5l Green,storage_type,stacking box
+STO-271AZSNO,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-271AZSNO.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 5l Green,volume_l,5
+STO-27C18N18,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-27C18N18.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 3l Clear,color_family,clear
+STO-27C18N18,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-27C18N18.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 3l Clear,material,steel
+STO-27C18N18,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-27C18N18.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 3l Clear,stackable,no
+STO-27C18N18,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-27C18N18.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 3l Clear,storage_type,stacking box
+STO-27C18N18,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-27C18N18.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 3l Clear,volume_l,3
+STO-2AS2XYZJ,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2AS2XYZJ.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 18l Blue,color_family,blue
+STO-2AS2XYZJ,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2AS2XYZJ.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 18l Blue,material,polypropylene
+STO-2AS2XYZJ,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2AS2XYZJ.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 18l Blue,stackable,system only
+STO-2AS2XYZJ,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2AS2XYZJ.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 18l Blue,storage_type,organizer
+STO-2AS2XYZJ,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2AS2XYZJ.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 18l Blue,volume_l,18
+STO-2DYLO2CB,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-2DYLO2CB.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer organizer 18l Clear,color_family,clear
+STO-2DYLO2CB,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-2DYLO2CB.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer organizer 18l Clear,material,steel
+STO-2DYLO2CB,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-2DYLO2CB.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer organizer 18l Clear,stackable,no
+STO-2DYLO2CB,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-2DYLO2CB.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer organizer 18l Clear,storage_type,organizer
+STO-2DYLO2CB,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-2DYLO2CB.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer organizer 18l Clear,volume_l,18
+STO-2F0XWKC3,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-2F0XWKC3.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer parts case 8l Gray,color_family,gray
+STO-2F0XWKC3,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-2F0XWKC3.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer parts case 8l Gray,material,steel
+STO-2F0XWKC3,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-2F0XWKC3.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer parts case 8l Gray,stackable,yes
+STO-2F0XWKC3,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-2F0XWKC3.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer parts case 8l Gray,storage_type,parts case
+STO-2F0XWKC3,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-2F0XWKC3.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer parts case 8l Gray,volume_l,8
+STO-2G07G4PD,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2G07G4PD.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 12l Black,color_family,black
+STO-2G07G4PD,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2G07G4PD.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 12l Black,material,polypropylene
+STO-2G07G4PD,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2G07G4PD.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 12l Black,stackable,yes
+STO-2G07G4PD,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2G07G4PD.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 12l Black,storage_type,storage bin
+STO-2G07G4PD,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2G07G4PD.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 12l Black,volume_l,12
+STO-2RJWTXJ7,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2RJWTXJ7.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 8l Purple,color_family,purple
+STO-2RJWTXJ7,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2RJWTXJ7.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 8l Purple,material,polypropylene
+STO-2RJWTXJ7,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2RJWTXJ7.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 8l Purple,stackable,system only
+STO-2RJWTXJ7,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2RJWTXJ7.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 8l Purple,storage_type,storage bin
+STO-2RJWTXJ7,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-2RJWTXJ7.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 8l Purple,volume_l,8
+STO-31KA0G1R,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-31KA0G1R.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 8l Green,color_family,green
+STO-31KA0G1R,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-31KA0G1R.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 8l Green,material,steel
+STO-31KA0G1R,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-31KA0G1R.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 8l Green,stackable,system only
+STO-31KA0G1R,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-31KA0G1R.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 8l Green,storage_type,stacking box
+STO-31KA0G1R,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-31KA0G1R.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer stacking box 8l Green,volume_l,8
+STO-3L7MGY2K,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-3L7MGY2K.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer parts case 25l Gray,color_family,gray
+STO-3L7MGY2K,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-3L7MGY2K.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer parts case 25l Gray,material,steel
+STO-3L7MGY2K,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-3L7MGY2K.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer parts case 25l Gray,stackable,system only
+STO-3L7MGY2K,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-3L7MGY2K.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer parts case 25l Gray,storage_type,parts case
+STO-3L7MGY2K,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0009_2iliz7s2/STO-3L7MGY2K.json,Stanley,Professional,FM 39X-HFQ,Stanley Professional FM 39X-HFQ Storage Bin and Organizer parts case 25l Gray,volume_l,25
+STO-3N1QG0DF,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-3N1QG0DF.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 25l Yellow,color_family,yellow
+STO-3N1QG0DF,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-3N1QG0DF.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 25l Yellow,material,polypropylene
+STO-3N1QG0DF,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-3N1QG0DF.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 25l Yellow,stackable,system only
+STO-3N1QG0DF,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-3N1QG0DF.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 25l Yellow,storage_type,storage bin
+STO-3N1QG0DF,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-3N1QG0DF.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 25l Yellow,volume_l,25
+STO-4W7MLQH6,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-4W7MLQH6.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 3l Purple,color_family,purple
+STO-4W7MLQH6,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-4W7MLQH6.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 3l Purple,material,polypropylene
+STO-4W7MLQH6,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-4W7MLQH6.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 3l Purple,stackable,system only
+STO-4W7MLQH6,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-4W7MLQH6.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 3l Purple,storage_type,storage bin
+STO-4W7MLQH6,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-4W7MLQH6.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 3l Purple,volume_l,3
+STO-81YVMVK6,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-81YVMVK6.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 25l Yellow,color_family,yellow
+STO-81YVMVK6,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-81YVMVK6.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 25l Yellow,material,polypropylene
+STO-81YVMVK6,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-81YVMVK6.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 25l Yellow,stackable,yes
+STO-81YVMVK6,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-81YVMVK6.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 25l Yellow,storage_type,organizer
+STO-81YVMVK6,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-81YVMVK6.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer organizer 25l Yellow,volume_l,25
+STO-99WLI9F7,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-99WLI9F7.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer parts case 25l Purple,color_family,purple
+STO-99WLI9F7,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-99WLI9F7.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer parts case 25l Purple,material,polypropylene
+STO-99WLI9F7,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-99WLI9F7.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer parts case 25l Purple,stackable,no
+STO-99WLI9F7,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-99WLI9F7.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer parts case 25l Purple,storage_type,parts case
+STO-99WLI9F7,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-99WLI9F7.json,Stanley,Professional,FM 1LT-4QA,Stanley Professional FM 1LT-4QA Storage Bin and Organizer parts case 25l Purple,volume_l,25
+warning: result truncated at 100 rows
+Next step_3... Run a targeted SQL query for Stanley Professional FM 1LT-4QA with both required properties using case-normalized matching, returning sku and path. (12267 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.name\nFROM products p\nJOIN product_properties pp1 ON pp1.sku = p.sku AND pp1.key = 'storage_type'\nJOIN product_properties pp2 ON pp2.sku = p.sku AND pp2.key = 'color_family'\nWHERE p.brand = 'Stanley'\n  AND p.series = 'Professional'\n  AND p.model = 'FM 1LT-4QA'\n  AND LOWER(pp1.value_text) = 'storage bin'\n  AND LOWER(pp2.value_text) = 'gray'\nORDER BY p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.name
+FROM products p
+JOIN product_properties pp1 ON pp1.sku = p.sku AND pp1.key = 'storage_type'
+JOIN product_properties pp2 ON pp2.sku = p.sku AND pp2.key = 'color_family'
+WHERE p.brand = 'Stanley'
+  AND p.series = 'Professional'
+  AND p.model = 'FM 1LT-4QA'
+  AND LOWER(pp1.value_text) = 'storage bin'
+  AND LOWER(pp2.value_text) = 'gray'
+ORDER BY p.sku;
+SQL
+sku,path,name
+STO-NEPB9FPG,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-NEPB9FPG.json,Stanley Professional FM 1LT-4QA Storage Bin and Organizer storage bin 25l Gray
+Next step_4... Query inventory joined to stores for STO-NEPB9FPG, restricting to open stores and available_today > 0. (11228 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT s.path AS store_path, i.sku, i.available_today\nFROM inventory i\nJOIN stores s ON s.id = i.store_id\nWHERE i.sku = 'STO-NEPB9FPG'\n  AND s.is_open = 1\n  AND i.available_today > 0\nORDER BY i.available_today DESC;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT s.path AS store_path, i.sku, i.available_today
+FROM inventory i
+JOIN stores s ON s.id = i.store_id
+WHERE i.sku = 'STO-NEPB9FPG'
+  AND s.is_open = 1
+  AND i.available_today > 0
+ORDER BY i.available_today DESC;
+SQL
+store_path,sku,available_today
+/proc/stores/store_vienna_praterstern.json,STO-NEPB9FPG,11
+/proc/stores/store_vienna_meidling.json,STO-NEPB9FPG,3
+/proc/stores/store_graz_jakomini.json,STO-NEPB9FPG,3
+Next step_5... Report completion with the required yes/no token and grounded references. (13986 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved the exact Stanley FM 1LT-4QA gray storage-bin variant in products/properties.', 'Verified positive available_today inventory in open stores for that SKU.', 'Prepared final yes/no availability response with record-path grounding.'] message='<YES>' grounding_refs=['/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-NEPB9FPG.json', '/proc/stores/store_vienna_praterstern.json', '/proc/stores/store_vienna_meidling.json', '/proc/stores/store_graz_jakomini.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved the exact Stanley FM 1LT-4QA gray storage-bin variant in products/properties.
+- Verified positive available_today inventory in open stores for that SKU.
+- Prepared final yes/no availability response with record-path grounding.
+
+[34mAGENT SUMMARY: <YES>[0m
+- [34m/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0016_x8ssehy3/STO-NEPB9FPG.json[0m
+- [34m/proc/stores/store_vienna_praterstern.json[0m
+- [34m/proc/stores/store_vienna_meidling.json[0m
+- [34m/proc/stores/store_graz_jakomini.json[0m
