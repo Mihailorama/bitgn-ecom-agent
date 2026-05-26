@@ -74,7 +74,7 @@ upgrade if validation shows family-specific weaknesses.
 Sources: https://bitgn.com/insights/ (operation-pangolin, codex-on-rails,
 skifmax rules-evolution, plan-repl-agent, azamat1c filesystem-agent).
 
-## Status & next steps (updated 2026-05-25, evening state)
+## Status & next steps (updated 2026-05-26, morning state)
 
 Full winning plan: `~/.claude/plans/graceful-nibbling-backus.md` (local to the web
 session - the summary below is the durable copy). Score-vs-speed log: `RESULTS.md`.
@@ -139,6 +139,32 @@ latest stability runs are mostly `43/44`:
 - Runtime code was reverted; the WIP diff is preserved as
   `artifacts/sweeps/2026-05-25-t16-exact-variant-rejected/wip.diff`.
 
+**2026-05-26 stability check and rejected strict-only probe.**
+- Current restored runtime was re-swept with
+  `PARALLEL=6 MODEL_ID=codex:gpt-5.3-codex make sweep`:
+  - `2026-05-26 07:59`: `93.2%` (`41/44`) at `236s`, misses observed in
+    `t15`, `t16`, and `t32`. Logs:
+    `artifacts/sweeps/2026-05-26-current-regression-41of44/`.
+  - `t15` and `t16` used `_try_inventory_count`; this confirms the live
+    deterministic resolver can still produce wrong-count or wrong-required-ref
+    failures even after the broad class-split rollback.
+  - `t32` went through the LLM path and picked a plausible but wrong catalogue
+    SKU/ref for a property-check task; treat this as the same underlying
+    product-variant/ref-selection family, not as a separate prompt-only issue.
+- A narrow strict-only probe was tested: product checks and inventory counts
+  used `strict_props=True` with no relaxed fallback. The targeted subset could
+  pass, but full sweep rejected it:
+  - `2026-05-26 08:09`: `93.2%` (`41/44`) at `253s`, misses in `t12`, `t15`,
+    and `t16`. Logs:
+    `artifacts/sweeps/2026-05-26-rejected-strict-only-41of44/`.
+  - `t15`/`t16` fell back to slow LLM resolution and became ambiguous or cited
+    invalid refs. `t12` shows unrelated catalogue-count variance (`<COUNT:308>`
+    vs the expected filtered count).
+  - Security grep stayed clean for both 2026-05-26 sweeps.
+- Decision: do not remove relaxed fallback globally. The right next step is a
+  typed product-variant resolver plus ref policy tests, then class-local routing
+  that only bypasses fallback when the resolver can prove exactness.
+
 Current state in `agent.py` includes:
 - EvidenceLedger + `_harvest`: tracks every confirmed `/proc` path (SQL `path` col,
   read/stat/find/search/list).
@@ -149,8 +175,8 @@ Current state in `agent.py` includes:
 - Format enforcement (`_required_format`/`_enforce_format_inplace`): coerces
   `<COUNT:%d>`/`[QTY:%d]`/`count : %d`; never synthesizes yes/no polarity.
 - Variant-disambiguation + deterministic inventory resolution for multi-item
-  counts (currently strict product selection; relaxed fallback removed to reduce
-  wrong-SKU grounding on `t13-t16`).
+  counts (currently strict-first product selection with relaxed fallback; global
+  strict-only mode is rejected because it regresses full sweeps).
 - Outcome decision-order (security-primary) + 3DS recovery requiring verified
   ownership+eligibility (closed a v6 security miss; over-refusals t21/t24/t41/t43 fixed).
 - Cite-the-subject gate (`_subject_paths`): OK-only, nudges citing a named
@@ -175,7 +201,9 @@ is still unmet at 100% quality.
    captured useful evidence but reduced the headline score. Start from restored
    `66a7ccb` algorithm state.
 2. Close the restored-baseline `t16` inventory grounding miss with a narrow
-   resolver, but do not revive the rejected exact-variant branch verbatim.
+   resolver, but do not revive either rejected branch verbatim:
+   `2026-05-25-t16-exact-variant-rejected` or
+   `2026-05-26-rejected-strict-only-41of44`.
    Required shape: structured `resolve_product_variant()` returning exact
    candidate groups plus reason codes (`exact`, `ambiguous`, `unresolved`), then
    a separate `build_inventory_refs()` policy that can be unit-tested against

@@ -1,0 +1,531 @@
+TASK t20 (model codex:gpt-5.3-codex)
+INSTRUCTION: I can visit any PowerTool branch in Vienna today. Across every Vienna branch, including branches with 0 availability, how many units of product (the Metal and Concrete Paint from Sikkens in the Sikkens Quick Dry SIK 1H0-QNN Metal and Concrete Paint line that has product type concrete sealer and color family Brown) are available today? Answer exactly as "[QTY:%d]" and cite every city store record plus the product record.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query SQL to resolve the exact matching product variant and confirm its path/sku/properties. (24497 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       MAX(CASE WHEN pp.key='product_type' THEN pp.value_text END) AS product_type,\n       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family\nFROM products p\nJOIN product_properties pp ON pp.sku = p.sku\nWHERE (p.brand='Sikkens' OR p.name LIKE '%Sikkens%')\n  AND (p.series='SIK 1H0-QNN' OR p.model='SIK 1H0-QNN' OR p.name LIKE '%SIK 1H0-QNN%')\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name\nHAVING product_type='concrete sealer' AND color_family='Brown';"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       MAX(CASE WHEN pp.key='product_type' THEN pp.value_text END) AS product_type,
+       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family
+FROM products p
+JOIN product_properties pp ON pp.sku = p.sku
+WHERE (p.brand='Sikkens' OR p.name LIKE '%Sikkens%')
+  AND (p.series='SIK 1H0-QNN' OR p.model='SIK 1H0-QNN' OR p.name LIKE '%SIK 1H0-QNN%')
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name
+HAVING product_type='concrete sealer' AND color_family='Brown';
+SQL
+sku,path,brand,series,model,name,product_type,color_family
+Next step_2... Run a broad SQL discovery query over candidate Sikkens Quick Dry items and their property key/value pairs. (12135 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pp.key, pp.value_text\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand LIKE '%Sikkens%'\n   OR p.series LIKE '%Quick Dry%'\n   OR p.model LIKE '%SIK%'\n   OR p.name LIKE '%Metal%Concrete%Paint%'\nORDER BY p.brand, p.series, p.model, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name, pp.key, pp.value_text
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand LIKE '%Sikkens%'
+   OR p.series LIKE '%Quick Dry%'
+   OR p.model LIKE '%SIK%'
+   OR p.name LIKE '%Metal%Concrete%Paint%'
+ORDER BY p.brand, p.series, p.model, p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,key,value_text
+PNT-2A8SURQM,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2A8SURQM.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Gray gloss 500ml,base_type,water based
+PNT-2A8SURQM,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2A8SURQM.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Gray gloss 500ml,color_family,gray
+PNT-2A8SURQM,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2A8SURQM.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Gray gloss 500ml,finish,gloss
+PNT-2A8SURQM,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2A8SURQM.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Gray gloss 500ml,product_type,primer
+PNT-2A8SURQM,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2A8SURQM.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Gray gloss 500ml,use_area,interior/exterior
+PNT-2A8SURQM,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2A8SURQM.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Gray gloss 500ml,volume_ml,500
+PNT-2C7AH3PD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2C7AH3PD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer White matte 5000ml,base_type,water based
+PNT-2C7AH3PD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2C7AH3PD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer White matte 5000ml,color_family,white
+PNT-2C7AH3PD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2C7AH3PD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer White matte 5000ml,finish,matte
+PNT-2C7AH3PD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2C7AH3PD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer White matte 5000ml,product_type,concrete sealer
+PNT-2C7AH3PD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2C7AH3PD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer White matte 5000ml,use_area,interior/exterior
+PNT-2C7AH3PD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2C7AH3PD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer White matte 5000ml,volume_ml,5000
+PNT-2HCS528L,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2HCS528L.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint radiator paint White gloss 500ml,base_type,water based
+PNT-2HCS528L,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2HCS528L.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint radiator paint White gloss 500ml,color_family,white
+PNT-2HCS528L,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2HCS528L.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint radiator paint White gloss 500ml,finish,gloss
+PNT-2HCS528L,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2HCS528L.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint radiator paint White gloss 500ml,product_type,radiator paint
+PNT-2HCS528L,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2HCS528L.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint radiator paint White gloss 500ml,use_area,interior/exterior
+PNT-2HCS528L,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2HCS528L.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint radiator paint White gloss 500ml,volume_ml,500
+PNT-2JMWR9WI,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2JMWR9WI.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer Yellow satin 750ml,base_type,water based
+PNT-2JMWR9WI,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2JMWR9WI.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer Yellow satin 750ml,color_family,yellow
+PNT-2JMWR9WI,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2JMWR9WI.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer Yellow satin 750ml,finish,satin
+PNT-2JMWR9WI,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2JMWR9WI.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer Yellow satin 750ml,product_type,concrete sealer
+PNT-2JMWR9WI,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2JMWR9WI.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer Yellow satin 750ml,use_area,interior/exterior
+PNT-2JMWR9WI,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2JMWR9WI.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer Yellow satin 750ml,volume_ml,750
+PNT-2TO9XITD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2TO9XITD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Green transparent 250ml,base_type,water based
+PNT-2TO9XITD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2TO9XITD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Green transparent 250ml,color_family,green
+PNT-2TO9XITD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2TO9XITD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Green transparent 250ml,finish,transparent
+PNT-2TO9XITD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2TO9XITD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Green transparent 250ml,product_type,primer
+PNT-2TO9XITD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2TO9XITD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Green transparent 250ml,use_area,interior/exterior
+PNT-2TO9XITD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2TO9XITD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Green transparent 250ml,volume_ml,250
+PNT-2XXHB4UD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2XXHB4UD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint metal paint Purple matte 250ml,base_type,water based
+PNT-2XXHB4UD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2XXHB4UD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint metal paint Purple matte 250ml,color_family,purple
+PNT-2XXHB4UD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2XXHB4UD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint metal paint Purple matte 250ml,finish,matte
+PNT-2XXHB4UD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2XXHB4UD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint metal paint Purple matte 250ml,product_type,metal paint
+PNT-2XXHB4UD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2XXHB4UD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint metal paint Purple matte 250ml,use_area,interior/exterior
+PNT-2XXHB4UD,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2XXHB4UD.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint metal paint Purple matte 250ml,volume_ml,250
+PNT-2ZRKNNYE,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2ZRKNNYE.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer Beige satin 1000ml,base_type,water based
+PNT-2ZRKNNYE,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2ZRKNNYE.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer Beige satin 1000ml,color_family,beige
+PNT-2ZRKNNYE,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2ZRKNNYE.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer Beige satin 1000ml,finish,satin
+PNT-2ZRKNNYE,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2ZRKNNYE.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer Beige satin 1000ml,product_type,concrete sealer
+PNT-2ZRKNNYE,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2ZRKNNYE.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer Beige satin 1000ml,use_area,interior/exterior
+PNT-2ZRKNNYE,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-2ZRKNNYE.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint concrete sealer Beige satin 1000ml,volume_ml,1000
+PNT-3254U6XH,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3254U6XH.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Red matte 750ml,base_type,water based
+PNT-3254U6XH,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3254U6XH.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Red matte 750ml,color_family,red
+PNT-3254U6XH,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3254U6XH.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Red matte 750ml,finish,matte
+PNT-3254U6XH,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3254U6XH.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Red matte 750ml,product_type,primer
+PNT-3254U6XH,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3254U6XH.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Red matte 750ml,use_area,interior/exterior
+PNT-3254U6XH,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3254U6XH.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint primer Red matte 750ml,volume_ml,750
+PNT-3AQERVFR,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3AQERVFR.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint facade paint Red satin 2500ml,base_type,water based
+PNT-3AQERVFR,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3AQERVFR.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint facade paint Red satin 2500ml,color_family,red
+PNT-3AQERVFR,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3AQERVFR.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint facade paint Red satin 2500ml,finish,satin
+PNT-3AQERVFR,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3AQERVFR.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint facade paint Red satin 2500ml,product_type,facade paint
+PNT-3AQERVFR,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3AQERVFR.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint facade paint Red satin 2500ml,use_area,interior/exterior
+PNT-3AQERVFR,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3AQERVFR.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint facade paint Red satin 2500ml,volume_ml,2500
+PNT-3OXN57K4,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3OXN57K4.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint radiator paint Gray gloss 500ml,base_type,water based
+PNT-3OXN57K4,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3OXN57K4.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint radiator paint Gray gloss 500ml,color_family,gray
+PNT-3OXN57K4,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3OXN57K4.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint radiator paint Gray gloss 500ml,finish,gloss
+PNT-3OXN57K4,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3OXN57K4.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint radiator paint Gray gloss 500ml,product_type,radiator paint
+PNT-3OXN57K4,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3OXN57K4.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint radiator paint Gray gloss 500ml,use_area,interior/exterior
+PNT-3OXN57K4,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3OXN57K4.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint radiator paint Gray gloss 500ml,volume_ml,500
+PNT-3PMZCGQ1,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3PMZCGQ1.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint facade paint Yellow satin 5000ml,base_type,water based
+PNT-3PMZCGQ1,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3PMZCGQ1.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint facade paint Yellow satin 5000ml,color_family,yellow
+PNT-3PMZCGQ1,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3PMZCGQ1.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint facade paint Yellow satin 5000ml,finish,satin
+PNT-3PMZCGQ1,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3PMZCGQ1.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint facade paint Yellow satin 5000ml,product_type,facade paint
+PNT-3PMZCGQ1,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3PMZCGQ1.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint facade paint Yellow satin 5000ml,use_area,interior/exterior
+PNT-3PMZCGQ1,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-3PMZCGQ1.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint facade paint Yellow satin 5000ml,volume_ml,5000
+PNT-X8J1D7Y8,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-X8J1D7Y8.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint metal paint Gray transparent 750ml,base_type,water based
+PNT-X8J1D7Y8,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-X8J1D7Y8.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint metal paint Gray transparent 750ml,color_family,gray
+PNT-X8J1D7Y8,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-X8J1D7Y8.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint metal paint Gray transparent 750ml,finish,transparent
+PNT-X8J1D7Y8,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-X8J1D7Y8.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint metal paint Gray transparent 750ml,product_type,metal paint
+PNT-X8J1D7Y8,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-X8J1D7Y8.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint metal paint Gray transparent 750ml,use_area,interior/exterior
+PNT-X8J1D7Y8,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0012_ia5i7p0g/PNT-X8J1D7Y8.json,Caparol,AmphiSilan,Amphi 25Y-W4E,Caparol AmphiSilan Amphi 25Y-W4E Metal and Concrete Paint metal paint Gray transparent 750ml,volume_ml,750
+PNT-113TAZF0,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-113TAZF0.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint metal paint Gray matte 750ml,base_type,solvent based
+PNT-113TAZF0,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-113TAZF0.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint metal paint Gray matte 750ml,color_family,gray
+PNT-113TAZF0,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-113TAZF0.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint metal paint Gray matte 750ml,finish,matte
+PNT-113TAZF0,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-113TAZF0.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint metal paint Gray matte 750ml,product_type,metal paint
+PNT-113TAZF0,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-113TAZF0.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint metal paint Gray matte 750ml,use_area,interior/exterior
+PNT-113TAZF0,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-113TAZF0.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint metal paint Gray matte 750ml,volume_ml,750
+PNT-14HVSDLU,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-14HVSDLU.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint primer Orange transparent 1000ml,base_type,solvent based
+PNT-14HVSDLU,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-14HVSDLU.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint primer Orange transparent 1000ml,color_family,orange
+PNT-14HVSDLU,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-14HVSDLU.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint primer Orange transparent 1000ml,finish,transparent
+PNT-14HVSDLU,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-14HVSDLU.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint primer Orange transparent 1000ml,product_type,primer
+PNT-14HVSDLU,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-14HVSDLU.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint primer Orange transparent 1000ml,use_area,interior/exterior
+PNT-14HVSDLU,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-14HVSDLU.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint primer Orange transparent 1000ml,volume_ml,1000
+PNT-1C6IUVQP,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-1C6IUVQP.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint facade paint Green gloss 5000ml,base_type,solvent based
+PNT-1C6IUVQP,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-1C6IUVQP.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint facade paint Green gloss 5000ml,color_family,green
+PNT-1C6IUVQP,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-1C6IUVQP.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint facade paint Green gloss 5000ml,finish,gloss
+PNT-1C6IUVQP,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-1C6IUVQP.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint facade paint Green gloss 5000ml,product_type,facade paint
+PNT-1C6IUVQP,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-1C6IUVQP.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint facade paint Green gloss 5000ml,use_area,interior/exterior
+PNT-1C6IUVQP,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-1C6IUVQP.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint facade paint Green gloss 5000ml,volume_ml,5000
+PNT-1LUXIUZ2,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-1LUXIUZ2.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint metal paint Orange matte 1000ml,base_type,solvent based
+PNT-1LUXIUZ2,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-1LUXIUZ2.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint metal paint Orange matte 1000ml,color_family,orange
+PNT-1LUXIUZ2,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-1LUXIUZ2.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint metal paint Orange matte 1000ml,finish,matte
+PNT-1LUXIUZ2,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-1LUXIUZ2.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint metal paint Orange matte 1000ml,product_type,metal paint
+PNT-1LUXIUZ2,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-1LUXIUZ2.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint metal paint Orange matte 1000ml,use_area,interior/exterior
+PNT-1LUXIUZ2,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-1LUXIUZ2.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint metal paint Orange matte 1000ml,volume_ml,1000
+PNT-28URXGN0,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-28URXGN0.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint primer Red gloss 2500ml,base_type,solvent based
+PNT-28URXGN0,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-28URXGN0.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint primer Red gloss 2500ml,color_family,red
+PNT-28URXGN0,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-28URXGN0.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint primer Red gloss 2500ml,finish,gloss
+PNT-28URXGN0,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0005_19lkhww7/PNT-28URXGN0.json,Caparol,AmphiSilan,Indeko FX5-0YV,Caparol AmphiSilan Indeko FX5-0YV Metal and Concrete Paint primer Red gloss 2500ml,product_type,primer
+warning: result truncated at 100 rows
+Next step_3... Run a focused SQL query for Sikkens/Quick Dry/SIK 1H0-QNN variants with property pivots to confirm whether a Brown concrete sealer SKU exists. (14896 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       MAX(CASE WHEN pp.key='product_type' THEN pp.value_text END) AS product_type,\n       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family\nFROM products p\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nWHERE p.brand LIKE '%Sikkens%'\n   OR p.series LIKE '%Quick Dry%'\n   OR p.model LIKE '%SIK 1H0-QNN%'\n   OR p.name LIKE '%Sikkens Quick Dry SIK 1H0-QNN%'\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name\nORDER BY p.brand, p.series, p.model, p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       MAX(CASE WHEN pp.key='product_type' THEN pp.value_text END) AS product_type,
+       MAX(CASE WHEN pp.key='color_family' THEN pp.value_text END) AS color_family
+FROM products p
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.brand LIKE '%Sikkens%'
+   OR p.series LIKE '%Quick Dry%'
+   OR p.model LIKE '%SIK 1H0-QNN%'
+   OR p.name LIKE '%Sikkens Quick Dry SIK 1H0-QNN%'
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name
+ORDER BY p.brand, p.series, p.model, p.sku;
+SQL
+sku,path,brand,series,model,name,product_type,color_family
+PNT-16YE4LCA,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-16YE4LCA.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint metal paint White gloss 2500ml,metal paint,white
+PNT-1GPWKPPQ,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-1GPWKPPQ.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint radiator paint Gray transparent 250ml,radiator paint,gray
+PNT-1I5XG9ZU,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-1I5XG9ZU.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint facade paint Gray matte 5000ml,facade paint,gray
+PNT-1LI73OWM,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-1LI73OWM.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint radiator paint Orange satin 1000ml,radiator paint,orange
+PNT-1QNOS2H1,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-1QNOS2H1.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint metal paint Black matte 5000ml,metal paint,black
+PNT-207PI451,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-207PI451.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint concrete sealer Beige transparent 750ml,concrete sealer,beige
+PNT-2I6TLPLI,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-2I6TLPLI.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint facade paint White matte 1000ml,facade paint,white
+PNT-2N2D9U2B,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-2N2D9U2B.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint facade paint Yellow matte 5000ml,facade paint,yellow
+PNT-2O2OWDQB,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-2O2OWDQB.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint radiator paint Blue matte 250ml,radiator paint,blue
+PNT-2T6YD8BM,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-2T6YD8BM.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint radiator paint White matte 250ml,radiator paint,white
+PNT-32G4UH2B,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-32G4UH2B.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint metal paint Green transparent 500ml,metal paint,green
+PNT-37IIBHOF,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-37IIBHOF.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint metal paint Beige satin 750ml,metal paint,beige
+PNT-380RWAWC,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-380RWAWC.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint facade paint White transparent 5000ml,facade paint,white
+PNT-3FPBCZ42,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-3FPBCZ42.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint metal paint Beige matte 500ml,metal paint,beige
+PNT-3K0RV0TA,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-3K0RV0TA.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint primer Black gloss 2500ml,primer,black
+PNT-3M78BT8U,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-3M78BT8U.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint facade paint Beige transparent 5000ml,facade paint,beige
+PNT-3PRJ0148,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-3PRJ0148.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint primer Beige transparent 500ml,primer,beige
+PNT-E7JQKC04,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-E7JQKC04.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint radiator paint White gloss 750ml,radiator paint,white
+PNT-OXN9M5C5,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-OXN9M5C5.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint concrete sealer Black satin 1000ml,concrete sealer,black
+PNT-ZLMZJ815,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0009_1yteaeq3/PNT-ZLMZJ815.json,Dulux,Quick Dry,Trade 2AS-9GY,Dulux Quick Dry Trade 2AS-9GY Metal and Concrete Paint primer Green transparent 500ml,primer,green
+PNT-10BV0IPT,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-10BV0IPT.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint radiator paint Gray satin 500ml,radiator paint,gray
+PNT-12DE6YYN,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-12DE6YYN.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint concrete sealer Gray gloss 2500ml,concrete sealer,gray
+PNT-18BENG6R,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-18BENG6R.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint radiator paint Yellow satin 500ml,radiator paint,yellow
+PNT-190M5UMW,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-190M5UMW.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint metal paint Brown satin 750ml,metal paint,brown
+PNT-1UQRLA1D,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-1UQRLA1D.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint concrete sealer Beige satin 500ml,concrete sealer,beige
+PNT-1VMNJICO,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-1VMNJICO.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint radiator paint Brown transparent 2500ml,radiator paint,brown
+PNT-1XOU40CM,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-1XOU40CM.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint radiator paint Orange matte 1000ml,radiator paint,orange
+PNT-2159F04K,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-2159F04K.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint radiator paint Yellow transparent 250ml,radiator paint,yellow
+PNT-246VKP5U,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-246VKP5U.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint radiator paint Blue satin 750ml,radiator paint,blue
+PNT-2YDI6KN7,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-2YDI6KN7.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint metal paint Blue gloss 500ml,metal paint,blue
+PNT-32ELUKZE,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-32ELUKZE.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint radiator paint White matte 1000ml,radiator paint,white
+PNT-34985WZY,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-34985WZY.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint primer Gray satin 250ml,primer,gray
+PNT-3CMUTM1X,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-3CMUTM1X.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint facade paint Brown satin 5000ml,facade paint,brown
+PNT-3DEHNTQ7,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-3DEHNTQ7.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint concrete sealer Green matte 1000ml,concrete sealer,green
+PNT-3NFMQO9X,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-3NFMQO9X.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint facade paint White satin 5000ml,facade paint,white
+PNT-5SN7HVBV,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-5SN7HVBV.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint primer Yellow gloss 5000ml,primer,yellow
+PNT-687RVLI5,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-687RVLI5.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint concrete sealer Green matte 750ml,concrete sealer,green
+PNT-I8SCBJBT,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-I8SCBJBT.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint primer Orange matte 1000ml,primer,orange
+PNT-IYGKAJXY,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-IYGKAJXY.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint concrete sealer Beige satin 2500ml,concrete sealer,beige
+PNT-JKA8DFZ6,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0010_e76hrxen/PNT-JKA8DFZ6.json,Dulux,Quick Dry,Weathershield 2ZJ-R8R,Dulux Quick Dry Weathershield 2ZJ-R8R Metal and Concrete Paint radiator paint Black matte 1000ml,radiator paint,black
+PNT-136QX4RF,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0004_2g3vz547/PNT-136QX4RF.json,Sikkens,Exterior,Cetol 3CU-TSJ,Sikkens Exterior Cetol 3CU-TSJ Wood Stain and Deck Oil deck oil Brown transparent 5000ml,deck oil,brown
+PNT-1WAH8GFG,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0004_2g3vz547/PNT-1WAH8GFG.json,Sikkens,Exterior,Cetol 3CU-TSJ,Sikkens Exterior Cetol 3CU-TSJ Wood Stain and Deck Oil deck oil Black matte 5000ml,deck oil,black
+PNT-1YBI10IL,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0004_2g3vz547/PNT-1YBI10IL.json,Sikkens,Exterior,Cetol 3CU-TSJ,Sikkens Exterior Cetol 3CU-TSJ Wood Stain and Deck Oil deck oil White satin 750ml,deck oil,white
+PNT-2MT1X4L4,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0004_2g3vz547/PNT-2MT1X4L4.json,Sikkens,Exterior,Cetol 3CU-TSJ,Sikkens Exterior Cetol 3CU-TSJ Wood Stain and Deck Oil wood stain Gray gloss 10000ml,wood stain,gray
+PNT-2NK3OOYK,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0004_2g3vz547/PNT-2NK3OOYK.json,Sikkens,Exterior,Cetol 3CU-TSJ,Sikkens Exterior Cetol 3CU-TSJ Wood Stain and Deck Oil wood stain White matte 2500ml,wood stain,white
+PNT-320T4RM0,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0004_2g3vz547/PNT-320T4RM0.json,Sikkens,Exterior,Cetol 3CU-TSJ,Sikkens Exterior Cetol 3CU-TSJ Wood Stain and Deck Oil lacquer White satin 1000ml,lacquer,white
+PNT-321E94T4,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0004_2g3vz547/PNT-321E94T4.json,Sikkens,Exterior,Cetol 3CU-TSJ,Sikkens Exterior Cetol 3CU-TSJ Wood Stain and Deck Oil primer White gloss 1000ml,primer,white
+PNT-8UHDLKZP,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0004_2g3vz547/PNT-8UHDLKZP.json,Sikkens,Exterior,Cetol 3CU-TSJ,Sikkens Exterior Cetol 3CU-TSJ Wood Stain and Deck Oil deck oil White satin 1000ml,deck oil,white
+PNT-1A80WB42,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-1A80WB42.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil deck oil Brown gloss 1000ml,deck oil,brown
+PNT-1DTT9N0D,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-1DTT9N0D.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil wood sealer White matte 1000ml,wood sealer,white
+PNT-1EU1OTR7,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-1EU1OTR7.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil wood sealer Brown gloss 1000ml,wood sealer,brown
+PNT-1Y0EVUPV,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-1Y0EVUPV.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil primer Gray matte 5000ml,primer,gray
+PNT-1ZF1KH2H,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-1ZF1KH2H.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil lacquer Green transparent 1000ml,lacquer,green
+PNT-203Q8WQC,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-203Q8WQC.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil wood stain Clear transparent 750ml,wood stain,clear
+PNT-2AEG52YR,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-2AEG52YR.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil wood stain Green matte 750ml,wood stain,green
+PNT-2HWNSV3W,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-2HWNSV3W.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil primer White satin 5000ml,primer,white
+PNT-2WRJ0VZM,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-2WRJ0VZM.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil wood sealer Beige gloss 750ml,wood sealer,beige
+PNT-2Z3B1LOG,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-2Z3B1LOG.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil wood sealer White transparent 1000ml,wood sealer,white
+PNT-35IXBN46,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-35IXBN46.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil primer Beige satin 1000ml,primer,beige
+PNT-3ASNWJE7,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-3ASNWJE7.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil deck oil Beige transparent 5000ml,deck oil,beige
+PNT-3B1H61PE,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-3B1H61PE.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil primer White matte 1000ml,primer,white
+PNT-3FVOHXXA,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-3FVOHXXA.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil wood stain Brown matte 750ml,wood stain,brown
+PNT-3N1YXQL6,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-3N1YXQL6.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil wood stain Black satin 2500ml,wood stain,black
+PNT-3OL27SF8,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-3OL27SF8.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil wood stain Beige satin 1000ml,wood stain,beige
+PNT-3V4I1D1V,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-3V4I1D1V.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil lacquer Brown transparent 750ml,lacquer,brown
+PNT-DU1SDUBU,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-DU1SDUBU.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil wood stain Brown satin 750ml,wood stain,brown
+PNT-FRIKPAHX,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-FRIKPAHX.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil deck oil Brown matte 5000ml,deck oil,brown
+PNT-XGDH1YJY,/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0003_34qvx0b4/PNT-XGDH1YJY.json,Sikkens,Exterior,SIK ZRP-H5X,Sikkens Exterior SIK ZRP-H5X Wood Stain and Deck Oil primer Brown transparent 10000ml,primer,brown
+PNT-1K1VSOX4,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0019_3sbzvh0j/PNT-1K1VSOX4.json,Sikkens,Interior,Cetol 1A5-Y7M,Sikkens Interior Cetol 1A5-Y7M Wall Paint Brown matte 2500ml,,brown
+PNT-1PRQYZWN,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0019_3sbzvh0j/PNT-1PRQYZWN.json,Sikkens,Interior,Cetol 1A5-Y7M,Sikkens Interior Cetol 1A5-Y7M Wall Paint Brown satin 10000ml,,brown
+PNT-24EUWUCY,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0019_3sbzvh0j/PNT-24EUWUCY.json,Sikkens,Interior,Cetol 1A5-Y7M,Sikkens Interior Cetol 1A5-Y7M Wall Paint Yellow satin 5000ml,,yellow
+PNT-31J55ISP,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0019_3sbzvh0j/PNT-31J55ISP.json,Sikkens,Interior,Cetol 1A5-Y7M,Sikkens Interior Cetol 1A5-Y7M Wall Paint Black eggshell 2500ml,,black
+PNT-34WX2698,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0019_3sbzvh0j/PNT-34WX2698.json,Sikkens,Interior,Cetol 1A5-Y7M,Sikkens Interior Cetol 1A5-Y7M Wall Paint Black matte 2500ml,,black
+PNT-3F8UJ5VF,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0019_3sbzvh0j/PNT-3F8UJ5VF.json,Sikkens,Interior,Cetol 1A5-Y7M,Sikkens Interior Cetol 1A5-Y7M Wall Paint Red satin 10000ml,,red
+PNT-8IBB8R6V,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0019_3sbzvh0j/PNT-8IBB8R6V.json,Sikkens,Interior,Cetol 1A5-Y7M,Sikkens Interior Cetol 1A5-Y7M Wall Paint Yellow satin 2500ml,,yellow
+PNT-BFOYJ9B7,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0019_3sbzvh0j/PNT-BFOYJ9B7.json,Sikkens,Interior,Cetol 1A5-Y7M,Sikkens Interior Cetol 1A5-Y7M Wall Paint Yellow satin 1000ml,,yellow
+PNT-154B6K9W,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0014_22l819u7/PNT-154B6K9W.json,Sikkens,Premium,Cetol 3SV-3N2,Sikkens Premium Cetol 3SV-3N2 Wall Paint Brown satin 1000ml,,brown
+PNT-16YNTOYE,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0014_22l819u7/PNT-16YNTOYE.json,Sikkens,Premium,Cetol 3SV-3N2,Sikkens Premium Cetol 3SV-3N2 Wall Paint Yellow matte 2500ml,,yellow
+PNT-19LR15QZ,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0014_22l819u7/PNT-19LR15QZ.json,Sikkens,Premium,Cetol 3SV-3N2,Sikkens Premium Cetol 3SV-3N2 Wall Paint Blue gloss 2500ml,,blue
+PNT-1AU8IMLW,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0014_22l819u7/PNT-1AU8IMLW.json,Sikkens,Premium,Cetol 3SV-3N2,Sikkens Premium Cetol 3SV-3N2 Wall Paint Blue eggshell 10000ml,,blue
+PNT-1GBPE1XU,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0014_22l819u7/PNT-1GBPE1XU.json,Sikkens,Premium,Cetol 3SV-3N2,Sikkens Premium Cetol 3SV-3N2 Wall Paint Black matte 5000ml,,black
+PNT-1MNJPDZU,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0014_22l819u7/PNT-1MNJPDZU.json,Sikkens,Premium,Cetol 3SV-3N2,Sikkens Premium Cetol 3SV-3N2 Wall Paint Blue satin 5000ml,,blue
+PNT-1O4AUVHT,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0014_22l819u7/PNT-1O4AUVHT.json,Sikkens,Premium,Cetol 3SV-3N2,Sikkens Premium Cetol 3SV-3N2 Wall Paint Beige gloss 1000ml,,beige
+PNT-2E7TL2UJ,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0014_22l819u7/PNT-2E7TL2UJ.json,Sikkens,Premium,Cetol 3SV-3N2,Sikkens Premium Cetol 3SV-3N2 Wall Paint Brown eggshell 750ml,,brown
+PNT-30ZXZ1XV,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0014_22l819u7/PNT-30ZXZ1XV.json,Sikkens,Premium,Cetol 3SV-3N2,Sikkens Premium Cetol 3SV-3N2 Wall Paint White eggshell 5000ml,,white
+PNT-38IQOW9R,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0014_22l819u7/PNT-38IQOW9R.json,Sikkens,Premium,Cetol 3SV-3N2,Sikkens Premium Cetol 3SV-3N2 Wall Paint Black eggshell 10000ml,,black
+PNT-77M9IJK9,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0014_22l819u7/PNT-77M9IJK9.json,Sikkens,Premium,Cetol 3SV-3N2,Sikkens Premium Cetol 3SV-3N2 Wall Paint Gray matte 5000ml,,gray
+PNT-RJE31QIQ,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0014_22l819u7/PNT-RJE31QIQ.json,Sikkens,Premium,Cetol 3SV-3N2,Sikkens Premium Cetol 3SV-3N2 Wall Paint Beige matte 2500ml,,beige
+PNT-SP0KUDXY,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0014_22l819u7/PNT-SP0KUDXY.json,Sikkens,Premium,Cetol 3SV-3N2,Sikkens Premium Cetol 3SV-3N2 Wall Paint Clear matte 750ml,,clear
+PNT-VG4CGVV8,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0014_22l819u7/PNT-VG4CGVV8.json,Sikkens,Premium,Cetol 3SV-3N2,Sikkens Premium Cetol 3SV-3N2 Wall Paint Gray gloss 2500ml,,gray
+PNT-10A5POBG,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0004_1f15bjf6/PNT-10A5POBG.json,Sikkens,Premium,Rubbol U97-PMQ,Sikkens Premium Rubbol U97-PMQ Wall Paint White matte 1000ml,,white
+PNT-10G7I4NT,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0004_1f15bjf6/PNT-10G7I4NT.json,Sikkens,Premium,Rubbol U97-PMQ,Sikkens Premium Rubbol U97-PMQ Wall Paint Red matte 2500ml,,red
+PNT-2J80TUT7,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0004_1f15bjf6/PNT-2J80TUT7.json,Sikkens,Premium,Rubbol U97-PMQ,Sikkens Premium Rubbol U97-PMQ Wall Paint Yellow matte 750ml,,yellow
+PNT-2KLG1G9A,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0004_1f15bjf6/PNT-2KLG1G9A.json,Sikkens,Premium,Rubbol U97-PMQ,Sikkens Premium Rubbol U97-PMQ Wall Paint Blue satin 5000ml,,blue
+PNT-2YJQC2RS,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0004_1f15bjf6/PNT-2YJQC2RS.json,Sikkens,Premium,Rubbol U97-PMQ,Sikkens Premium Rubbol U97-PMQ Wall Paint Red matte 750ml,,red
+PNT-39CN4D3Z,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0004_1f15bjf6/PNT-39CN4D3Z.json,Sikkens,Premium,Rubbol U97-PMQ,Sikkens Premium Rubbol U97-PMQ Wall Paint Blue eggshell 5000ml,,blue
+PNT-3A5YX0A8,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0004_1f15bjf6/PNT-3A5YX0A8.json,Sikkens,Premium,Rubbol U97-PMQ,Sikkens Premium Rubbol U97-PMQ Wall Paint Black matte 1000ml,,black
+PNT-3EAPC9QJ,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0004_1f15bjf6/PNT-3EAPC9QJ.json,Sikkens,Premium,Rubbol U97-PMQ,Sikkens Premium Rubbol U97-PMQ Wall Paint Gray satin 1000ml,,gray
+PNT-3IOV35Y8,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0004_1f15bjf6/PNT-3IOV35Y8.json,Sikkens,Premium,Rubbol U97-PMQ,Sikkens Premium Rubbol U97-PMQ Wall Paint Blue gloss 1000ml,,blue
+PNT-3RH9VHOE,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0004_1f15bjf6/PNT-3RH9VHOE.json,Sikkens,Premium,Rubbol U97-PMQ,Sikkens Premium Rubbol U97-PMQ Wall Paint Brown eggshell 1000ml,,brown
+warning: result truncated at 100 rows
+Next step_4... Run a strict SQL query for Sikkens + Quick Dry + SIK 1H0-QNN in metal_concrete_paint with required properties. (16069 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       MAX(CASE WHEN pp.key='product_type' THEN LOWER(pp.value_text) END) AS product_type,\n       MAX(CASE WHEN pp.key='color_family' THEN LOWER(pp.value_text) END) AS color_family\nFROM products p\nJOIN product_properties pp ON pp.sku = p.sku\nWHERE p.path LIKE '/proc/catalog/paints_finishes/metal_concrete_paint/%'\n  AND LOWER(p.brand) = 'sikkens'\n  AND LOWER(p.series) = 'quick dry'\n  AND p.model = 'SIK 1H0-QNN'\nGROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name\nHAVING product_type = 'concrete sealer' AND color_family = 'brown';"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       MAX(CASE WHEN pp.key='product_type' THEN LOWER(pp.value_text) END) AS product_type,
+       MAX(CASE WHEN pp.key='color_family' THEN LOWER(pp.value_text) END) AS color_family
+FROM products p
+JOIN product_properties pp ON pp.sku = p.sku
+WHERE p.path LIKE '/proc/catalog/paints_finishes/metal_concrete_paint/%'
+  AND LOWER(p.brand) = 'sikkens'
+  AND LOWER(p.series) = 'quick dry'
+  AND p.model = 'SIK 1H0-QNN'
+GROUP BY p.sku, p.path, p.brand, p.series, p.model, p.name
+HAVING product_type = 'concrete sealer' AND color_family = 'brown';
+SQL
+sku,path,brand,series,model,name,product_type,color_family
+PNT-14WUDSX9,/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0007_2qadpxvv/PNT-14WUDSX9.json,Sikkens,Quick Dry,SIK 1H0-QNN,Sikkens Quick Dry SIK 1H0-QNN Metal and Concrete Paint concrete sealer Brown gloss 2500ml,concrete sealer,brown
+Next step_5... Run a LEFT JOIN aggregation over Vienna stores for SKU PNT-14WUDSX9 to include zero-availability branches. (13670 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT s.path AS store_path,\n       COALESCE(i.available_today, 0) AS available_today,\n       SUM(COALESCE(i.available_today, 0)) OVER () AS total_available_today\nFROM stores s\nLEFT JOIN inventory i\n  ON i.store_id = s.id\n AND i.sku = 'PNT-14WUDSX9'\nWHERE s.city = 'Vienna'\nORDER BY s.path;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT s.path AS store_path,
+       COALESCE(i.available_today, 0) AS available_today,
+       SUM(COALESCE(i.available_today, 0)) OVER () AS total_available_today
+FROM stores s
+LEFT JOIN inventory i
+  ON i.store_id = s.id
+ AND i.sku = 'PNT-14WUDSX9'
+WHERE s.city = 'Vienna'
+ORDER BY s.path;
+SQL
+store_path,available_today,total_available_today
+/proc/stores/store_vienna_meidling.json,5,5
+/proc/stores/store_vienna_praterstern.json,0,5
+Next step_6... Return report_completion with exact token and required refs. (13434 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved exact product variant', 'Aggregated Vienna availability including zero-stock stores'] message='[QTY:5]' grounding_refs=['/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0007_2qadpxvv/PNT-14WUDSX9.json', '/proc/stores/store_vienna_meidling.json', '/proc/stores/store_vienna_praterstern.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved exact product variant
+- Aggregated Vienna availability including zero-stock stores
+
+[34mAGENT SUMMARY: [QTY:5][0m
+- [34m/proc/catalog/paints_finishes/metal_concrete_paint/fam_paints_finishes_metal_concrete_paint_0007_2qadpxvv/PNT-14WUDSX9.json[0m
+- [34m/proc/stores/store_vienna_meidling.json[0m
+- [34m/proc/stores/store_vienna_praterstern.json[0m
