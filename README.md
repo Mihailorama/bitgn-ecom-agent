@@ -9,6 +9,11 @@ tools such as `/bin/sql`) over the schema published at
 [buf.build/bitgn/api](https://buf.build/bitgn/api), and drives an LLM with
 [Schema-Guided Reasoning](https://abdullin.com/schema-guided-reasoning/).
 
+Current accepted scoring milestone: `46/47` with `codex:gpt-5.3-codex` at
+`PARALLEL=6`, commit `e4a2d41`, tag
+`bench-ecom1-dev-v47-46of47-20260526`. Later lower-scoring portfolio runs are
+diagnostic evidence only, not the baseline state.
+
 ## Why this scores well
 
 ECOM grades reliability, **policy compliance**, **security posture**, grounding,
@@ -46,13 +51,18 @@ every provider.
 
 | Context | `MODEL_ID` | Auth | Why |
 |---|---|---|---|
-| **Tests** | `claude:opus` (or `sonnet`) | local `claude` CLI over OAuth - no API key | drives the Claude Code subscription, free for dev iteration |
-| **Challenge** | `gemini/gemini-3.5-flash` (or `gemini/gemini-3.5-pro`) | `GEMINI_API_KEY` | very fast - matters when the leaderboard runs many trials |
-| Neutral default | `gpt-5.5` | `OPENAI_API_KEY` | strong general reasoning |
-| (also) | `anthropic/claude-...` | `ANTHROPIC_API_KEY` | Claude over the metered API |
+| **Leaderboard attempts** | `codex:gpt-5.3-codex` | local `codex` CLI over ChatGPT OAuth | current strongest profile for this agent |
+| Regression canary | `claude:sonnet` | local `claude` CLI over OAuth | cheaper validation, but lower current score |
+| Gemini CLI comparison | `agy` | local Antigravity CLI over Google AI Pro OAuth | available, but currently slower and less stable |
+| API fallback | `gpt-5.5` / `openai/...` | `OPENAI_API_KEY` | LiteLLM-backed OpenAI path |
+| API fallback | `gemini/gemini-3.5-flash` / `pro` | `GEMINI_API_KEY` | LiteLLM-backed Gemini path |
+| API fallback | `anthropic/claude-...` | `ANTHROPIC_API_KEY` | Claude over the metered API |
 
 Bare Claude family names (`opus`, `sonnet`, `claude-opus-4-6`, `claude:opus`)
 route to the **OAuth CLI**; the `anthropic/` prefix routes to the metered API.
+`codex:*` routes to the local Codex CLI. `agy` routes to Antigravity CLI; any
+model suffix after `agy:` is informational because the CLI selects the Pro-tier
+Gemini model.
 
 ## Setup
 
@@ -82,6 +92,11 @@ The key ties a run to your account so its score shows on
 - Single task: `uv run python main.py t01`
 - Subset: `uv run python main.py t01 t04`
 - Via Make: `make run` / `make task TASKS="t01 t04"`
+- Parallel sweep: `PARALLEL=6 MODEL_ID=codex:gpt-5.3-codex uv run python run_parallel.py`
+- Backend portfolio comparison:
+  `uv run python portfolio_runner.py --out-dir artifacts/portfolio/<label>`
+  runs codex, sonnet, and agy in parallel with isolated logs and disables
+  concurrent `RESULTS.md` appends via `NO_RESULTS_APPEND=1`.
 
 ## Environment overrides
 
@@ -96,6 +111,7 @@ The key ties a run to your account so its score shows on
 | `CLAUDE_CLI_TIMEOUT` | `300` | per-step timeout for the Claude OAuth CLI (seconds) |
 | `HINT` | _(empty)_ | extra system guidance (open benchmarks expose hints) |
 | `BITGN_HOST` / `BENCHMARK_HOST` | `https://api.bitgn.com` | control-plane URL |
+| `NO_RESULTS_APPEND` | _(empty)_ | set to `1` for orchestrated multi-backend runs that should not concurrently append `RESULTS.md` |
 
 ## Layout
 
@@ -103,6 +119,10 @@ The key ties a run to your account so its score shows on
 - `llm.py` - provider routing + structured output (LiteLLM for API models, the
   `claude` CLI for OAuth).
 - `main.py` - control-plane flow: start run, iterate trials, score, submit.
+- `run_parallel.py` - process-pool sweep runner; appends to `RESULTS.md` only
+  for full sweeps unless `NO_RESULTS_APPEND=1`.
+- `portfolio_runner.py` - comparison orchestrator for codex / sonnet / agy with
+  separate per-profile logs and JSON/Markdown summaries.
 - `smoke_test.py` - offline loop test (`make test`): stubs the SDK + the LLM so
   discovery, tool dispatch, error recovery, denial, and completion run without keys.
 - `BENCHMARK_NOTES.md` - the ECOM1 task taxonomy the system prompt is tuned against.

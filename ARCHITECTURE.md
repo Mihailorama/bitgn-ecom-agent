@@ -24,6 +24,12 @@ The benchmark denominator changed during the work (`44 -> 46 -> 47`), so a
 change only counts as progress if a full sweep raises or preserves the accepted
 absolute solved-count target.
 
+Later diagnostic runs that scored fewer solved tasks are not the current state.
+In particular, the 2026-05-27 portfolio comparison is evidence about backend
+behavior on the then-current 48-task denominator, but its best codex result was
+`44/48`; it must not replace the accepted `46/47` milestone as the baseline for
+future development.
+
 ## Historical Rollback Point
 
 As of the final 2026-05-26 rollback, `agent.py` and `smoke_test.py` are restored

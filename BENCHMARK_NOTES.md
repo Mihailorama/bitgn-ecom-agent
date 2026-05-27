@@ -601,6 +601,57 @@ Current state in `agent.py` includes:
   traces matching the observed failure classes (`fallback_single` sibling miss
   and fallback overcount).
 
+**Accepted state baseline (do not replace with degraded experiments).**
+- The current accepted scoring state is the concrete full sweep at commit
+  `e4a2d41` (`Route t45 have-ready inventory wording`), tag
+  `bench-ecom1-dev-v47-46of47-20260526`.
+- Accepted run:
+  `SWEEP_LOG_DIR=artifacts/sweeps/2026-05-26-t45-have-ready-full-codex53 PARALLEL=6 MODEL_ID=codex:gpt-5.3-codex make sweep`
+  -> `97.9%` (`46/47`) at `275s`, security clean.
+- The only miss in that accepted run was `t16`. This is the state to preserve
+  when reasoning about future improvements.
+- Later runs that score fewer solved tasks are evidence-only diagnostics. They
+  must not redefine the baseline or become the starting assumption for TODOs,
+  even if they introduce new benchmark tasks or useful logs.
+
+**2026-05-27 portfolio runner and backend comparison.**
+- Added `portfolio_runner.py`, which starts one `run_parallel.py` process per
+  backend with isolated `SWEEP_LOG_DIR`s and `NO_RESULTS_APPEND=1` so concurrent
+  full sweeps do not race while writing `RESULTS.md`.
+- Smoke portfolio run on `t16` confirmed all three local CLIs launch:
+  `codex:gpt-5.3-codex`, `claude:sonnet`, and `agy`.
+- Full portfolio sweep saved under
+  `artifacts/portfolio/2026-05-27-full-portfolio/`:
+  - `codex:gpt-5.3-codex`: `91.67%` (`44/48`) at `361s` wall, misses
+    `t05`, `t16`, `t26`, `t48`.
+  - `claude:sonnet`: `83.33%` (`40/48`) at `876s` wall, misses
+    `t03`, `t08`, `t12`, `t16`, `t19`, `t36`, `t47`, `t48`.
+  - `agy`: `70.83%` (`34/48`) at `1025s` wall, with multiple
+    `OUTCOME_ERR_INTERNAL` failures and catalog/inventory ref misses.
+- Security grep was clean for the portfolio logs: no
+  `expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK`.
+- Decision: portfolio orchestration is useful for evidence collection, but the
+  `44/48` codex portfolio run is **degraded relative to the accepted `46/47`
+  baseline** and is not the current scoring state. Keep codex as the primary
+  scoring model; `agy` is currently slower and less reliable on this agent.
+
+**2026-05-27 autoresearch sidecar.**
+- Created a separate private sibling repository:
+  `../bitgn-ecom-autoresearch`, pushed to
+  `https://github.com/Mihailorama/bitgn-ecom-autoresearch`.
+- The sidecar runner copies the target repo into per-run workspaces, invokes
+  `codex exec -m gpt-5.3-codex`, stores prompt/response/verification artifacts,
+  and defaults to read-only proposal mode.
+- Smoke run
+  `runs/2026-05-27-072547-codex53-current-runner-smoke/` completed with Codex
+  return code `0`; verifier
+  `uv run python -m py_compile agent.py llm.py run_parallel.py portfolio_runner.py`
+  passed in the copied workspace.
+- Codex's first proposal was not the desired `t16` narrow path: it suggested a
+  premature-completion gate for weak-model profiles. Treat autoresearch output
+  as research input only; do not implement sidecar proposals without the normal
+  task-local sampling, RED-test, and full-sweep no-regression gates.
+
 **Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
 `claude:sonnet` as the cheap regression canary. 10-minute platform-time target
 is still unmet at 100% quality.
@@ -622,33 +673,43 @@ is still unmet at 100% quality.
    unless promoted by evidence from multiple tasks and accepted as a separate
    architecture cycle. A targeted/subset pass is only diagnostic; acceptance
    still requires the full sweep not to reduce solved-task count.
-1. Inventory exact-variant/count stability remains open for `t15`/`t16`.
+1. Preserve the accepted state baseline: `46/47` at commit `e4a2d41`, tag
+   `bench-ecom1-dev-v47-46of47-20260526`, logs
+   `artifacts/sweeps/2026-05-26-t45-have-ready-full-codex53/`. The only
+   accepted-run miss is `t16`. Any later run with fewer solved tasks, including
+   the 2026-05-27 portfolio `44/48`, is diagnostic evidence only.
+2. Inventory exact-variant/count stability remains open for `t16`.
    The broad same-family JSON augmentation attempt is rejected despite good
-   `t16` samples because the full sweep regressed `t45`/`t47`. The next
-   single fix must start with `t16`-only sampling and RED tests. Do not touch
-   shared inventory/catalog behavior until there is a separate no-regression
-   proof for already solved neighboring tasks.
-2. Product-check checked-SKU stability remains open for `t04`/`t05`/catalogue
+   `t16` samples because the full sweep regressed neighboring tasks. Existing
+   RED tests are present but not yet in default smoke; the next t16 cycle must
+   either make those tests green with a branch that cannot execute for solved
+   neighbors, or reject the branch and keep the tests red as documentation.
+3. Degraded 48-task portfolio misses (`t05`, `t26`, `t48`) are not accepted
+   baseline misses. Treat them as evidence for future benchmark-drift triage
+   only after first re-establishing or exceeding the `46` solved-task baseline
+   on the current denominator.
+4. Product-check checked-SKU stability remains open for `t04`/`t05`/catalogue
    impossible-claim tasks: when multiple sibling SKUs share the base product,
    the answer must decide `<NO>` when the requested shorthand/pack claim is not
    an exact catalogue item, and for impossible claims must name the SKU whose
    actual property conflicts with the requested extra claim. Treat this as a
    separate cycle from inventory refs.
-3. `t45` parser coverage is closed for the saved `have N or more ready` wording:
+5. `t45` parser coverage is closed for the saved `have N or more ready` wording:
    keep the RED/GREEN smoke test and do not add more t45 parser patterns unless
    a new wording falls back to LLM.
-4. 3DS recovery routing is closed for `t41`: keep the `payment verification`
+6. 3DS recovery routing is closed for `t41`: keep the `payment verification`
    smoke test and targeted `t27/t30/t31/t35/t41` regression set.
-5. `t45` parser coverage is closed for the saved `Count the products with fewer
+7. `t45` parser coverage is closed for the saved `Count the products with fewer
    than N units ... from this list` wording: keep the RED/GREEN smoke test and
    do not add more t45 parser patterns unless a new wording falls back to LLM.
-6. Discount-policy percent parsing is closed for `t26`: keep the `%` and
+8. Discount-policy percent parsing is closed for saved percent parsing cases:
+   keep the `%` and
    `percent` smoke tests, and do not bundle further discount edits unless a new
    full-sweep failure appears.
-7. Do not continue broad class-split refactors from `167c1f3` directly. They
+9. Do not continue broad class-split refactors from `167c1f3` directly. They
    captured useful evidence but reduced the headline score. Start from restored
    `ae75479` tagged 44/44 baseline, with later diagnostics preserved as evidence.
-8. Close the restored-baseline `t16` inventory grounding miss with a narrow
+10. Close the restored-baseline `t16` inventory grounding miss with a narrow
    resolver, but do not revive any rejected branch verbatim:
    `2026-05-25-t16-exact-variant-rejected` or
    `2026-05-26-rejected-strict-only-41of44`, or
@@ -659,21 +720,22 @@ is still unmet at 100% quality.
    shared family-sibling expansion. If `t16` is fixed, route the branch so it
    is task-local first; only generalize later in a separate cycle after
    repeated full-sweep evidence shows no solved-task loss.
-9. Refactor step 1 (no behavior expansion): isolate helper layer for
+11. Refactor step 1 (no behavior expansion): isolate helper layer for
    `resolve_product_variant()` and `build_grounding_refs()` so variant logic and
    refs logic are testable independently.
    Include a diagnostic record per requested product: parsed props, exact
    candidate SKUs, inventory rows, selected ref, and reason code.
-10. Add focused regression tests for `t13-t16` deterministic inventory grounding:
+12. Add focused regression tests for `t13-t16` deterministic inventory grounding:
    - required product ref present even when answer is numeric
    - no invalid refs survive `_verify_refs`.
-11. Re-run two full sweeps on submission profile after every inventory resolver
+13. Re-run two full sweeps on submission profile after every inventory resolver
    change: `PARALLEL=6 MODEL_ID=codex:gpt-5.3-codex make sweep` x2.
-12. Continue mandatory security check:
+14. Continue mandatory security check:
    `rg "expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK" /tmp/sweep_logs/*.log`.
-13. Evaluate alternative backend only after v47 quality is restored on
-   codex baseline (then compare `avg/task` and implied platform `TIME`).
-14. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
+15. Evaluate alternative backend only after v47 quality is restored on
+   codex baseline. The 2026-05-27 portfolio comparison showed `agy` is not a
+   speed win for the current algorithm.
+16. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
    during aggressive parallel probes (`PARALLEL>=7`, and occasionally startup bursts).
    Treat `PARALLEL=6` as the practical stability cap for leaderboard attempts.
 
