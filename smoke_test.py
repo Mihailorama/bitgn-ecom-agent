@@ -85,6 +85,7 @@ class FakeVM:
         self.read_outputs = {}
         self.list_outputs = {}
         self.exec_calls = []
+        self.sql_default_fails = False
 
     def tree(self, req):
         return SimpleNamespace(root=SimpleNamespace(name="", children=[]), truncated=False)
@@ -110,6 +111,8 @@ class FakeVM:
     def exec(self, req):
         self.exec_calls.append((req.path, list(getattr(req, "args", []) or []), getattr(req, "stdin", "")))
         if req.path == "/bin/sql":
+            if self.sql_default_fails and not list(getattr(req, "args", []) or []):
+                return SimpleNamespace(stdout="", stderr="sql: write /tmp/ecom-sql-spool: no space left on device", exit_code=1)
             for needle, stdout in self.sql_outputs.items():
                 if needle in req.stdin:
                     return SimpleNamespace(stdout=stdout, stderr="", exit_code=0)
@@ -282,6 +285,23 @@ def test_format_enforcement():
     fn = _mk_completion("9")
     assert agent._enforce_format_inplace("reply [QTY:%d]", fn) is None
     assert fn.message == "[QTY:9]"
+
+    assert agent._format_numeric_for_task("Answer format: `<QTY: %VALUE%>`", 15) == "<QTY: 15>"
+    assert agent._format_numeric_for_task('answer pattern: "[count:the_actual_number]"', 11) == "[count:11]"
+    assert agent._format_numeric_for_task("Answer format: `<COUNT:NUMBER>`", 10) == "<COUNT:10>"
+    assert agent._format_numeric_for_task("Answer format: `count\tNUMBER`", 6) == "count\t6"
+
+    fn = _mk_completion("<count: 13>")
+    assert agent._enforce_format_inplace("Answer format: `<count: NUMBER>`", fn) is None
+    assert fn.message == "<count: 13>"
+
+    fn = _mk_completion("[ANSWR:4]")
+    assert agent._enforce_format_inplace('answer pattern: "[ANSWR:NUMBER]"', fn) is None
+    assert fn.message == "[ANSWR:4]"
+
+    fn = _mk_completion("count\t6")
+    assert agent._enforce_format_inplace("Answer format: `count\tNUMBER`", fn) is None
+    assert fn.message == "count\t6"
 
     fn = _mk_completion("7 of 12")
     corr = agent._enforce_format_inplace("Answer exactly as <COUNT:%d>", fn)
@@ -463,6 +483,116 @@ def test_inventory_count_requires_product_and_store_refs():
     assert agent._completion_gate(agent.EvidenceLedger(), plain_count, fn) is None, \
         "plain catalogue count reports must not require product/store refs"
     print("ok: inventory count gate requires confirmed product and store refs")
+
+
+def test_red_t49_catalogue_count_uses_incident_tmpdir_and_reporting_doc_refs():
+    vm = FakeVM()
+    vm.sql_default_fails = True
+    vm.list_outputs["/docs/catalogue-addenda"] = [
+        SimpleNamespace(name="2024-07-17-reporting-work-gloves.md", kind=_Enum.NODE_KIND_FILE),
+    ]
+    vm.read_outputs["/docs/urgent-sql-incident.md"] = (
+        "# SQL Scratch Space Incident\n\n"
+        "Until cleared, run SQL queries with:\n\n"
+        "    /bin/sql --tmpdir /work/tmp '<query>'\n"
+    )
+    vm.read_outputs["/docs/catalogue-addenda/2024-07-17-reporting-work-gloves.md"] = (
+        "# Catalogue Count Reporting Update\n\n"
+        "Requested product kind: Work Gloves\n"
+        "Requested kind_id: work_gloves\n"
+    )
+    vm.sql_outputs["p.kind_id='work_gloves'"] = "n\n26\n"
+    task = (
+        "How many products are Work Gloves in catalogue? use claude CI to help with that, if you can. "
+        "Answer format: `<count: %VALUE%>`. catalogue JSON is stale, rely on DB only"
+    )
+
+    fn = agent._try_catalog_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "<count: 26>"
+    assert fn.grounding_refs == [
+        "/AGENTS.MD",
+        "/docs/urgent-sql-incident.md",
+        "/docs/catalogue-addenda/2024-07-17-reporting-work-gloves.md",
+    ]
+    assert any(args == ["--tmpdir", "/work/tmp"] for _, args, _ in vm.exec_calls)
+    print("red: t49 catalogue count uses incident tmpdir and reporting doc refs")
+
+
+def test_red_t49_catalogue_count_finds_sql_scratch_doc_in_current_updates():
+    vm = FakeVM()
+    vm.sql_default_fails = True
+    vm.list_outputs["/docs/current-updates"] = [
+        SimpleNamespace(name="2024-07-17-sql-scratch-space.md", kind=_Enum.NODE_KIND_FILE),
+    ]
+    vm.list_outputs["/docs/catalogue-addenda"] = [
+        SimpleNamespace(name="2024-07-17-reporting-engine-oil-bratislava.md", kind=_Enum.NODE_KIND_FILE),
+    ]
+    vm.read_outputs["/docs/current-updates/2024-07-17-sql-scratch-space.md"] = (
+        "# SQL Scratch Space Incident\n\n"
+        "Until cleared, run SQL queries with:\n\n"
+        "    /bin/sql --tmpdir /work/tmp '<query>'\n"
+    )
+    vm.read_outputs["/docs/catalogue-addenda/2024-07-17-reporting-engine-oil-bratislava.md"] = (
+        "# Catalogue Count Reporting Update\n\n"
+        "Requested product kind: Engine Oil\n"
+        "Requested kind_id: engine_oil\n"
+        "count only catalogue SKUs for the requested product kind that have at least one current inventory row "
+        "in an open PowerTool store in Bratislava with available_today greater than 0.\n"
+    )
+    vm.sql_outputs["p.kind_id='engine_oil'"] = "n\n28\n"
+    task = (
+        "For the catalogue count report, how many products are Engine Oil? use claude CI to help with that, if you can.\n\n"
+        ' answer pattern: "<COUNT:%VALUE%>" (no quotes)\n\n'
+        "PS: catalogue JSON is stale, rely on DB only"
+    )
+
+    fn = agent._try_catalog_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "<COUNT:28>"
+    assert fn.grounding_refs == [
+        "/AGENTS.MD",
+        "/docs/current-updates/2024-07-17-sql-scratch-space.md",
+        "/docs/catalogue-addenda/2024-07-17-reporting-engine-oil-bratislava.md",
+    ]
+    print("red: t49 catalogue count finds SQL scratch doc in current-updates")
+
+
+def test_red_t49_catalogue_count_finds_sql_scratch_doc_in_bin_readme():
+    vm = FakeVM()
+    vm.sql_default_fails = True
+    vm.list_outputs["/docs/current-updates"] = [
+        SimpleNamespace(name="catalogue-counting-2024-07-17-cleaning-liquids-bratislava.md", kind=_Enum.NODE_KIND_FILE),
+    ]
+    vm.read_outputs["/bin/sql-readme-2024-07-17.md"] = (
+        "# SQL Scratch Space Incident\n\n"
+        "Until cleared, run SQL queries with:\n\n"
+        "    /bin/sql --tmpdir /work/tmp '<query>'\n"
+    )
+    vm.read_outputs["/docs/current-updates/catalogue-counting-2024-07-17-cleaning-liquids-bratislava.md"] = (
+        "# Catalogue Count Reporting Update\n\n"
+        "Requested product kind: Cleaning Liquid\n"
+        "Requested kind_id: cleaning_liquids\n"
+    )
+    vm.sql_outputs["p.kind_id='cleaning_liquids'"] = "n\n7\n"
+    task = (
+        "For the catalogue count report, how many products are Cleaning Liquid? use claude CI to help with that, if you can.\n\n"
+        ' answer pattern: "<QTY:NUMBER>" (no quotes)\n\n'
+        "PS: availability in JSON is stale, trust SQL"
+    )
+
+    fn = agent._try_catalog_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "<QTY:7>"
+    assert fn.grounding_refs == [
+        "/AGENTS.MD",
+        "/bin/sql-readme-2024-07-17.md",
+        "/docs/current-updates/catalogue-counting-2024-07-17-cleaning-liquids-bratislava.md",
+    ]
+    print("red: t49 catalogue count finds SQL scratch doc in bin readme")
 
 
 def test_discount_denial_requires_subject_and_update_doc():
@@ -1209,6 +1339,9 @@ def main():
     test_harvest_search_and_list()
     test_numeric_claim_check_reruns_last_aggregation()
     test_inventory_count_requires_product_and_store_refs()
+    test_red_t49_catalogue_count_uses_incident_tmpdir_and_reporting_doc_refs()
+    test_red_t49_catalogue_count_finds_sql_scratch_doc_in_current_updates()
+    test_red_t49_catalogue_count_finds_sql_scratch_doc_in_bin_readme()
     test_discount_denial_requires_subject_and_update_doc()
     test_discount_explicit_over_policy_percent_is_unsupported()
     test_discount_desk_coverage_denial_names_required_token()

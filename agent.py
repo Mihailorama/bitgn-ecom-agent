@@ -907,20 +907,36 @@ def _only_int(text: str) -> "int | None":
 
 def _required_format(instruction: str):
     """Return (name, validate_fn, coerce_fn) or None. coerce_fn(msg) -> str|None."""
-    low = (instruction or "").lower()
-    if re.search(r"<count:\s*(%d|n|-?\d+)\s*>", low):
+    text = instruction or ""
+    placeholder = r"(?:%d|%value%|number|the_actual_number|n|-?\d+)"
+    tag = re.search(rf"<([A-Za-z]+):(\s*){placeholder}\s*>", text, re.I)
+    if tag:
+        name = f"{tag.group(1).lower()}_angle_tag"
+        tag_name = tag.group(1)
+        sep = tag.group(2)
         return (
-            "count_tag",
-            lambda m: re.fullmatch(r"<COUNT:-?\d+>", m.strip()) is not None,
-            lambda m: (lambda n: f"<COUNT:{n}>" if n is not None else None)(_only_int(m)),
+            name,
+            lambda m: re.fullmatch(rf"<{re.escape(tag_name)}:{re.escape(sep)}-?\d+>", m.strip()) is not None,
+            lambda m: (lambda n: f"<{tag_name}:{sep}{n}>" if n is not None else None)(_only_int(m)),
         )
-    if re.search(r"\[qty:\s*(%d|n|-?\d+)\s*\]", low):
+    tag = re.search(rf"\[([A-Za-z]+):(\s*){placeholder}\s*\]", text, re.I)
+    if tag:
+        name = f"{tag.group(1).lower()}_square_tag"
+        tag_name = tag.group(1)
+        sep = tag.group(2)
         return (
-            "qty_tag",
-            lambda m: re.fullmatch(r"\[QTY:-?\d+\]", m.strip()) is not None,
-            lambda m: (lambda n: f"[QTY:{n}]" if n is not None else None)(_only_int(m)),
+            name,
+            lambda m: re.fullmatch(rf"\[{re.escape(tag_name)}:{re.escape(sep)}-?\d+\]", m.strip()) is not None,
+            lambda m: (lambda n: f"[{tag_name}:{sep}{n}]" if n is not None else None)(_only_int(m)),
         )
-    if re.search(r"count\s*:\s*(%d|n|-?\d+)", low):
+    low = text.lower()
+    if re.search(rf"\bcount\t{placeholder}\b", low):
+        return (
+            "count_tab",
+            lambda m: re.fullmatch(r"count\t-?\d+", m.strip(), re.I) is not None,
+            lambda m: (lambda n: f"count\t{n}" if n is not None else None)(_only_int(m)),
+        )
+    if re.search(r"count\s*:\s*(%d|n\b|-?\d+)", low):
         return (
             "count_colon",
             lambda m: re.fullmatch(r"count\s*:\s*-?\d+", m.strip(), re.I) is not None,
@@ -1311,6 +1327,40 @@ def _exec_sql_stdout(vm: EcomRuntimeClientSync, query: str) -> str:
     return getattr(result, "stdout", "")
 
 
+def _exec_sql_stdout_with_incident_fallback(
+    vm: EcomRuntimeClientSync, query: str
+) -> "tuple[str, list[str]]":
+    result = dispatch(vm, Req_Exec(tool="exec", path="/bin/sql", stdin=query))
+    if not getattr(result, "exit_code", 0):
+        return getattr(result, "stdout", ""), []
+    stderr = getattr(result, "stderr", "") or ""
+    if "no space left" not in stderr.lower() and "ecom-sql-spool" not in stderr.lower():
+        return "", []
+    incident = []
+    for path in ["/docs/urgent-sql-incident.md", "/bin/sql-readme-2024-07-17.md"] + _candidate_doc_paths(vm):
+        if path in incident:
+            continue
+        if path != "/docs/urgent-sql-incident.md" and "sql" not in path.lower():
+            continue
+        try:
+            body = getattr(dispatch(vm, Req_Read(tool="read", path=path)), "content", "")
+        except Exception:
+            continue
+        m = re.search(r"--tmpdir\s+([^\s'\"`]+)", body)
+        if m:
+            incident = [path, m.group(1)]
+            break
+    if not incident:
+        return "", []
+    retry = dispatch(
+        vm,
+        Req_Exec(tool="exec", path="/bin/sql", args=["--tmpdir", incident[1]], stdin=query),
+    )
+    if getattr(retry, "exit_code", 0):
+        return "", [incident[0]]
+    return getattr(retry, "stdout", ""), [incident[0]]
+
+
 def _exec_tool_stdout(vm: EcomRuntimeClientSync, path: str, args: "list[str]") -> str:
     result = dispatch(vm, Req_Exec(tool="exec", path=path, args=args))
     return getattr(result, "stdout", "")
@@ -1341,6 +1391,21 @@ def _id_context(vm: EcomRuntimeClientSync) -> "tuple[str, set[str]]":
 
 
 def _format_numeric_for_task(task_text: str, n: int) -> str:
+    placeholder = r"(?:%d|%value%|number|the_actual_number)"
+    if re.search(rf"<(?:count|qty|total):\s*{placeholder}\s*>", task_text, re.I):
+        sample = re.search(rf"<(?:count|qty|total):\s*{placeholder}\s*>", task_text, re.I).group(0)
+        tag_match = re.match(r"<([^:]+):", sample)
+        tag = tag_match.group(1) if tag_match else "COUNT"
+        space = " " if re.search(r":\s+", sample) else ""
+        return f"<{tag}:{space}{n}>"
+    if re.search(rf"\[(?:count|qty|total):\s*{placeholder}\s*\]", task_text, re.I):
+        sample = re.search(rf"\[(?:count|qty|total):\s*{placeholder}\s*\]", task_text, re.I).group(0)
+        tag_match = re.match(r"\[([^:]+):", sample)
+        tag = tag_match.group(1) if tag_match else "QTY"
+        space = " " if re.search(r":\s+", sample) else ""
+        return f"[{tag}:{space}{n}]"
+    if re.search(rf"\bcount\t{placeholder}\b", task_text, re.I):
+        return f"count\t{n}"
     low = task_text.lower()
     if re.search(r"<count:\s*%d\s*>", low):
         return f"<COUNT:{n}>"
@@ -1952,10 +2017,12 @@ def _desk_coverage_denial_token(vm: EcomRuntimeClientSync, update_doc: "str | No
 
 def _try_catalog_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
     m = re.search(
-        r"(?:For the catalogue count report,\s*)?how many (?:catalogue )?products are (.+?)\? Answer",
+        r"(?:For the catalogue count report,\s*)?how many (?:catalogue )?products are (.+?)(?:\s+in catalogue)?\?\s*(?:[\s\S]*?\bAnswer\b|$)",
         task_text,
         re.I,
     )
+    if not m:
+        m = re.search(r"how many (.+?) products should I report today\?", task_text, re.I)
     if not m:
         return None
     kind = m.group(1).strip()
@@ -1974,26 +2041,34 @@ def _try_catalog_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTask
             break
     if addendum:
         body = addendum[1]
+        kind_id_m = re.search(r"Requested kind_id:\s*([A-Za-z0-9_/-]+)", body, re.I)
         city_m = re.search(
             r"open PowerTool store in\s+([A-Za-z -]+?)\s+with available_today greater than 0",
             body,
             re.I,
         )
         city = city_m.group(1).strip() if city_m else ""
+        where_kind = (
+            "p.kind_id=" + _sql_quote(kind_id_m.group(1))
+            if kind_id_m else
+            "pk.name=" + _sql_quote(kind)
+        )
         q = f"""
 SELECT COUNT(DISTINCT p.sku) AS n
 FROM products p
 JOIN product_kinds pk ON pk.id=p.kind_id
 JOIN inventory i ON i.sku=p.sku
 JOIN stores s ON s.id=i.store_id
-WHERE pk.name={_sql_quote(kind)}
+WHERE {where_kind}
   AND i.available_today > 0
   AND s.is_open=1
   {("AND lower(s.city)=lower(" + _sql_quote(city) + ")") if city else ""};
 """
     else:
         q = f"SELECT COUNT(*) AS n FROM products p JOIN product_kinds pk ON pk.id=p.kind_id WHERE pk.name={_sql_quote(kind)};"
-    n = _sql_single_int(_exec_sql_stdout(vm, q))
+    stdout, incident_refs = _exec_sql_stdout_with_incident_fallback(vm, q)
+    refs[1:1] = [p for p in incident_refs if p not in refs]
+    n = _sql_single_int(stdout)
     if n is None:
         return None
     return ReportTaskCompletion(
