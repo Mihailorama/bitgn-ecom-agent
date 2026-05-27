@@ -1,0 +1,470 @@
+TASK t47 (model codex:gpt-5.5, slot codex)
+INSTRUCTION: I'm preparing a quote for a customer from this pasted product list. Check each row against our exact catalogue and my store's same-day availability.
+
+Input format:
+RowID	description	quantity
+
+Return exactly this tab-separated output table, including the header, with rows in the same order:
+RowID	SKU	in_stock	match
+
+If the description is not an exact catalogue product, leave SKU and in_stock empty and set match=false. If the product exists, set in_stock to the quantity available today in my store (reference all matched SKUs in response). set `match` field true only when the exact product exists and in_stock is at least the requested quantity.
+
+Rows:
+hsBQx	the Work Jacket from Mascot in the Mascot Advanced ACC 35W-IIS Work Jacket line that has color family Black and has color family blue	1
+8UNrN	the Sealant from Sika in the Sika Professional Sika 28T-UV8 Sealant line that has sealant type hybrid sealant, color family Gray, and volume 280 ml	1
+aVwaJ	the Hammer Measuring and Cutting Tool from Bahco in the Bahco Workshop BAH 3VZ-SPH Hammer Measuring and Cutting Tool line that has tool type clamp	2
+5Dfno	the Chainsaw from Fiskars in the Fiskars Battery X 1CD-A3X Chainsaw line that has power source petrol	1
+VhEXz	the Pipe Fitting from Viega in the Viega Professional Sanpress 2OG-ENN Pipe Fitting line that has fitting type compression coupler and diameter 32 mm and has connection type push fit	1
+9aLj4	the Compressor and Dust Extractor from Holzmann in the Holzmann Compact D 327-RR0 Compressor and Dust Extractor line that has machine type compressor, voltage 230 V, and power 3000 W	1
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- claude
+|   |-- codex
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- os-and-tooling-incidents-and-workarounds.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- os-and-tooling-incidents-and-workarounds.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2025-10-08T16:53:18Z
+[32mAUTO[0m: /bin/id
+user: emp_031
+roles: employee, store_manager, discount_manager, refund_manager, inventory_viewer, fulfillment_viewer, customer_service
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Run a focused read-only SQL query joining employees, stores, products, product_properties, product_kinds, and inventory for the described brands/series/models/properties. (24091 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH my_store AS (\n  SELECT e.id AS employee_id, e.path AS employee_path, s.id AS store_id, s.path AS store_path, s.name AS store_name\n  FROM employees e\n  JOIN stores s ON s.id = e.store_id\n  WHERE e.id = 'emp_031'\n), wanted(rowid, brand, series, model) AS (\n  VALUES\n    ('hsBQx','Mascot','Mascot Advanced','ACC 35W-IIS'),\n    ('8UNrN','Sika','Sika Professional','Sika 28T-UV8'),\n    ('aVwaJ','Bahco','Bahco Workshop','BAH 3VZ-SPH'),\n    ('5Dfno','Fiskars','Fiskars Battery X','1CD-A3X'),\n    ('VhEXz','Viega','Viega Professional','Sanpress 2OG-ENN'),\n    ('9aLj4','Holzmann','Holzmann Compact D','327-RR0')\n)\nSELECT\n  w.rowid,\n  ms.employee_path,\n  ms.store_id,\n  ms.store_path,\n  pk.name AS kind_name,\n  p.sku,\n  p.path AS product_path,\n  p.brand,\n  p.series,\n  p.model,\n  p.name,\n  COALESCE(i.available_today, 0) AS available_today,\n  pp.key,\n  pp.value_text,\n  pp.value_number\nFROM wanted w\nCROSS JOIN my_store ms\nLEFT JOIN products p\n  ON p.brand = w.brand AND p.series = w.series AND p.model = w.model\nLEFT JOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN inventory i ON i.store_id = ms.store_id AND i.sku = p.sku\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nORDER BY w.rowid, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH my_store AS (
+  SELECT e.id AS employee_id, e.path AS employee_path, s.id AS store_id, s.path AS store_path, s.name AS store_name
+  FROM employees e
+  JOIN stores s ON s.id = e.store_id
+  WHERE e.id = 'emp_031'
+), wanted(rowid, brand, series, model) AS (
+  VALUES
+    ('hsBQx','Mascot','Mascot Advanced','ACC 35W-IIS'),
+    ('8UNrN','Sika','Sika Professional','Sika 28T-UV8'),
+    ('aVwaJ','Bahco','Bahco Workshop','BAH 3VZ-SPH'),
+    ('5Dfno','Fiskars','Fiskars Battery X','1CD-A3X'),
+    ('VhEXz','Viega','Viega Professional','Sanpress 2OG-ENN'),
+    ('9aLj4','Holzmann','Holzmann Compact D','327-RR0')
+)
+SELECT
+  w.rowid,
+  ms.employee_path,
+  ms.store_id,
+  ms.store_path,
+  pk.name AS kind_name,
+  p.sku,
+  p.path AS product_path,
+  p.brand,
+  p.series,
+  p.model,
+  p.name,
+  COALESCE(i.available_today, 0) AS available_today,
+  pp.key,
+  pp.value_text,
+  pp.value_number
+FROM wanted w
+CROSS JOIN my_store ms
+LEFT JOIN products p
+  ON p.brand = w.brand AND p.series = w.series AND p.model = w.model
+LEFT JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN inventory i ON i.store_id = ms.store_id AND i.sku = p.sku
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+ORDER BY w.rowid, p.sku, pp.key;
+SQL
+rowid,employee_path,store_id,store_path,kind_name,sku,product_path,brand,series,model,name,available_today,key,value_text,value_number
+5Dfno,/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,,,,,,,,0,,,
+8UNrN,/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,,,,,,,,0,,,
+9aLj4,/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,,,,,,,,0,,,
+VhEXz,/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,,,,,,,,0,,,
+aVwaJ,/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,,,,,,,,0,,,
+hsBQx,/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,,,,,,,,0,,,
+Next step_2... Run a broader read-only SQL query for the requested brands and likely product text to discover actual stored catalogue values and properties. (17254 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH my_store AS (\n  SELECT e.id AS employee_id, e.path AS employee_path, s.id AS store_id, s.path AS store_path\n  FROM employees e\n  JOIN stores s ON s.id = e.store_id\n  WHERE e.id = 'emp_031'\n), candidates AS (\n  SELECT p.*, pk.name AS kind_name\n  FROM products p\n  JOIN product_kinds pk ON pk.id = p.kind_id\n  WHERE p.brand IN ('Mascot','Sika','Bahco','Fiskars','Viega','Holzmann')\n     OR p.name LIKE '%ACC 35W-IIS%'\n     OR p.name LIKE '%Sika 28T-UV8%'\n     OR p.name LIKE '%BAH 3VZ-SPH%'\n     OR p.name LIKE '%1CD-A3X%'\n     OR p.name LIKE '%Sanpress 2OG-ENN%'\n     OR p.name LIKE '%327-RR0%'\n     OR p.model IN ('ACC 35W-IIS','Sika 28T-UV8','BAH 3VZ-SPH','1CD-A3X','Sanpress 2OG-ENN','327-RR0')\n)\nSELECT\n  ms.employee_path,\n  ms.store_id,\n  ms.store_path,\n  c.sku,\n  c.path AS product_path,\n  c.brand,\n  c.series,\n  c.model,\n  c.kind_name,\n  c.name,\n  COALESCE(i.available_today, 0) AS available_today,\n  pp.key,\n  pp.value_text,\n  pp.value_number\nFROM my_store ms\nJOIN candidates c\nLEFT JOIN inventory i ON i.store_id = ms.store_id AND i.sku = c.sku\nLEFT JOIN product_properties pp ON pp.sku = c.sku\nORDER BY c.brand, c.series, c.model, c.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH my_store AS (
+  SELECT e.id AS employee_id, e.path AS employee_path, s.id AS store_id, s.path AS store_path
+  FROM employees e
+  JOIN stores s ON s.id = e.store_id
+  WHERE e.id = 'emp_031'
+), candidates AS (
+  SELECT p.*, pk.name AS kind_name
+  FROM products p
+  JOIN product_kinds pk ON pk.id = p.kind_id
+  WHERE p.brand IN ('Mascot','Sika','Bahco','Fiskars','Viega','Holzmann')
+     OR p.name LIKE '%ACC 35W-IIS%'
+     OR p.name LIKE '%Sika 28T-UV8%'
+     OR p.name LIKE '%BAH 3VZ-SPH%'
+     OR p.name LIKE '%1CD-A3X%'
+     OR p.name LIKE '%Sanpress 2OG-ENN%'
+     OR p.name LIKE '%327-RR0%'
+     OR p.model IN ('ACC 35W-IIS','Sika 28T-UV8','BAH 3VZ-SPH','1CD-A3X','Sanpress 2OG-ENN','327-RR0')
+)
+SELECT
+  ms.employee_path,
+  ms.store_id,
+  ms.store_path,
+  c.sku,
+  c.path AS product_path,
+  c.brand,
+  c.series,
+  c.model,
+  c.kind_name,
+  c.name,
+  COALESCE(i.available_today, 0) AS available_today,
+  pp.key,
+  pp.value_text,
+  pp.value_number
+FROM my_store ms
+JOIN candidates c
+LEFT JOIN inventory i ON i.store_id = ms.store_id AND i.sku = c.sku
+LEFT JOIN product_properties pp ON pp.sku = c.sku
+ORDER BY c.brand, c.series, c.model, c.sku, pp.key;
+SQL
+employee_path,store_id,store_path,sku,product_path,brand,series,model,kind_name,name,available_today,key,value_text,value_number
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-2JYG5QH9,/proc/catalog/Bahco/HND-2JYG5QH9.json,Bahco,Comfort Grip,BE 1ZR-PGS,Pliers and Wrenches,Bahco Comfort Grip BE 1ZR-PGS Pliers and Wrenches adjustable wrench 150mm plain,0,grip_type,plain,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-2JYG5QH9,/proc/catalog/Bahco/HND-2JYG5QH9.json,Bahco,Comfort Grip,BE 1ZR-PGS,Pliers and Wrenches,Bahco Comfort Grip BE 1ZR-PGS Pliers and Wrenches adjustable wrench 150mm plain,0,length_mm,150,150
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-2JYG5QH9,/proc/catalog/Bahco/HND-2JYG5QH9.json,Bahco,Comfort Grip,BE 1ZR-PGS,Pliers and Wrenches,Bahco Comfort Grip BE 1ZR-PGS Pliers and Wrenches adjustable wrench 150mm plain,0,material,carbon steel,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-2JYG5QH9,/proc/catalog/Bahco/HND-2JYG5QH9.json,Bahco,Comfort Grip,BE 1ZR-PGS,Pliers and Wrenches,Bahco Comfort Grip BE 1ZR-PGS Pliers and Wrenches adjustable wrench 150mm plain,0,tool_type,adjustable wrench,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-2O9KS4GG,/proc/catalog/Bahco/HND-2O9KS4GG.json,Bahco,Comfort Grip,BE 1ZR-PGS,Pliers and Wrenches,Bahco Comfort Grip BE 1ZR-PGS Pliers and Wrenches side cutter 125mm ergonomic,0,grip_type,ergonomic,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-2O9KS4GG,/proc/catalog/Bahco/HND-2O9KS4GG.json,Bahco,Comfort Grip,BE 1ZR-PGS,Pliers and Wrenches,Bahco Comfort Grip BE 1ZR-PGS Pliers and Wrenches side cutter 125mm ergonomic,0,length_mm,125,125
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-2O9KS4GG,/proc/catalog/Bahco/HND-2O9KS4GG.json,Bahco,Comfort Grip,BE 1ZR-PGS,Pliers and Wrenches,Bahco Comfort Grip BE 1ZR-PGS Pliers and Wrenches side cutter 125mm ergonomic,0,material,carbon steel,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-2O9KS4GG,/proc/catalog/Bahco/HND-2O9KS4GG.json,Bahco,Comfort Grip,BE 1ZR-PGS,Pliers and Wrenches,Bahco Comfort Grip BE 1ZR-PGS Pliers and Wrenches side cutter 125mm ergonomic,0,tool_type,side cutter,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-3ZVNDDW0,/proc/catalog/Bahco/HND-3ZVNDDW0.json,Bahco,Comfort Grip,BE 1ZR-PGS,Pliers and Wrenches,Bahco Comfort Grip BE 1ZR-PGS Pliers and Wrenches side cutter 300mm soft grip,0,grip_type,soft grip,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-3ZVNDDW0,/proc/catalog/Bahco/HND-3ZVNDDW0.json,Bahco,Comfort Grip,BE 1ZR-PGS,Pliers and Wrenches,Bahco Comfort Grip BE 1ZR-PGS Pliers and Wrenches side cutter 300mm soft grip,0,length_mm,300,300
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-3ZVNDDW0,/proc/catalog/Bahco/HND-3ZVNDDW0.json,Bahco,Comfort Grip,BE 1ZR-PGS,Pliers and Wrenches,Bahco Comfort Grip BE 1ZR-PGS Pliers and Wrenches side cutter 300mm soft grip,0,material,carbon steel,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-3ZVNDDW0,/proc/catalog/Bahco/HND-3ZVNDDW0.json,Bahco,Comfort Grip,BE 1ZR-PGS,Pliers and Wrenches,Bahco Comfort Grip BE 1ZR-PGS Pliers and Wrenches side cutter 300mm soft grip,0,tool_type,side cutter,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-16AK9OEL,/proc/catalog/Bahco/HND-16AK9OEL.json,Bahco,Workshop,BAH 3VZ-SPH,Hammer Measuring and Cutting Tool,Bahco Workshop BAH 3VZ-SPH Hammer Measuring and Cutting Tool spirit level 150mm,0,length_mm,150,150
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-16AK9OEL,/proc/catalog/Bahco/HND-16AK9OEL.json,Bahco,Workshop,BAH 3VZ-SPH,Hammer Measuring and Cutting Tool,Bahco Workshop BAH 3VZ-SPH Hammer Measuring and Cutting Tool spirit level 150mm,0,material,carbon steel,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-16AK9OEL,/proc/catalog/Bahco/HND-16AK9OEL.json,Bahco,Workshop,BAH 3VZ-SPH,Hammer Measuring and Cutting Tool,Bahco Workshop BAH 3VZ-SPH Hammer Measuring and Cutting Tool spirit level 150mm,0,tool_type,spirit level,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-274DRRGP,/proc/catalog/Bahco/HND-274DRRGP.json,Bahco,Workshop,BAH 3VZ-SPH,Hammer Measuring and Cutting Tool,Bahco Workshop BAH 3VZ-SPH Hammer Measuring and Cutting Tool measuring tape 200mm,4,length_mm,200,200
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-274DRRGP,/proc/catalog/Bahco/HND-274DRRGP.json,Bahco,Workshop,BAH 3VZ-SPH,Hammer Measuring and Cutting Tool,Bahco Workshop BAH 3VZ-SPH Hammer Measuring and Cutting Tool measuring tape 200mm,4,material,carbon steel,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-274DRRGP,/proc/catalog/Bahco/HND-274DRRGP.json,Bahco,Workshop,BAH 3VZ-SPH,Hammer Measuring and Cutting Tool,Bahco Workshop BAH 3VZ-SPH Hammer Measuring and Cutting Tool measuring tape 200mm,4,tool_type,measuring tape,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-2YJMDCJE,/proc/catalog/Bahco/HND-2YJMDCJE.json,Bahco,Workshop,BAH 3VZ-SPH,Hammer Measuring and Cutting Tool,Bahco Workshop BAH 3VZ-SPH Hammer Measuring and Cutting Tool clamp 600mm,1,length_mm,600,600
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-2YJMDCJE,/proc/catalog/Bahco/HND-2YJMDCJE.json,Bahco,Workshop,BAH 3VZ-SPH,Hammer Measuring and Cutting Tool,Bahco Workshop BAH 3VZ-SPH Hammer Measuring and Cutting Tool clamp 600mm,1,material,carbon steel,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,HND-2YJMDCJE,/proc/catalog/Bahco/HND-2YJMDCJE.json,Bahco,Workshop,BAH 3VZ-SPH,Hammer Measuring and Cutting Tool,Bahco Workshop BAH 3VZ-SPH Hammer Measuring and Cutting Tool clamp 600mm,1,tool_type,clamp,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,GRD-138CLG7H,/proc/catalog/Fiskars/GRD-138CLG7H.json,Fiskars,Battery,X 1CD-A3X,Chainsaw,Fiskars Battery X 1CD-A3X Chainsaw battery 20cm,0,bar_length_cm,20,20
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,GRD-138CLG7H,/proc/catalog/Fiskars/GRD-138CLG7H.json,Fiskars,Battery,X 1CD-A3X,Chainsaw,Fiskars Battery X 1CD-A3X Chainsaw battery 20cm,0,battery_platform,18v-system,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,GRD-138CLG7H,/proc/catalog/Fiskars/GRD-138CLG7H.json,Fiskars,Battery,X 1CD-A3X,Chainsaw,Fiskars Battery X 1CD-A3X Chainsaw battery 20cm,0,chain_speed_class,standard,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,GRD-138CLG7H,/proc/catalog/Fiskars/GRD-138CLG7H.json,Fiskars,Battery,X 1CD-A3X,Chainsaw,Fiskars Battery X 1CD-A3X Chainsaw battery 20cm,0,power_source,battery,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,GRD-1QO0KQ77,/proc/catalog/Fiskars/GRD-1QO0KQ77.json,Fiskars,Battery,X 1CD-A3X,Chainsaw,Fiskars Battery X 1CD-A3X Chainsaw petrol 40cm,0,bar_length_cm,40,40
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,GRD-1QO0KQ77,/proc/catalog/Fiskars/GRD-1QO0KQ77.json,Fiskars,Battery,X 1CD-A3X,Chainsaw,Fiskars Battery X 1CD-A3X Chainsaw petrol 40cm,0,battery_platform,petrol,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,GRD-1QO0KQ77,/proc/catalog/Fiskars/GRD-1QO0KQ77.json,Fiskars,Battery,X 1CD-A3X,Chainsaw,Fiskars Battery X 1CD-A3X Chainsaw petrol 40cm,0,chain_speed_class,standard,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,GRD-1QO0KQ77,/proc/catalog/Fiskars/GRD-1QO0KQ77.json,Fiskars,Battery,X 1CD-A3X,Chainsaw,Fiskars Battery X 1CD-A3X Chainsaw petrol 40cm,0,power_source,petrol,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,MAC-28R9X4AP,/proc/catalog/Holzmann/MAC-28R9X4AP.json,Holzmann,Compact,D 327-RR0,Compressor and Dust Extractor,Holzmann Compact D 327-RR0 Compressor and Dust Extractor compressor 3000W 50l,0,machine_type,compressor,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,MAC-28R9X4AP,/proc/catalog/Holzmann/MAC-28R9X4AP.json,Holzmann,Compact,D 327-RR0,Compressor and Dust Extractor,Holzmann Compact D 327-RR0 Compressor and Dust Extractor compressor 3000W 50l,0,mount_type,floor standing,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,MAC-28R9X4AP,/proc/catalog/Holzmann/MAC-28R9X4AP.json,Holzmann,Compact,D 327-RR0,Compressor and Dust Extractor,Holzmann Compact D 327-RR0 Compressor and Dust Extractor compressor 3000W 50l,0,power_w,3000,3000
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,MAC-28R9X4AP,/proc/catalog/Holzmann/MAC-28R9X4AP.json,Holzmann,Compact,D 327-RR0,Compressor and Dust Extractor,Holzmann Compact D 327-RR0 Compressor and Dust Extractor compressor 3000W 50l,0,tank_volume_l,50,50
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,MAC-28R9X4AP,/proc/catalog/Holzmann/MAC-28R9X4AP.json,Holzmann,Compact,D 327-RR0,Compressor and Dust Extractor,Holzmann Compact D 327-RR0 Compressor and Dust Extractor compressor 3000W 50l,0,voltage_v,230,230
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,MAC-361LHXG6,/proc/catalog/Holzmann/MAC-361LHXG6.json,Holzmann,Compact,D 327-RR0,Compressor and Dust Extractor,Holzmann Compact D 327-RR0 Compressor and Dust Extractor compressor 1500W 100l,0,machine_type,compressor,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,MAC-361LHXG6,/proc/catalog/Holzmann/MAC-361LHXG6.json,Holzmann,Compact,D 327-RR0,Compressor and Dust Extractor,Holzmann Compact D 327-RR0 Compressor and Dust Extractor compressor 1500W 100l,0,mount_type,floor standing,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,MAC-361LHXG6,/proc/catalog/Holzmann/MAC-361LHXG6.json,Holzmann,Compact,D 327-RR0,Compressor and Dust Extractor,Holzmann Compact D 327-RR0 Compressor and Dust Extractor compressor 1500W 100l,0,power_w,1500,1500
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,MAC-361LHXG6,/proc/catalog/Holzmann/MAC-361LHXG6.json,Holzmann,Compact,D 327-RR0,Compressor and Dust Extractor,Holzmann Compact D 327-RR0 Compressor and Dust Extractor compressor 1500W 100l,0,tank_volume_l,100,100
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,MAC-361LHXG6,/proc/catalog/Holzmann/MAC-361LHXG6.json,Holzmann,Compact,D 327-RR0,Compressor and Dust Extractor,Holzmann Compact D 327-RR0 Compressor and Dust Extractor compressor 1500W 100l,0,voltage_v,230,230
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,WRK-1A7JZ7P3,/proc/catalog/Mascot/WRK-1A7JZ7P3.json,Mascot,Advanced,ACC 35W-IIS,Work Jacket,Mascot Advanced ACC 35W-IIS Work Jacket Blue XL waterproof,0,color_family,blue,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,WRK-1A7JZ7P3,/proc/catalog/Mascot/WRK-1A7JZ7P3.json,Mascot,Advanced,ACC 35W-IIS,Work Jacket,Mascot Advanced ACC 35W-IIS Work Jacket Blue XL waterproof,0,fabric_weight_gsm,300,300
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,WRK-1A7JZ7P3,/proc/catalog/Mascot/WRK-1A7JZ7P3.json,Mascot,Advanced,ACC 35W-IIS,Work Jacket,Mascot Advanced ACC 35W-IIS Work Jacket Blue XL waterproof,0,fit,slim,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,WRK-1A7JZ7P3,/proc/catalog/Mascot/WRK-1A7JZ7P3.json,Mascot,Advanced,ACC 35W-IIS,Work Jacket,Mascot Advanced ACC 35W-IIS Work Jacket Blue XL waterproof,0,size,XL,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,WRK-1A7JZ7P3,/proc/catalog/Mascot/WRK-1A7JZ7P3.json,Mascot,Advanced,ACC 35W-IIS,Work Jacket,Mascot Advanced ACC 35W-IIS Work Jacket Blue XL waterproof,0,weather_rating,waterproof,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,WRK-3JV3G2YY,/proc/catalog/Mascot/WRK-3JV3G2YY.json,Mascot,Advanced,ACC 35W-IIS,Work Jacket,Mascot Advanced ACC 35W-IIS Work Jacket Purple S waterproof,0,color_family,purple,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,WRK-3JV3G2YY,/proc/catalog/Mascot/WRK-3JV3G2YY.json,Mascot,Advanced,ACC 35W-IIS,Work Jacket,Mascot Advanced ACC 35W-IIS Work Jacket Purple S waterproof,0,fabric_weight_gsm,300,300
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,WRK-3JV3G2YY,/proc/catalog/Mascot/WRK-3JV3G2YY.json,Mascot,Advanced,ACC 35W-IIS,Work Jacket,Mascot Advanced ACC 35W-IIS Work Jacket Purple S waterproof,0,fit,unisex,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,WRK-3JV3G2YY,/proc/catalog/Mascot/WRK-3JV3G2YY.json,Mascot,Advanced,ACC 35W-IIS,Work Jacket,Mascot Advanced ACC 35W-IIS Work Jacket Purple S waterproof,0,size,S,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,WRK-3JV3G2YY,/proc/catalog/Mascot/WRK-3JV3G2YY.json,Mascot,Advanced,ACC 35W-IIS,Work Jacket,Mascot Advanced ACC 35W-IIS Work Jacket Purple S waterproof,0,weather_rating,waterproof,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,WRK-3QX06WWQ,/proc/catalog/Mascot/WRK-3QX06WWQ.json,Mascot,Advanced,ACC 35W-IIS,Work Jacket,Mascot Advanced ACC 35W-IIS Work Jacket Black S waterproof,0,color_family,black,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,WRK-3QX06WWQ,/proc/catalog/Mascot/WRK-3QX06WWQ.json,Mascot,Advanced,ACC 35W-IIS,Work Jacket,Mascot Advanced ACC 35W-IIS Work Jacket Black S waterproof,0,fabric_weight_gsm,300,300
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,WRK-3QX06WWQ,/proc/catalog/Mascot/WRK-3QX06WWQ.json,Mascot,Advanced,ACC 35W-IIS,Work Jacket,Mascot Advanced ACC 35W-IIS Work Jacket Black S waterproof,0,fit,regular,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,WRK-3QX06WWQ,/proc/catalog/Mascot/WRK-3QX06WWQ.json,Mascot,Advanced,ACC 35W-IIS,Work Jacket,Mascot Advanced ACC 35W-IIS Work Jacket Black S waterproof,0,size,S,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,WRK-3QX06WWQ,/proc/catalog/Mascot/WRK-3QX06WWQ.json,Mascot,Advanced,ACC 35W-IIS,Work Jacket,Mascot Advanced ACC 35W-IIS Work Jacket Black S waterproof,0,weather_rating,waterproof,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-1JMTJ3CB,/proc/catalog/Sika/ADH-1JMTJ3CB.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant silicone sealant Black 300ml,0,chemistry,silicone,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-1JMTJ3CB,/proc/catalog/Sika/ADH-1JMTJ3CB.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant silicone sealant Black 300ml,0,color_family,black,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-1JMTJ3CB,/proc/catalog/Sika/ADH-1JMTJ3CB.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant silicone sealant Black 300ml,0,sealant_type,silicone sealant,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-1JMTJ3CB,/proc/catalog/Sika/ADH-1JMTJ3CB.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant silicone sealant Black 300ml,0,use_area,exterior,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-1JMTJ3CB,/proc/catalog/Sika/ADH-1JMTJ3CB.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant silicone sealant Black 300ml,0,volume_ml,300,300
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-2D3Q64KH,/proc/catalog/Sika/ADH-2D3Q64KH.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant hybrid sealant Gray 300ml,2,chemistry,hybrid polymer,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-2D3Q64KH,/proc/catalog/Sika/ADH-2D3Q64KH.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant hybrid sealant Gray 300ml,2,color_family,gray,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-2D3Q64KH,/proc/catalog/Sika/ADH-2D3Q64KH.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant hybrid sealant Gray 300ml,2,sealant_type,hybrid sealant,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-2D3Q64KH,/proc/catalog/Sika/ADH-2D3Q64KH.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant hybrid sealant Gray 300ml,2,use_area,exterior,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-2D3Q64KH,/proc/catalog/Sika/ADH-2D3Q64KH.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant hybrid sealant Gray 300ml,2,volume_ml,300,300
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-2U8ETNHK,/proc/catalog/Sika/ADH-2U8ETNHK.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant silicone sealant Clear 310ml,0,chemistry,silicone,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-2U8ETNHK,/proc/catalog/Sika/ADH-2U8ETNHK.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant silicone sealant Clear 310ml,0,color_family,clear,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-2U8ETNHK,/proc/catalog/Sika/ADH-2U8ETNHK.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant silicone sealant Clear 310ml,0,sealant_type,silicone sealant,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-2U8ETNHK,/proc/catalog/Sika/ADH-2U8ETNHK.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant silicone sealant Clear 310ml,0,use_area,exterior,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-2U8ETNHK,/proc/catalog/Sika/ADH-2U8ETNHK.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant silicone sealant Clear 310ml,0,volume_ml,310,310
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-3FVPXKII,/proc/catalog/Sika/ADH-3FVPXKII.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant hybrid sealant Gray 280ml,1,chemistry,hybrid polymer,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-3FVPXKII,/proc/catalog/Sika/ADH-3FVPXKII.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant hybrid sealant Gray 280ml,1,color_family,gray,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-3FVPXKII,/proc/catalog/Sika/ADH-3FVPXKII.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant hybrid sealant Gray 280ml,1,sealant_type,hybrid sealant,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-3FVPXKII,/proc/catalog/Sika/ADH-3FVPXKII.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant hybrid sealant Gray 280ml,1,use_area,exterior,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,ADH-3FVPXKII,/proc/catalog/Sika/ADH-3FVPXKII.json,Sika,Professional,Sika 28T-UV8,Sealant,Sika Professional Sika 28T-UV8 Sealant hybrid sealant Gray 280ml,1,volume_ml,280,280
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-1B0AEUWP,/proc/catalog/Viega/PLB-1B0AEUWP.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting pipe fitting 15mm push fit,5,connection_type,push fit,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-1B0AEUWP,/proc/catalog/Viega/PLB-1B0AEUWP.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting pipe fitting 15mm push fit,5,diameter_mm,15,15
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-1B0AEUWP,/proc/catalog/Viega/PLB-1B0AEUWP.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting pipe fitting 15mm push fit,5,fitting_type,pipe fitting,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-1B0AEUWP,/proc/catalog/Viega/PLB-1B0AEUWP.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting pipe fitting 15mm push fit,5,material,rubber,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-1B0AEUWP,/proc/catalog/Viega/PLB-1B0AEUWP.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting pipe fitting 15mm push fit,5,thread_type,none,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-1IQS623P,/proc/catalog/Viega/PLB-1IQS623P.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting compression coupler 12mm compression,0,connection_type,compression,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-1IQS623P,/proc/catalog/Viega/PLB-1IQS623P.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting compression coupler 12mm compression,0,diameter_mm,12,12
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-1IQS623P,/proc/catalog/Viega/PLB-1IQS623P.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting compression coupler 12mm compression,0,fitting_type,compression coupler,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-1IQS623P,/proc/catalog/Viega/PLB-1IQS623P.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting compression coupler 12mm compression,0,material,rubber,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-1IQS623P,/proc/catalog/Viega/PLB-1IQS623P.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting compression coupler 12mm compression,0,thread_type,none,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-22902X96,/proc/catalog/Viega/PLB-22902X96.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting compression coupler 32mm press,0,connection_type,press,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-22902X96,/proc/catalog/Viega/PLB-22902X96.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting compression coupler 32mm press,0,diameter_mm,32,32
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-22902X96,/proc/catalog/Viega/PLB-22902X96.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting compression coupler 32mm press,0,fitting_type,compression coupler,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-22902X96,/proc/catalog/Viega/PLB-22902X96.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting compression coupler 32mm press,0,material,rubber,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-22902X96,/proc/catalog/Viega/PLB-22902X96.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting compression coupler 32mm press,0,thread_type,M22,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-37HTTAOT,/proc/catalog/Viega/PLB-37HTTAOT.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting pipe fitting 15mm threaded,8,connection_type,threaded,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-37HTTAOT,/proc/catalog/Viega/PLB-37HTTAOT.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting pipe fitting 15mm threaded,8,diameter_mm,15,15
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-37HTTAOT,/proc/catalog/Viega/PLB-37HTTAOT.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting pipe fitting 15mm threaded,8,fitting_type,pipe fitting,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-37HTTAOT,/proc/catalog/Viega/PLB-37HTTAOT.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting pipe fitting 15mm threaded,8,material,rubber,
+/proc/employees/emp_031.json,store_innsbruck_wilten,/proc/stores/store_innsbruck_wilten.json,PLB-37HTTAOT,/proc/catalog/Viega/PLB-37HTTAOT.json,Viega,Professional,Sanpress 2OG-ENN,Pipe Fitting,Viega Professional Sanpress 2OG-ENN Pipe Fitting pipe fitting 15mm threaded,8,thread_type,none,
+Next step_3... Report the requested tab-separated table with rows in the original order and complete grounding references. (30798 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Read required root instructions and docs tree from transcript.', 'Established active employee emp_031 and store_innsbruck_wilten from SQL.', 'Resolved product variants and same-day availability via broadened SQL catalogue/property query.'] message='RowID\tSKU\tin_stock\tmatch\nhsBQx\t\t\tfalse\n8UNrN\tADH-3FVPXKII\t1\ttrue\naVwaJ\tHND-2YJMDCJE\t1\tfalse\n5Dfno\tGRD-1QO0KQ77\t0\tfalse\nVhEXz\t\t\tfalse\n9aLj4\tMAC-28R9X4AP\t0\tfalse' grounding_refs=['/AGENTS.MD', '/proc/employees/emp_031.json', '/proc/stores/store_innsbruck_wilten.json', '/proc/catalog/Sika/ADH-3FVPXKII.json', '/proc/catalog/Bahco/HND-2YJMDCJE.json', '/proc/catalog/Fiskars/GRD-1QO0KQ77.json', '/proc/catalog/Holzmann/MAC-28R9X4AP.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Read required root instructions and docs tree from transcript.
+- Established active employee emp_031 and store_innsbruck_wilten from SQL.
+- Resolved product variants and same-day availability via broadened SQL catalogue/property query.
+
+[34mAGENT SUMMARY: RowID	SKU	in_stock	match
+hsBQx			false
+8UNrN	ADH-3FVPXKII	1	true
+aVwaJ	HND-2YJMDCJE	1	false
+5Dfno	GRD-1QO0KQ77	0	false
+VhEXz			false
+9aLj4	MAC-28R9X4AP	0	false[0m
+- [34m/AGENTS.MD[0m
+- [34m/proc/employees/emp_031.json[0m
+- [34m/proc/stores/store_innsbruck_wilten.json[0m
+- [34m/proc/catalog/Sika/ADH-3FVPXKII.json[0m
+- [34m/proc/catalog/Bahco/HND-2YJMDCJE.json[0m
+- [34m/proc/catalog/Fiskars/GRD-1QO0KQ77.json[0m
+- [34m/proc/catalog/Holzmann/MAC-28R9X4AP.json[0m

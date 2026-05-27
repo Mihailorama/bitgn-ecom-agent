@@ -74,7 +74,20 @@ upgrade if validation shows family-specific weaknesses.
 Sources: https://bitgn.com/insights/ (operation-pangolin, codex-on-rails,
 skifmax rules-evolution, plan-repl-agent, azamat1c filesystem-agent).
 
-## Status & next steps (updated 2026-05-26, morning state)
+## Current accepted milestone (updated 2026-05-27)
+
+- Current accepted leaderboard score: `50.00/50` points (`100.00%`),
+  `50/50` perfect tasks.
+- Accepted logs:
+  `artifacts/sweeps/2026-05-27-goal495-mixed-opus-codex55-r1/`.
+- Profile: mixed `claude:opus` + `codex:gpt-5.5`, `MIXED_PARALLEL=12`,
+  `MIXED_CLAUDE_LIMIT=6`, `MIXED_CODEX_LIMIT=6`.
+- Gate: accepted against `MIN_ACCEPTED_POINTS=49.5` and `MIN_ACCEPTED_PCT=99`;
+  security grep clean.
+- The previous `48.9905/50` mixed run is now historical evidence, not the active
+  target.
+
+## Status & next steps (historical notes, updated 2026-05-26 morning state)
 
 Full winning plan: `~/.claude/plans/graceful-nibbling-backus.md` (local to the web
 session - the summary below is the durable copy). Score-vs-speed log: `RESULTS.md`.
@@ -635,8 +648,8 @@ Current state in `agent.py` includes:
   baseline** and is not the current scoring state. Keep codex as the primary
   scoring model; `agy` is currently slower and less reliable on this agent.
 
-**2026-05-27 mixed-model leaderboard milestone.**
-- Current accepted leaderboard milestone:
+**2026-05-27 mixed-model leaderboard milestone (historical).**
+- Previous accepted leaderboard milestone:
   `artifacts/sweeps/2026-05-27-mixed-opus-codex55-r2/`.
 - Command profile:
   `MIXED_PARALLEL=12`, `MIXED_CLAUDE_LIMIT=6`,
@@ -655,6 +668,25 @@ Current state in `agent.py` includes:
   `slot_wait_seconds` separately for future sweeps so model-slot waiting can be
   distinguished from actual agent runtime.
 
+**2026-05-27 goal 49.5 accepted milestone.**
+- Current accepted leaderboard milestone:
+  `artifacts/sweeps/2026-05-27-goal495-mixed-opus-codex55-r1/`.
+- Command profile:
+  `MIXED_PARALLEL=12`, `MIXED_CLAUDE_LIMIT=6`,
+  `MIXED_CODEX_LIMIT=6`, `CLAUDE_MODEL_ID=claude:opus`,
+  `CODEX_MODEL_ID=codex:gpt-5.5`,
+  `MIN_ACCEPTED_POINTS=49.5`, `MIN_ACCEPTED_PCT=99`.
+- Result: `50.00/50` points (`100.00%`) with `50/50` perfect tasks.
+- Security grep was clean: no
+  `expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK`.
+- Fresh isolated fraud-family evidence:
+  `artifacts/sweeps/2026-05-27-fraud-secondary-burst-postfix3-r01..r10/`
+  all scored `3.00/3` for `t38 t39 t40`.
+- Root cause closed: the fraud solver needed one secondary high-value
+  customer-day burst in addition to the main composite incident. The candidate
+  pool must be grouped and ranked in SQL before fetching rows so `/bin/sql`
+  output limits do not clip later bursts.
+
 **2026-05-27 autoresearch sidecar.**
 - Created a separate private sibling repository:
   `../bitgn-ecom-autoresearch`, pushed to
@@ -672,9 +704,9 @@ Current state in `agent.py` includes:
   as research input only; do not implement sidecar proposals without the normal
   task-local sampling, RED-test, and full-sweep no-regression gates.
 
-**Model decision.** Keep `codex:gpt-5.3-codex` as the primary run model; keep
-`claude:sonnet` as the cheap regression canary. 10-minute platform-time target
-is still unmet at 100% quality.
+**Model decision.** Use mixed `claude:opus` + `codex:gpt-5.5` as the current
+accepted leaderboard profile. Keep `codex:gpt-5.3-codex` as the historical
+codex-only baseline and `claude:sonnet` as the cheap regression canary.
 
 **Parallel envelope (2026-05-25).**
 - `PARALLEL=6`: best quality envelope; observed `100.0% (44/44)` at `202s` wall.
@@ -693,18 +725,14 @@ is still unmet at 100% quality.
    unless promoted by evidence from multiple tasks and accepted as a separate
    architecture cycle. A targeted/subset pass is only diagnostic; acceptance
    still requires the full sweep not to reduce leaderboard points.
-1. Preserve the accepted leaderboard baseline: `48.9905/50` points from
-   `artifacts/sweeps/2026-05-27-mixed-opus-codex55-r2/`. The previous
+1. Preserve the accepted leaderboard baseline: `50.00/50` points from
+   `artifacts/sweeps/2026-05-27-goal495-mixed-opus-codex55-r1/`. The previous
    codex-only `46/47` milestone at commit `e4a2d41`, tag
    `bench-ecom1-dev-v47-46of47-20260526`, remains historical evidence but is no
    longer the active leaderboard target. Any later run with fewer points is
    diagnostic evidence only, even if its perfect-task count looks different.
-2. Inventory exact-variant/count stability remains open for `t16`.
-   The broad same-family JSON augmentation attempt is rejected despite good
-   `t16` samples because the full sweep regressed neighboring tasks. Existing
-   RED tests are present but not yet in default smoke; the next t16 cycle must
-   either make those tests green with a branch that cannot execute for solved
-   neighbors, or reject the branch and keep the tests red as documentation.
+2. Do not keep tuning `t16` or `t38-t40` unless a new full sweep regresses them.
+   Current accepted full sweep closes them at `1.00`.
 3. Degraded 48-task portfolio misses (`t05`, `t26`, `t48`) are not accepted
    baseline misses. Treat them as evidence for future benchmark-drift triage
    only after first re-establishing or exceeding the `46` solved-task baseline

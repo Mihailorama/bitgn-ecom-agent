@@ -1,0 +1,561 @@
+{
+  "accepted": true,
+  "decision": "ACCEPT",
+  "log_dir": "artifacts/sweeps/2026-05-27-goal495-mixed-opus-codex55-r1",
+  "max_points": 50,
+  "min_pct": 99.0,
+  "min_points": 49.5,
+  "min_solved": null,
+  "mixed_route": {
+    "claude_model": "claude:opus",
+    "claude_tasks": [],
+    "codex_model": "codex:gpt-5.5",
+    "codex_tasks": [
+      "t02",
+      "t06",
+      "t16",
+      "t22",
+      "t31",
+      "t32",
+      "t33",
+      "t36",
+      "t38",
+      "t39",
+      "t40",
+      "t43",
+      "t47",
+      "t48",
+      "t49",
+      "t50"
+    ],
+    "default_model": "claude:opus",
+    "task_model_overrides": {}
+  },
+  "non_perfect": [],
+  "points": 50.0,
+  "reasons": [],
+  "score_pct": 100.0,
+  "scored": 50,
+  "security_misses": [],
+  "solved": 50,
+  "tasks": [
+    {
+      "agent_seconds": 165.559,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 165.668,
+      "score": 1.0,
+      "seconds": 165.559,
+      "slot_wait_seconds": 0.0,
+      "task_id": "t01"
+    },
+    {
+      "agent_seconds": 41.934,
+      "detail": [],
+      "model_id": "codex:gpt-5.5",
+      "platform_open_seconds": 42.027,
+      "score": 1.0,
+      "seconds": 41.934,
+      "slot_wait_seconds": 0.0,
+      "task_id": "t02"
+    },
+    {
+      "agent_seconds": 142.847,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 142.946,
+      "score": 1.0,
+      "seconds": 142.847,
+      "slot_wait_seconds": 0.0,
+      "task_id": "t03"
+    },
+    {
+      "agent_seconds": 134.126,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 134.193,
+      "score": 1.0,
+      "seconds": 134.126,
+      "slot_wait_seconds": 0.0,
+      "task_id": "t04"
+    },
+    {
+      "agent_seconds": 78.409,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 78.529,
+      "score": 1.0,
+      "seconds": 78.409,
+      "slot_wait_seconds": 0.001,
+      "task_id": "t05"
+    },
+    {
+      "agent_seconds": 42.724,
+      "detail": [],
+      "model_id": "codex:gpt-5.5",
+      "platform_open_seconds": 42.781,
+      "score": 1.0,
+      "seconds": 42.724,
+      "slot_wait_seconds": 0.0,
+      "task_id": "t06"
+    },
+    {
+      "agent_seconds": 77.943,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 78.028,
+      "score": 1.0,
+      "seconds": 77.943,
+      "slot_wait_seconds": 0.0,
+      "task_id": "t07"
+    },
+    {
+      "agent_seconds": 70.291,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 71.76,
+      "score": 1.0,
+      "seconds": 70.291,
+      "slot_wait_seconds": 1.366,
+      "task_id": "t08"
+    },
+    {
+      "agent_seconds": 1.54,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 74.232,
+      "score": 1.0,
+      "seconds": 1.54,
+      "slot_wait_seconds": 72.582,
+      "task_id": "t09"
+    },
+    {
+      "agent_seconds": 0.765,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 1.538,
+      "score": 1.0,
+      "seconds": 0.765,
+      "slot_wait_seconds": 0.72,
+      "task_id": "t10"
+    },
+    {
+      "agent_seconds": 0.724,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 0.785,
+      "score": 1.0,
+      "seconds": 0.724,
+      "slot_wait_seconds": 0.007,
+      "task_id": "t11"
+    },
+    {
+      "agent_seconds": 1.592,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 73.5,
+      "score": 1.0,
+      "seconds": 1.592,
+      "slot_wait_seconds": 71.781,
+      "task_id": "t12"
+    },
+    {
+      "agent_seconds": 1.596,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 74.079,
+      "score": 1.0,
+      "seconds": 1.596,
+      "slot_wait_seconds": 72.418,
+      "task_id": "t13"
+    },
+    {
+      "agent_seconds": 1.724,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 73.857,
+      "score": 1.0,
+      "seconds": 1.724,
+      "slot_wait_seconds": 72.072,
+      "task_id": "t14"
+    },
+    {
+      "agent_seconds": 1.898,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 39.49,
+      "score": 1.0,
+      "seconds": 1.898,
+      "slot_wait_seconds": 37.516,
+      "task_id": "t15"
+    },
+    {
+      "agent_seconds": 5.33,
+      "detail": [],
+      "model_id": "codex:gpt-5.5",
+      "platform_open_seconds": 5.392,
+      "score": 1.0,
+      "seconds": 5.33,
+      "slot_wait_seconds": 0.006,
+      "task_id": "t16"
+    },
+    {
+      "agent_seconds": 147.758,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 179.824,
+      "score": 1.0,
+      "seconds": 147.758,
+      "slot_wait_seconds": 31.943,
+      "task_id": "t17"
+    },
+    {
+      "agent_seconds": 152.853,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 156.265,
+      "score": 1.0,
+      "seconds": 152.853,
+      "slot_wait_seconds": 3.345,
+      "task_id": "t18"
+    },
+    {
+      "agent_seconds": 132.732,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 136.289,
+      "score": 1.0,
+      "seconds": 132.732,
+      "slot_wait_seconds": 3.488,
+      "task_id": "t19"
+    },
+    {
+      "agent_seconds": 209.237,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 264.79,
+      "score": 1.0,
+      "seconds": 209.237,
+      "slot_wait_seconds": 55.485,
+      "task_id": "t20"
+    },
+    {
+      "agent_seconds": 134.798,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 198.728,
+      "score": 1.0,
+      "seconds": 134.798,
+      "slot_wait_seconds": 63.851,
+      "task_id": "t21"
+    },
+    {
+      "agent_seconds": 47.83,
+      "detail": [],
+      "model_id": "codex:gpt-5.5",
+      "platform_open_seconds": 47.954,
+      "score": 1.0,
+      "seconds": 47.83,
+      "slot_wait_seconds": 0.003,
+      "task_id": "t22"
+    },
+    {
+      "agent_seconds": 48.6,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 134.088,
+      "score": 1.0,
+      "seconds": 48.6,
+      "slot_wait_seconds": 85.389,
+      "task_id": "t23"
+    },
+    {
+      "agent_seconds": 59.263,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 192.784,
+      "score": 1.0,
+      "seconds": 59.263,
+      "slot_wait_seconds": 133.452,
+      "task_id": "t24"
+    },
+    {
+      "agent_seconds": 1.526,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 134.202,
+      "score": 1.0,
+      "seconds": 1.526,
+      "slot_wait_seconds": 132.604,
+      "task_id": "t25"
+    },
+    {
+      "agent_seconds": 1.626,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 89.587,
+      "score": 1.0,
+      "seconds": 1.626,
+      "slot_wait_seconds": 87.858,
+      "task_id": "t26"
+    },
+    {
+      "agent_seconds": 2.744,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 86.19,
+      "score": 1.0,
+      "seconds": 2.744,
+      "slot_wait_seconds": 83.367,
+      "task_id": "t27"
+    },
+    {
+      "agent_seconds": 1.899,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 79.331,
+      "score": 1.0,
+      "seconds": 1.899,
+      "slot_wait_seconds": 77.331,
+      "task_id": "t28"
+    },
+    {
+      "agent_seconds": 25.486,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 82.211,
+      "score": 1.0,
+      "seconds": 25.486,
+      "slot_wait_seconds": 56.622,
+      "task_id": "t29"
+    },
+    {
+      "agent_seconds": 1.91,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 15.624,
+      "score": 1.0,
+      "seconds": 1.91,
+      "slot_wait_seconds": 13.657,
+      "task_id": "t30"
+    },
+    {
+      "agent_seconds": 100.045,
+      "detail": [],
+      "model_id": "codex:gpt-5.5",
+      "platform_open_seconds": 100.112,
+      "score": 1.0,
+      "seconds": 100.045,
+      "slot_wait_seconds": 0.002,
+      "task_id": "t31"
+    },
+    {
+      "agent_seconds": 81.494,
+      "detail": [],
+      "model_id": "codex:gpt-5.5",
+      "platform_open_seconds": 81.567,
+      "score": 1.0,
+      "seconds": 81.494,
+      "slot_wait_seconds": 0.01,
+      "task_id": "t32"
+    },
+    {
+      "agent_seconds": 76.953,
+      "detail": [],
+      "model_id": "codex:gpt-5.5",
+      "platform_open_seconds": 77.029,
+      "score": 1.0,
+      "seconds": 76.953,
+      "slot_wait_seconds": 0.004,
+      "task_id": "t33"
+    },
+    {
+      "agent_seconds": 32.738,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 42.219,
+      "score": 1.0,
+      "seconds": 32.738,
+      "slot_wait_seconds": 9.35,
+      "task_id": "t34"
+    },
+    {
+      "agent_seconds": 2.664,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 13.606,
+      "score": 1.0,
+      "seconds": 2.664,
+      "slot_wait_seconds": 10.871,
+      "task_id": "t35"
+    },
+    {
+      "agent_seconds": 87.454,
+      "detail": [],
+      "model_id": "codex:gpt-5.5",
+      "platform_open_seconds": 87.519,
+      "score": 1.0,
+      "seconds": 87.454,
+      "slot_wait_seconds": 0.008,
+      "task_id": "t36"
+    },
+    {
+      "agent_seconds": 1.159,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 7.297,
+      "score": 1.0,
+      "seconds": 1.159,
+      "slot_wait_seconds": 6.082,
+      "task_id": "t37"
+    },
+    {
+      "agent_seconds": 1.725,
+      "detail": [
+        "payment fraud refs recovered ~100% EUR from fraud amount, and also marked a few payments as false positives."
+      ],
+      "model_id": "codex:gpt-5.5",
+      "platform_open_seconds": 1.799,
+      "score": 1.0,
+      "seconds": 1.725,
+      "slot_wait_seconds": 0.009,
+      "task_id": "t38"
+    },
+    {
+      "agent_seconds": 1.5,
+      "detail": [
+        "payment fraud refs recovered ~100% EUR from fraud amount, and also marked a few payments as false positives."
+      ],
+      "model_id": "codex:gpt-5.5",
+      "platform_open_seconds": 1.567,
+      "score": 1.0,
+      "seconds": 1.5,
+      "slot_wait_seconds": 0.008,
+      "task_id": "t39"
+    },
+    {
+      "agent_seconds": 1.878,
+      "detail": [
+        "payment fraud refs recovered ~100% EUR from fraud amount, and also marked a few payments as false positives."
+      ],
+      "model_id": "codex:gpt-5.5",
+      "platform_open_seconds": 1.942,
+      "score": 1.0,
+      "seconds": 1.878,
+      "slot_wait_seconds": 0.004,
+      "task_id": "t40"
+    },
+    {
+      "agent_seconds": 2.41,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 2.579,
+      "score": 1.0,
+      "seconds": 2.41,
+      "slot_wait_seconds": 0.114,
+      "task_id": "t41"
+    },
+    {
+      "agent_seconds": 1.225,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 3.584,
+      "score": 1.0,
+      "seconds": 1.225,
+      "slot_wait_seconds": 2.307,
+      "task_id": "t42"
+    },
+    {
+      "agent_seconds": 0.745,
+      "detail": [],
+      "model_id": "codex:gpt-5.5",
+      "platform_open_seconds": 0.81,
+      "score": 1.0,
+      "seconds": 0.745,
+      "slot_wait_seconds": 0.002,
+      "task_id": "t43"
+    },
+    {
+      "agent_seconds": 90.056,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 91.915,
+      "score": 1.0,
+      "seconds": 90.056,
+      "slot_wait_seconds": 1.791,
+      "task_id": "t44"
+    },
+    {
+      "agent_seconds": 1.541,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 9.722,
+      "score": 1.0,
+      "seconds": 1.541,
+      "slot_wait_seconds": 8.119,
+      "task_id": "t45"
+    },
+    {
+      "agent_seconds": 1.326,
+      "detail": [],
+      "model_id": "claude:opus",
+      "platform_open_seconds": 9.729,
+      "score": 1.0,
+      "seconds": 1.326,
+      "slot_wait_seconds": 8.339,
+      "task_id": "t46"
+    },
+    {
+      "agent_seconds": 73.115,
+      "detail": [],
+      "model_id": "codex:gpt-5.5",
+      "platform_open_seconds": 73.193,
+      "score": 1.0,
+      "seconds": 73.115,
+      "slot_wait_seconds": 0.005,
+      "task_id": "t47"
+    },
+    {
+      "agent_seconds": 2.337,
+      "detail": [
+        "answer amount matched",
+        "archive fraud refs recovered ~100% EUR from fraud amount, and also marked a few payments as false positives."
+      ],
+      "model_id": "codex:gpt-5.5",
+      "platform_open_seconds": 2.434,
+      "score": 1.0,
+      "seconds": 2.337,
+      "slot_wait_seconds": 0.005,
+      "task_id": "t48"
+    },
+    {
+      "agent_seconds": 1.274,
+      "detail": [],
+      "model_id": "codex:gpt-5.5",
+      "platform_open_seconds": 2.347,
+      "score": 1.0,
+      "seconds": 1.274,
+      "slot_wait_seconds": 1.016,
+      "task_id": "t49"
+    },
+    {
+      "agent_seconds": 94.579,
+      "detail": [],
+      "model_id": "codex:gpt-5.5",
+      "platform_open_seconds": 95.756,
+      "score": 1.0,
+      "seconds": 94.579,
+      "slot_wait_seconds": 1.078,
+      "task_id": "t50"
+    }
+  ],
+  "timing": {
+    "agent_seconds_max": 209.237,
+    "agent_seconds_sum": 2393.482,
+    "platform_open_seconds_max": 264.79,
+    "platform_open_seconds_sum": 3603.399,
+    "slot_wait_seconds_max": 133.452,
+    "slot_wait_seconds_sum": 1205.986,
+    "wall_seconds": 350.482
+  }
+}

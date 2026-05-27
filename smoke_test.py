@@ -1000,6 +1000,139 @@ def test_red_t48_archive_tsv_fraud_total_uses_archive_rows():
     print("ok: archive TSV fraud total uses archive row refs")
 
 
+def _fraud_payment_row(
+    path,
+    customer,
+    store,
+    created_at,
+    amount,
+    pm="pm_a",
+    dev="dev_a",
+    lat="48.200",
+    lon="16.360",
+    home_delta="0.100",
+    store_delta="0.100",
+):
+    return {
+        "id": path.rsplit("/", 1)[-1].removesuffix(".json"),
+        "path": path,
+        "customer_id": customer,
+        "store_id": store,
+        "status": "paid",
+        "created_at": created_at,
+        "amount_cents": str(amount),
+        "pm": pm,
+        "dev": dev,
+        "observed_lat": lat,
+        "observed_lon": lon,
+        "home_lat": "48.100",
+        "home_lon": "16.260",
+        "store_lat": "48.300",
+        "store_lon": "16.460",
+        "home_delta": home_delta,
+        "store_delta": store_delta,
+    }
+
+
+def _fraud_rows_csv(rows):
+    fields = [
+        "id", "path", "customer_id", "store_id", "status", "created_at",
+        "amount_cents", "pm", "dev", "observed_lat", "observed_lon",
+        "home_lat", "home_lon", "store_lat", "store_lon", "home_delta", "store_delta",
+    ]
+    return ",".join(fields) + "\n" + "\n".join(
+        ",".join(str(row.get(field, "")) for field in fields) for row in rows
+    ) + "\n"
+
+
+def test_red_fraud_cluster_adds_secondary_high_value_customer_day_burst():
+    main_burst = [
+        _fraud_payment_row(
+            f"/proc/payments/pay_main_{idx}.json",
+            "cust_main",
+            f"store_{idx % 4}",
+            f"2025-07-18T17:50:{idx:02d}Z",
+            10000,
+            pm=f"pm_{idx % 2}",
+            dev=f"dev_{idx % 2}",
+            lat=f"48.200{idx}",
+            lon=f"16.360{idx}",
+        )
+        for idx in range(6)
+    ]
+    secondary_burst = [
+        _fraud_payment_row(
+            f"/proc/payments/pay_secondary_{idx}.json",
+            "cust_secondary",
+            f"store_extra_{idx}",
+            f"2025-08-15T10:0{idx}:00Z",
+            60000,
+            pm="pm_secondary",
+            dev="dev_secondary",
+            lat="48.500",
+            lon="16.700",
+        )
+        for idx in range(4)
+    ]
+    low_value_noise = [
+        _fraud_payment_row(
+            f"/proc/payments/pay_noise_{idx}.json",
+            "cust_noise",
+            f"store_noise_{idx}",
+            f"2025-08-16T10:0{idx}:00Z",
+            1000,
+            pm="pm_noise",
+            dev="dev_noise",
+        )
+        for idx in range(4)
+    ]
+    vm = FakeVM()
+    vm.sql_outputs["single_customer_burst"] = _fraud_rows_csv(main_burst)
+    vm.sql_outputs["fraud_all_archived_payments"] = _fraud_rows_csv(
+        main_burst + secondary_burst + low_value_noise
+    )
+
+    fn = agent._try_fraud(
+        vm,
+        "Risk Ops confirmed a known fraud hit in older archived payment history. "
+        "Identify each payment record that belongs to the hit.",
+    )
+
+    assert fn is not None
+    assert set(fn.grounding_refs) == {
+        *(row["path"] for row in main_burst),
+        *(row["path"] for row in secondary_burst),
+    }
+    assert not any("pay_noise" in ref for ref in fn.grounding_refs), \
+        "low-value customer-day bursts should not be pulled into fraud refs"
+    print("red: fraud cluster adds secondary high-value customer-day burst")
+
+
+def test_red_fraud_all_archived_pool_does_not_inner_join_archived_metadata():
+    vm = FakeVM()
+    vm.sql_outputs["fraud_all_archived_payments"] = _fraud_rows_csv([])
+
+    agent._fraud_all_archived_rows(vm)
+
+    sql_calls = [stdin for path, _args, stdin in vm.exec_calls if path == "/bin/sql"]
+    assert sql_calls, "fraud all-row pool should query SQL"
+    assert "JOIN customers" not in sql_calls[-1]
+    assert "JOIN stores" not in sql_calls[-1]
+    print("red: fraud all-row pool reads payments without archived metadata inner joins")
+
+
+def test_red_fraud_secondary_pool_groups_candidates_before_fetching_rows():
+    vm = FakeVM()
+    vm.sql_outputs["fraud_all_archived_payments"] = _fraud_rows_csv([])
+
+    agent._fraud_all_archived_rows(vm)
+
+    sql_calls = [stdin for path, _args, stdin in vm.exec_calls if path == "/bin/sql"]
+    assert "GROUP BY p.customer_id" in sql_calls[-1]
+    assert "LIMIT 12" in sql_calls[-1]
+    print("red: fraud secondary pool ranks grouped candidates before fetching rows")
+
+
 def _inventory_solver_vm() -> FakeVM:
     vm = FakeVM()
     vm.sql_outputs["SELECT id,path,name,city,is_open FROM stores ORDER BY id;"] = (
@@ -2021,6 +2154,9 @@ def main():
     test_discount_desk_coverage_denial_names_required_token()
     test_payment_verification_recovery_cites_current_update_doc()
     test_red_t48_archive_tsv_fraud_total_uses_archive_rows()
+    test_red_fraud_cluster_adds_secondary_high_value_customer_day_burst()
+    test_red_fraud_all_archived_pool_does_not_inner_join_archived_metadata()
+    test_red_fraud_secondary_pool_groups_candidates_before_fetching_rows()
     test_inventory_solver_handles_less_than_available_today_shape()
     test_inventory_solver_handles_fewer_than_items_available_in_shape()
     test_inventory_solver_handles_count_products_fewer_units_from_list_shape()

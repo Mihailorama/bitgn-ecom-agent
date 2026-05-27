@@ -1,0 +1,25 @@
+{
+  "claude_model": "claude:opus",
+  "claude_tasks": [],
+  "codex_model": "codex:gpt-5.5",
+  "codex_tasks": [
+    "t02",
+    "t06",
+    "t16",
+    "t22",
+    "t31",
+    "t32",
+    "t33",
+    "t36",
+    "t38",
+    "t39",
+    "t40",
+    "t43",
+    "t47",
+    "t48",
+    "t49",
+    "t50"
+  ],
+  "default_model": "claude:opus",
+  "task_model_overrides": {}
+}

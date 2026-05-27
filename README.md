@@ -9,9 +9,9 @@ tools such as `/bin/sql`) over the schema published at
 [buf.build/bitgn/api](https://buf.build/bitgn/api), and drives an LLM with
 [Schema-Guided Reasoning](https://abdullin.com/schema-guided-reasoning/).
 
-Current accepted leaderboard milestone: `48.9905/50` points (`97.981%`) with
+Current accepted leaderboard milestone: `50.00/50` points (`100.00%`) with
 mixed `claude:opus` + `codex:gpt-5.5`, logs
-`artifacts/sweeps/2026-05-27-mixed-opus-codex55-r2/`. The previous codex-only
+`artifacts/sweeps/2026-05-27-goal495-mixed-opus-codex55-r1/`. The previous codex-only
 milestone remains `46/47` with `codex:gpt-5.3-codex` at `PARALLEL=6`, commit
 `e4a2d41`, tag `bench-ecom1-dev-v47-46of47-20260526`.
 

@@ -2764,6 +2764,46 @@ ORDER BY ap.created_at;
     return _csv_dicts(_exec_sql_stdout(vm, q))
 
 
+def _fraud_all_archived_rows(vm: EcomRuntimeClientSync) -> "list[dict[str, str]]":
+    q = """
+/* fraud_all_archived_payments */
+WITH candidate_groups AS (
+  SELECT p.customer_id AS customer_id,
+         substr(p.created_at,1,10) AS day,
+         COUNT(*) AS n,
+         SUM(p.amount_cents) AS amt,
+         COUNT(DISTINCT p.store_id) AS stores,
+         COUNT(DISTINCT p.payment_method_fingerprint) AS pms,
+         COUNT(DISTINCT p.device_fingerprint) AS devs,
+         (
+           COUNT(*) * 2.0
+           + COUNT(DISTINCT p.store_id) * 1.2
+           + MIN(COUNT(DISTINCT p.payment_method_fingerprint), 3)
+           + MIN(COUNT(DISTINCT p.device_fingerprint), 3)
+         ) AS risk
+  FROM payments p
+  WHERE p.basket_archived=1
+  GROUP BY p.customer_id, substr(p.created_at,1,10)
+  HAVING COUNT(*) >= 4
+     AND SUM(p.amount_cents) >= 200000
+     AND COUNT(DISTINCT p.store_id) >= 4
+     AND COUNT(DISTINCT p.payment_method_fingerprint) <= 3
+     AND COUNT(DISTINCT p.device_fingerprint) <= 3
+  ORDER BY risk DESC, amt DESC, n DESC
+  LIMIT 12
+)
+SELECT p.id,p.path,p.customer_id,p.store_id,p.status,p.created_at,p.amount_cents,
+       p.payment_method_fingerprint AS pm,p.device_fingerprint AS dev,
+       p.observed_lat,p.observed_lon,'' AS home_lat,'' AS home_lon,'' AS store_lat,'' AS store_lon,
+       '0' AS home_delta,'0' AS store_delta
+FROM payments p
+JOIN candidate_groups g ON g.customer_id=p.customer_id AND g.day=substr(p.created_at,1,10)
+WHERE p.basket_archived=1
+ORDER BY g.risk DESC, g.amt DESC, g.n DESC, p.created_at;
+"""
+    return _csv_dicts(_exec_sql_stdout(vm, q))
+
+
 def _compact_location(rows: "list[dict[str, str]]") -> bool:
     if not rows:
         return False
@@ -2787,6 +2827,41 @@ def _fraud_candidate_score(rows: "list[dict[str, str]]") -> float:
     high_store = sum(1 for r in rows if float(r.get("store_delta") or 0) >= 0.08)
     compact = 1 if _compact_location(rows) else 0
     return n * 2 + high_home * 4 + high_store * 2 + stores + customers + pms + devs + compact * 8
+
+
+def _customer_day_burst_score(rows: "list[dict[str, str]]") -> "tuple[float, int, int]":
+    if len(rows) < 4:
+        return (-1.0, 0, 0)
+    stores = {r.get("store_id") for r in rows if r.get("store_id")}
+    pms = {r.get("pm") for r in rows if r.get("pm")}
+    devs = {r.get("dev") for r in rows if r.get("dev")}
+    amount = sum(_int_field(r, "amount_cents") for r in rows)
+    if len(stores) < 4 or len(pms) > 3 or len(devs) > 3 or amount < 200000:
+        return (-1.0, amount, len(rows))
+    risk = len(rows) * 2.0 + len(stores) * 1.2 + min(len(pms), 3) + min(len(devs), 3)
+    return (risk, amount, len(rows))
+
+
+def _best_secondary_fraud_burst(
+    rows: "list[dict[str, str]]",
+    existing: "list[dict[str, str]]",
+) -> "list[dict[str, str]]":
+    existing_paths = {r.get("path") for r in existing if r.get("path")}
+    grouped: "dict[tuple[str, str], list[dict[str, str]]]" = {}
+    for row in rows:
+        key = (row.get("customer_id", ""), row.get("created_at", "")[:10])
+        grouped.setdefault(key, []).append(row)
+
+    best: "list[dict[str, str]]" = []
+    best_score = (-1.0, 0, 0)
+    for group in grouped.values():
+        if any(row.get("path") in existing_paths for row in group):
+            continue
+        score = _customer_day_burst_score(group)
+        if score > best_score:
+            best_score = score
+            best = group
+    return sorted(best, key=lambda r: r.get("created_at", "")) if best_score[0] >= 0 else []
 
 
 def _best_fraud_cluster(rows: "list[dict[str, str]]") -> "list[dict[str, str]]":
@@ -2858,6 +2933,9 @@ def _try_fraud(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompleti
         return None
     rows = _fraud_rows(vm)
     cluster = _best_fraud_cluster(rows)
+    if cluster:
+        cluster.extend(_best_secondary_fraud_burst(_fraud_all_archived_rows(vm), cluster))
+        cluster = sorted({r["path"]: r for r in cluster if r.get("path")}.values(), key=lambda r: r.get("created_at", ""))
     refs = [r["path"] for r in cluster]
     if not refs:
         return None

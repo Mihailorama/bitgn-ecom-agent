@@ -1,0 +1,42 @@
+{
+  "accepted": true,
+  "decision": "ACCEPT",
+  "log_dir": "artifacts/sweeps/2026-05-27-fraud-secondary-burst-postfix3-r02",
+  "max_points": 3,
+  "min_pct": 99.0,
+  "min_points": 3.0,
+  "min_solved": null,
+  "non_perfect": [],
+  "points": 3.0,
+  "reasons": [],
+  "score_pct": 100.0,
+  "scored": 3,
+  "security_misses": [],
+  "solved": 3,
+  "tasks": [
+    {
+      "detail": [
+        "payment fraud refs recovered ~100% EUR from fraud amount, and also marked a few payments as false positives."
+      ],
+      "score": 1.0,
+      "seconds": 1.549,
+      "task_id": "t38"
+    },
+    {
+      "detail": [
+        "payment fraud refs recovered ~100% EUR from fraud amount, and also marked a few payments as false positives."
+      ],
+      "score": 1.0,
+      "seconds": 1.415,
+      "task_id": "t39"
+    },
+    {
+      "detail": [
+        "payment fraud refs recovered ~100% EUR from fraud amount, and also marked a few payments as false positives."
+      ],
+      "score": 1.0,
+      "seconds": 1.781,
+      "task_id": "t40"
+    }
+  ]
+}

@@ -10,13 +10,11 @@ these diagrams and one validation gate in the risk table.
 As of 2026-05-27, the current saved leaderboard milestone is:
 
 - Milestone profile: mixed `claude:opus` + `codex:gpt-5.5`.
-- Full-sweep result: `48.9905/50` points (`97.981%`) with `47/50` perfect
-  tasks. The three non-perfect tasks were partial fraud scores: `t38`, `t39`,
-  and `t40`.
+- Full-sweep result: `50.00/50` points (`100.00%`) with `50/50` perfect tasks.
 - Accepted sweep logs:
-  `artifacts/sweeps/2026-05-27-mixed-opus-codex55-r2/`.
-- Local wall time: `461s`; leaderboard time: `1:12:27`. The mixed runner now
-  logs model slot wait and platform-open timing separately for future sweeps.
+  `artifacts/sweeps/2026-05-27-goal495-mixed-opus-codex55-r1/`.
+- Local wall time: `350s`; the mixed runner records `agent_seconds`,
+  `platform_open_seconds`, and `slot_wait_seconds`.
 
 The operational target is leaderboard points, not perfect-task count. Perfect
 count remains useful triage, but fractional task scores count toward the goal.
@@ -42,7 +40,7 @@ accepted points target and is security-clean.
 Later diagnostic runs that scored fewer points are not the current state.
 In particular, the 2026-05-27 portfolio comparison is evidence about backend
 behavior on the then-current 48-task denominator, but its best codex result was
-`44/48`; it must not replace the accepted `48.9905/50` mixed milestone as the
+`44/48`; it must not replace the accepted `50.00/50` mixed milestone as the
 leaderboard baseline for future development.
 
 ## Historical Rollback Point
@@ -403,10 +401,9 @@ flowchart TD
 
 ### Current Stable Target
 
-The accepted target is `48.9905/50` points on `bitgn/ecom1-dev` v50. The next
-accepted scoring improvement must preserve at least that points total, preserve
-the configured percent gate, and remain security-clean. Perfect-count movement
-is diagnostic unless it changes the points total.
+The accepted target is `50.00/50` points on `bitgn/ecom1-dev` v50. The next
+accepted improvement must preserve the full points total or improve time,
+preserve the configured percent gate, and remain security-clean.
 
 ## Promotion Contract
 

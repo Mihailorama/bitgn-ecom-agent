@@ -1,0 +1,284 @@
+TASK t08 (model claude:opus, slot claude)
+INSTRUCTION: A support note claims we stock the Valve and Connector from Hansgrohe in the Hansgrohe Raindance Raindance 1X3-24A Valve and Connector line that has connector type thread adapter and diameter 12 mm and has connector type ball valve. Check the actual catalogue item, cite the exact product record, and if the base product exists but that extra catalogue claim is absent, answer with <NO> and include the checked SKU.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- claude
+|   |-- codex
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- os-and-tooling-incidents-and-workarounds.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- os-and-tooling-incidents-and-workarounds.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query products table for the family (24769 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT sku, path, brand, series, model, name FROM products WHERE brand='Hansgrohe' AND series LIKE '%Raindance%' AND model LIKE '%1X3-24A%';"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT sku, path, brand, series, model, name FROM products WHERE brand='Hansgrohe' AND series LIKE '%Raindance%' AND model LIKE '%1X3-24A%';
+SQL
+sku,path,brand,series,model,name
+PLB-2JYQZFWI,/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0001_29dokbkp/PLB-2JYQZFWI.json,Hansgrohe,Raindance,Raindance 1X3-24A,Hansgrohe Raindance Raindance 1X3-24A Valve and Connector faucet connector 16mm none
+PLB-FQ0R7JDC,/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0001_29dokbkp/PLB-FQ0R7JDC.json,Hansgrohe,Raindance,Raindance 1X3-24A,Hansgrohe Raindance Raindance 1X3-24A Valve and Connector thread adapter 25mm 1/2 inch
+PLB-2FCIIVO3,/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0001_29dokbkp/PLB-2FCIIVO3.json,Hansgrohe,Raindance,Raindance 1X3-24A,Hansgrohe Raindance Raindance 1X3-24A Valve and Connector faucet connector 12mm 1 inch
+PLB-1HMCKCXY,/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0001_29dokbkp/PLB-1HMCKCXY.json,Hansgrohe,Raindance,Raindance 1X3-24A,Hansgrohe Raindance Raindance 1X3-24A Valve and Connector seal ring 15mm M22
+PLB-1UXWNKG3,/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0001_29dokbkp/PLB-1UXWNKG3.json,Hansgrohe,Raindance,Raindance 1X3-24A,Hansgrohe Raindance Raindance 1X3-24A Valve and Connector shower hose 15mm M22
+PLB-2ERITUR9,/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0001_29dokbkp/PLB-2ERITUR9.json,Hansgrohe,Raindance,Raindance 1X3-24A,Hansgrohe Raindance Raindance 1X3-24A Valve and Connector faucet connector 20mm 3/4 inch
+PLB-32A3UFBX,/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0001_29dokbkp/PLB-32A3UFBX.json,Hansgrohe,Raindance,Raindance 1X3-24A,Hansgrohe Raindance Raindance 1X3-24A Valve and Connector shower hose 15mm M24
+PLB-1QW7SV80,/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0001_29dokbkp/PLB-1QW7SV80.json,Hansgrohe,Raindance,Raindance 1X3-24A,Hansgrohe Raindance Raindance 1X3-24A Valve and Connector thread adapter 12mm 3/4 inch
+PLB-QVCG3UKW,/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0001_29dokbkp/PLB-QVCG3UKW.json,Hansgrohe,Raindance,Raindance 1X3-24A,Hansgrohe Raindance Raindance 1X3-24A Valve and Connector shower hose 15mm 1/2 inch
+PLB-3M3XDK1L,/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0001_29dokbkp/PLB-3M3XDK1L.json,Hansgrohe,Raindance,Raindance 1X3-24A,Hansgrohe Raindance Raindance 1X3-24A Valve and Connector ball valve 16mm M22
+PLB-2ZRIELE2,/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0001_29dokbkp/PLB-2ZRIELE2.json,Hansgrohe,Raindance,Raindance 1X3-24A,Hansgrohe Raindance Raindance 1X3-24A Valve and Connector faucet connector 15mm 3/4 inch
+PLB-SXYRTKKW,/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0001_29dokbkp/PLB-SXYRTKKW.json,Hansgrohe,Raindance,Raindance 1X3-24A,Hansgrohe Raindance Raindance 1X3-24A Valve and Connector faucet connector 16mm 1/2 inch
+Next step_2... Query product_properties for PLB-1QW7SV80 (25048 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT sku, key, value_text, value_number FROM product_properties WHERE sku='PLB-1QW7SV80' ORDER BY key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT sku, key, value_text, value_number FROM product_properties WHERE sku='PLB-1QW7SV80' ORDER BY key;
+SQL
+sku,key,value_text,value_number
+PLB-1QW7SV80,connection_type,threaded,
+PLB-1QW7SV80,connector_type,thread adapter,
+PLB-1QW7SV80,diameter_mm,12,12
+PLB-1QW7SV80,material,brass,
+PLB-1QW7SV80,thread_type,3/4 inch,
+Next step_3... Report <NO> with SKU PLB-1QW7SV80 (19465 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['queried products for Hansgrohe Raindance 1X3-24A family', 'inspected PLB-1QW7SV80 properties: thread adapter, 12 mm, no ball valve attribute'] message="<NO> SKU PLB-1QW7SV80 is the Hansgrohe Raindance 1X3-24A Valve and Connector with connector_type='thread adapter' and diameter_mm=12, but it does NOT have connector_type 'ball valve' — that extra catalogue claim is absent." grounding_refs=['/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0001_29dokbkp/PLB-1QW7SV80.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- queried products for Hansgrohe Raindance 1X3-24A family
+- inspected PLB-1QW7SV80 properties: thread adapter, 12 mm, no ball valve attribute
+
+[34mAGENT SUMMARY: <NO> SKU PLB-1QW7SV80 is the Hansgrohe Raindance 1X3-24A Valve and Connector with connector_type='thread adapter' and diameter_mm=12, but it does NOT have connector_type 'ball valve' — that extra catalogue claim is absent.[0m
+- [34m/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0001_29dokbkp/PLB-1QW7SV80.json[0m
