@@ -1,0 +1,261 @@
+TASK t16 (model codex:gpt-5.3-codex)
+INSTRUCTION: How many of these products have at least 4 items available in central Salzburg PowerTool branch today: the Valve and Connector from Grohe in the Grohe Universal Essence TTJ-PYK Valve and Connector line that has connector type ball valve, diameter 25 mm, and thread type 1/2 inch,the Safety Eyewear from Honeywell in the Honeywell Howard Leight Miller 37J-80C Safety Eyewear line that has lens color Gray and size M,the Nut Bolt and Washer from Wurth in the Wurth Zinc Plated ZEBRA 135-AHA Nut Bolt and Washer line that has fastener type bolt, diameter 4 mm, and length 30 mm,the Wood Stain and Deck Oil from Dulux in the Dulux Trade Easycare 1J1-41C Wood Stain and Deck Oil line that has product type primer and color family Gray,the Cleaning Machine from Vileda in the Vileda Compact Easy K0N-N95 Cleaning Machine line that has machine type wet dry vacuum and power 1800 W,the Work Trousers from Snickers Workwear in the Snickers Workwear Pro FlexiWork 30C-4Q0 Work Trousers line that has color family Gray, size S, and fit slim? Answer in exactly format "[QTY:%d]" (no quotes)
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- claude
+|   |-- codex
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- os-and-tooling-incidents-and-workarounds.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- os-and-tooling-incidents-and-workarounds.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+INVENTORY_DIAG {"brand": "Grohe", "candidates": [{"available_today": 0, "path": "/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0019_2y5g5met/PLB-1HTFFM2X.json", "sku": "PLB-1HTFFM2X"}, {"available_today": 0, "path": "/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0019_2y5g5met/PLB-386LNW9D.json", "sku": "PLB-386LNW9D"}, {"available_today": 0, "path": "/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0019_2y5g5met/PLB-16H225WD.json", "sku": "PLB-16H225WD"}, {"available_today": 0, "path": "/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0019_2y5g5met/PLB-3078ADXZ.json", "sku": "PLB-3078ADXZ"}, {"available_today": 0, "path": "/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0019_2y5g5met/PLB-394UH0RK.json", "sku": "PLB-394UH0RK"}], "diagnostics": {"brand": "Grohe", "exact_candidate_count": 0, "fallback_family_candidate_count": 5, "fallback_sku": "PLB-1HTFFM2X", "kind": "Valve and Connector", "line": "Grohe Universal Essence TTJ-PYK Valve and Connector", "prop_count": 3}, "kind": "Valve and Connector", "line": "Grohe Universal Essence TTJ-PYK Valve and Connector", "op": "ge", "props": [{"keys": ["connector_type"], "value": "ball valve"}, {"keys": ["diameter", "diameter_mm"], "value": "25 mm"}, {"keys": ["thread_type"], "value": "1/2 inch"}], "reason": "fallback_single", "status": "fallback", "store_id": "store_salzburg_elisabeth_vorstadt", "store_path": "/proc/stores/store_salzburg_elisabeth_vorstadt.json", "threshold": 4}
+INVENTORY_DIAG {"brand": "Honeywell", "candidates": [{"available_today": 0, "path": "/proc/catalog/safety_gear/safety_eyewear/fam_safety_gear_safety_eyewear_0018_1dc8y7l9/SFE-38N688QD.json", "sku": "SFE-38N688QD"}], "diagnostics": {"brand": "Honeywell", "exact_candidate_count": 1, "kind": "Safety Eyewear", "line": "Honeywell Howard Leight Miller 37J-80C Safety Eyewear", "prop_count": 2}, "kind": "Safety Eyewear", "line": "Honeywell Howard Leight Miller 37J-80C Safety Eyewear", "op": "ge", "props": [{"keys": ["lens_color"], "value": "gray"}, {"keys": ["size"], "value": "m"}], "reason": "exact_group", "status": "exact", "store_id": "store_salzburg_elisabeth_vorstadt", "store_path": "/proc/stores/store_salzburg_elisabeth_vorstadt.json", "threshold": 4}
+INVENTORY_DIAG {"brand": "Wurth", "candidates": [{"available_today": 0, "path": "/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0007_1xbgy18y/FST-28ZUUTV9.json", "sku": "FST-28ZUUTV9"}], "diagnostics": {"brand": "Wurth", "exact_candidate_count": 1, "kind": "Nut Bolt and Washer", "line": "Wurth Zinc Plated ZEBRA 135-AHA Nut Bolt and Washer", "prop_count": 3}, "kind": "Nut Bolt and Washer", "line": "Wurth Zinc Plated ZEBRA 135-AHA Nut Bolt and Washer", "op": "ge", "props": [{"keys": ["fastener_type"], "value": "bolt"}, {"keys": ["diameter", "diameter_mm"], "value": "4 mm"}, {"keys": ["length", "length_mm"], "value": "30 mm"}], "reason": "exact_group", "status": "exact", "store_id": "store_salzburg_elisabeth_vorstadt", "store_path": "/proc/stores/store_salzburg_elisabeth_vorstadt.json", "threshold": 4}
+INVENTORY_DIAG {"brand": "Dulux", "candidates": [{"available_today": 6, "path": "/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0010_39xch61k/PNT-2O8KH4VF.json", "sku": "PNT-2O8KH4VF"}], "diagnostics": {"brand": "Dulux", "exact_candidate_count": 1, "kind": "Wood Stain and Deck Oil", "line": "Dulux Trade Easycare 1J1-41C Wood Stain and Deck Oil", "prop_count": 2}, "kind": "Wood Stain and Deck Oil", "line": "Dulux Trade Easycare 1J1-41C Wood Stain and Deck Oil", "op": "ge", "props": [{"keys": ["product_type"], "value": "primer"}, {"keys": ["color_family", "color"], "value": "gray"}], "reason": "exact_group", "status": "exact", "store_id": "store_salzburg_elisabeth_vorstadt", "store_path": "/proc/stores/store_salzburg_elisabeth_vorstadt.json", "threshold": 4}
+INVENTORY_DIAG {"brand": "Vileda", "candidates": [{"available_today": 2, "path": "/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0013_1e0n0utf/CLN-2KNI90E3.json", "sku": "CLN-2KNI90E3"}], "diagnostics": {"brand": "Vileda", "exact_candidate_count": 1, "kind": "Cleaning Machine", "line": "Vileda Compact Easy K0N-N95 Cleaning Machine", "prop_count": 2}, "kind": "Cleaning Machine", "line": "Vileda Compact Easy K0N-N95 Cleaning Machine", "op": "ge", "props": [{"keys": ["machine_type"], "value": "wet dry vacuum"}, {"keys": ["power", "power_w"], "value": "1800 w"}], "reason": "exact_group", "status": "exact", "store_id": "store_salzburg_elisabeth_vorstadt", "store_path": "/proc/stores/store_salzburg_elisabeth_vorstadt.json", "threshold": 4}
+INVENTORY_DIAG {"brand": "Snickers Workwear", "candidates": [{"available_today": 4, "path": "/proc/catalog/workwear/work_trousers/fam_workwear_work_trousers_0008_3stg95kk/WRK-23S38TMQ.json", "sku": "WRK-23S38TMQ"}], "diagnostics": {"brand": "Snickers Workwear", "exact_candidate_count": 1, "kind": "Work Trousers", "line": "Snickers Workwear Pro FlexiWork 30C-4Q0 Work Trousers", "prop_count": 3}, "kind": "Work Trousers", "line": "Snickers Workwear Pro FlexiWork 30C-4Q0 Work Trousers", "op": "ge", "props": [{"keys": ["color_family", "color"], "value": "gray"}, {"keys": ["size"], "value": "s"}, {"keys": ["fit", "garment_fit"], "value": "slim"}], "reason": "exact_group", "status": "exact", "store_id": "store_salzburg_elisabeth_vorstadt", "store_path": "/proc/stores/store_salzburg_elisabeth_vorstadt.json", "threshold": 4}
+[32mdeterministic solver[0m: _try_inventory_count
+[32magent OUTCOME_OK[0m. Summary:
+- deterministic store inventory count via exact candidate SQL
+
+[34mAGENT SUMMARY: [QTY:2][0m
+- [34m/proc/stores/store_salzburg_elisabeth_vorstadt.json[0m
+- [34m/proc/catalog/paints_finishes/wood_stain_oil/fam_paints_finishes_wood_stain_oil_0010_39xch61k/PNT-2O8KH4VF.json[0m
+- [34m/proc/catalog/workwear/work_trousers/fam_workwear_work_trousers_0008_3stg95kk/WRK-23S38TMQ.json[0m

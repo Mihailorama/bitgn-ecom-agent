@@ -1,0 +1,258 @@
+TASK t16 (model codex:gpt-5.3-codex)
+INSTRUCTION: How many of these products have at least 3 items available in central Salzburg PowerTool branch today: the Work Jacket from Uvex in the Uvex Rugged x-fit 1CX-42C Work Jacket line that has color family Green,the Cleaning Machine from Karcher in the Karcher Workshop K T2D-J9K Cleaning Machine line that has machine type steam cleaner, power 1000 W, and tank volume 12 l,the Valve and Connector from AlcaPlast in the AlcaPlast Flexible A 33F-7U9 Valve and Connector line that has connector type shower hose and diameter 20 mm,the Work Trousers from Carhartt in the Carhartt Rugged Rugged 13I-P6P Work Trousers line that has color family Blue and size S,the Pliers and Wrenches from Hazet in the Hazet Professional HAZ 32M-V0J Pliers and Wrenches line that has tool type side cutter and length 150 mm,the Work Top from Sparco in the Sparco Urban Allroad 1UH-ALM Work Top line that has garment type fleece hoodie and color family Green? Answer in exactly format "%d" (no quotes)
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+INVENTORY_DIAG {"brand": "Uvex", "candidates": [{"available_today": 0, "path": "/proc/catalog/workwear/work_jackets/fam_workwear_work_jackets_0004_3mx09s4j/WRK-1ODW11P3.json", "sku": "WRK-1ODW11P3"}], "diagnostics": {"brand": "Uvex", "exact_candidate_count": 1, "kind": "Work Jacket", "line": "Uvex Rugged x-fit 1CX-42C Work Jacket", "prop_count": 1}, "kind": "Work Jacket", "line": "Uvex Rugged x-fit 1CX-42C Work Jacket", "op": "ge", "props": [{"keys": ["color_family", "color"], "value": "green"}], "reason": "exact_group", "status": "exact", "store_id": "store_salzburg_elisabeth_vorstadt", "store_path": "/proc/stores/store_salzburg_elisabeth_vorstadt.json", "threshold": 3}
+INVENTORY_DIAG {"brand": "Karcher", "candidates": [{"available_today": 0, "path": "/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0003_27aw9npb/CLN-20UZ2A6Q.json", "sku": "CLN-20UZ2A6Q"}], "diagnostics": {"brand": "Karcher", "exact_candidate_count": 1, "kind": "Cleaning Machine", "line": "Karcher Workshop K T2D-J9K Cleaning Machine", "prop_count": 2}, "kind": "Cleaning Machine", "line": "Karcher Workshop K T2D-J9K Cleaning Machine", "op": "ge", "props": [{"keys": ["machine_type"], "value": "steam cleaner"}, {"keys": ["power", "power_w"], "value": "1000 w, and tank volume 12 l"}], "reason": "exact_group", "status": "exact", "store_id": "store_salzburg_elisabeth_vorstadt", "store_path": "/proc/stores/store_salzburg_elisabeth_vorstadt.json", "threshold": 3}
+INVENTORY_DIAG {"brand": "AlcaPlast", "candidates": [{"available_today": 0, "path": "/proc/catalog/plumbing/valves_connectors/fam_plumbing_valves_connectors_0017_xp2iglo1/PLB-3DTVZ8ZD.json", "sku": "PLB-3DTVZ8ZD"}], "diagnostics": {"brand": "AlcaPlast", "exact_candidate_count": 1, "kind": "Valve and Connector", "line": "AlcaPlast Flexible A 33F-7U9 Valve and Connector", "prop_count": 2}, "kind": "Valve and Connector", "line": "AlcaPlast Flexible A 33F-7U9 Valve and Connector", "op": "ge", "props": [{"keys": ["connector_type"], "value": "shower hose"}, {"keys": ["diameter", "diameter_mm"], "value": "20 mm"}], "reason": "exact_group", "status": "exact", "store_id": "store_salzburg_elisabeth_vorstadt", "store_path": "/proc/stores/store_salzburg_elisabeth_vorstadt.json", "threshold": 3}
+INVENTORY_DIAG {"brand": "Carhartt", "candidates": [{"available_today": 3, "path": "/proc/catalog/workwear/work_trousers/fam_workwear_work_trousers_0003_hvj74blb/WRK-32YTV267.json", "sku": "WRK-32YTV267"}], "diagnostics": {"brand": "Carhartt", "exact_candidate_count": 1, "kind": "Work Trousers", "line": "Carhartt Rugged Rugged 13I-P6P Work Trousers", "prop_count": 2}, "kind": "Work Trousers", "line": "Carhartt Rugged Rugged 13I-P6P Work Trousers", "op": "ge", "props": [{"keys": ["color_family", "color"], "value": "blue"}, {"keys": ["size"], "value": "s"}], "reason": "exact_group", "status": "exact", "store_id": "store_salzburg_elisabeth_vorstadt", "store_path": "/proc/stores/store_salzburg_elisabeth_vorstadt.json", "threshold": 3}
+INVENTORY_DIAG {"brand": "Hazet", "candidates": [{"available_today": 3, "path": "/proc/catalog/hand_tools/pliers_wrenches/fam_hand_tools_pliers_wrenches_0020_3s2av2dx/HND-16AU23VT.json", "sku": "HND-16AU23VT"}, {"available_today": 0, "path": "/proc/catalog/hand_tools/pliers_wrenches/fam_hand_tools_pliers_wrenches_0020_3s2av2dx/HND-17CS7G3A.json", "sku": "HND-17CS7G3A"}, {"available_today": 0, "path": "/proc/catalog/hand_tools/pliers_wrenches/fam_hand_tools_pliers_wrenches_0020_3s2av2dx/HND-1KG2MMR7.json", "sku": "HND-1KG2MMR7"}, {"available_today": 0, "path": "/proc/catalog/hand_tools/pliers_wrenches/fam_hand_tools_pliers_wrenches_0020_3s2av2dx/HND-1LH26FDR.json", "sku": "HND-1LH26FDR"}, {"available_today": 8, "path": "/proc/catalog/hand_tools/pliers_wrenches/fam_hand_tools_pliers_wrenches_0020_3s2av2dx/HND-1OPNR0V9.json", "sku": "HND-1OPNR0V9"}, {"available_today": 0, "path": "/proc/catalog/hand_tools/pliers_wrenches/fam_hand_tools_pliers_wrenches_0020_3s2av2dx/HND-1QBHALU8.json", "sku": "HND-1QBHALU8"}, {"available_today": 5, "path": "/proc/catalog/hand_tools/pliers_wrenches/fam_hand_tools_pliers_wrenches_0020_3s2av2dx/HND-37X57HR5.json", "sku": "HND-37X57HR5"}], "diagnostics": {"brand": "Hazet", "exact_candidate_count": 0, "fallback_family_candidate_count": 7, "fallback_prop_match_count": 1, "fallback_sku": "HND-37X57HR5", "kind": "Pliers and Wrenches", "line": "Hazet Professional HAZ 32M-V0J Pliers and Wrenches", "prop_count": 2}, "kind": "Pliers and Wrenches", "line": "Hazet Professional HAZ 32M-V0J Pliers and Wrenches", "op": "ge", "props": [{"keys": ["tool_type"], "value": "side cutter"}, {"keys": ["length", "length_mm"], "value": "150 mm"}], "reason": "fallback_single", "status": "fallback", "store_id": "store_salzburg_elisabeth_vorstadt", "store_path": "/proc/stores/store_salzburg_elisabeth_vorstadt.json", "threshold": 3}
+INVENTORY_DIAG {"brand": "Sparco", "candidates": [{"available_today": 5, "path": "/proc/catalog/workwear/work_tops/fam_workwear_work_tops_0002_1xurj0gz/WRK-25NVK2R3.json", "sku": "WRK-25NVK2R3"}], "diagnostics": {"brand": "Sparco", "exact_candidate_count": 1, "kind": "Work Top", "line": "Sparco Urban Allroad 1UH-ALM Work Top", "prop_count": 2}, "kind": "Work Top", "line": "Sparco Urban Allroad 1UH-ALM Work Top", "op": "ge", "props": [{"keys": ["garment_type"], "value": "fleece hoodie"}, {"keys": ["color_family", "color"], "value": "green"}], "reason": "exact_group", "status": "exact", "store_id": "store_salzburg_elisabeth_vorstadt", "store_path": "/proc/stores/store_salzburg_elisabeth_vorstadt.json", "threshold": 3}
+[32mdeterministic solver[0m: _try_inventory_count
+[32magent OUTCOME_OK[0m. Summary:
+- deterministic store inventory count via exact candidate SQL
+
+[34mAGENT SUMMARY: 3[0m
+- [34m/proc/stores/store_salzburg_elisabeth_vorstadt.json[0m
+- [34m/proc/catalog/workwear/work_trousers/fam_workwear_work_trousers_0003_hvj74blb/WRK-32YTV267.json[0m
+- [34m/proc/catalog/hand_tools/pliers_wrenches/fam_hand_tools_pliers_wrenches_0020_3s2av2dx/HND-1OPNR0V9.json[0m
+- [34m/proc/catalog/workwear/work_tops/fam_workwear_work_tops_0002_1xurj0gz/WRK-25NVK2R3.json[0m

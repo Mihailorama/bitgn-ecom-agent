@@ -1,0 +1,618 @@
+TASK t47 (model codex:gpt-5.3-codex)
+INSTRUCTION: I'm preparing a quote for a customer from this pasted product list. Check each row against our exact catalogue and my store's same-day availability.
+
+Input format:
+RowID	description	quantity
+
+Return exactly this tab-separated output table, including the header, with rows in the same order:
+RowID	SKU	in_stock	match
+
+If the description is not an exact catalogue product, leave SKU and in_stock empty and set match=false. If the product exists, set in_stock to the quantity available today in my store (reference all matched SKUs in response). set `match` field true only when the exact product exists and in_stock is at least the requested quantity.
+
+Rows:
+L9UbC	the Valve and Connector from Giacomini in the Giacomini R Series R 1PA-6JD Valve and Connector line that has connector type ball valve and diameter 25 mm	7
+gfxN8	the Tool Box and Bag from Raaco in the Raaco Modular CarryLite 1QB-902 Tool Box and Bag line that has storage type tool bag, color family Black, and volume 12 l	4
+2qiVy	the Storage Bin and Organizer from Keter in the Keter Compact Stack 99Z-RIS Storage Bin and Organizer line that has storage type organizer and color family Gray	2
+5UwF3	the Valve and Connector from AlcaPlast in the AlcaPlast Universal Basic 1CT-04J Valve and Connector line that has connector type ball valve, diameter 25 mm, and thread type 3/4 inch	2
+Vf42c	the Tool Box and Bag from Stanley in the Stanley Classic STA CEQ-WUX Tool Box and Bag line that has storage type tool box and color family Orange	5
+UfKe2	the Cordless Drill Driver from Black+Decker in the Black+Decker Home GTC 3PT-1Y9 Cordless Drill Driver line that has voltage 12 V	6
+W5KcM	the Nut Bolt and Washer from Wurth in the Wurth Universal WU 30Y-BPU Nut Bolt and Washer line that has fastener type washer, diameter 6 mm, length 12 mm, and pack count 50 pcs and has fastener type threaded rod	1
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- claude
+|   |-- codex
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- os-and-tooling-incidents-and-workarounds.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- os-and-tooling-incidents-and-workarounds.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2024-07-17T20:49:48Z
+[32mAUTO[0m: /bin/id
+user: emp_036
+roles: employee, store_manager, discount_manager, refund_manager, inventory_viewer, fulfillment_viewer, customer_service
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Run a focused SQL query to fetch candidate products/properties and available_today for each row in the provided order. (35467 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH actor_store AS (\n  SELECT e.store_id\n  FROM employees e\n  WHERE e.id = 'emp_036'\n), req(row_id, qty, category_name, kind_name, brand, series, model, p1k, p1t, p1n, p2k, p2t, p2n, p3k, p3t, p3n, p4k, p4t, p4n, p5k, p5t, p5n) AS (\n  VALUES\n    ('L9UbC',7,'Valve and Connector','Valve and Connector','Giacomini','R Series','R 1PA-6JD','connector_type','ball valve',NULL,'diameter_mm',NULL,25,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL),\n    ('gfxN8',4,'Tool Box and Bag','Tool Box and Bag','Raaco','Modular CarryLite','1QB-902','storage_type','tool bag',NULL,'color_family','Black',NULL,'volume_l',NULL,12,NULL,NULL,NULL,NULL,NULL,NULL),\n    ('2qiVy',2,'Storage Bin and Organizer','Storage Bin and Organizer','Keter','Compact Stack','99Z-RIS','storage_type','organizer',NULL,'color_family','Gray',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL),\n    ('5UwF3',2,'Valve and Connector','Valve and Connector','AlcaPlast','Universal Basic','1CT-04J','connector_type','ball valve',NULL,'diameter_mm',NULL,25,'thread_type','3/4 inch',NULL,NULL,NULL,NULL,NULL,NULL,NULL),\n    ('Vf42c',5,'Tool Box and Bag','Tool Box and Bag','Stanley','Classic','STA CEQ-WUX','storage_type','tool box',NULL,'color_family','Orange',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL),\n    ('UfKe2',6,'Cordless Drill Driver','Cordless Drill Driver','Black+Decker','Home GTC','3PT-1Y9','voltage_v',NULL,12,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL),\n    ('W5KcM',1,'Nut Bolt and Washer','Nut Bolt and Washer','Wurth','Universal WU','30Y-BPU','fastener_type','washer',NULL,'diameter_mm',NULL,6,'length_mm',NULL,12,'pack_count_pcs',NULL,50,'fastener_type','threaded rod',NULL)\n), base AS (\n  SELECT\n    r.row_id,\n    r.qty,\n    p.sku,\n    p.path AS product_path,\n    p.brand,\n    p.series,\n    p.model,\n    c.name AS category_name,\n    k.name AS kind_name,\n    COALESCE(i.available_today,0) AS available_today\n  FROM req r\n  JOIN categories c ON c.name = r.category_name\n  JOIN product_kinds k ON k.category_id = c.id AND k.name = r.kind_name\n  JOIN products p ON p.category_id = c.id AND p.kind_id = k.id\n    AND p.brand = r.brand AND p.series = r.series AND p.model = r.model\n  LEFT JOIN actor_store s ON 1=1\n  LEFT JOIN inventory i ON i.store_id = s.store_id AND i.sku = p.sku\n)\nSELECT\n  b.row_id,\n  b.qty,\n  b.sku,\n  b.product_path,\n  b.available_today,\n  pp.key,\n  pp.value_text,\n  pp.value_number\nFROM base b\nLEFT JOIN product_properties pp ON pp.sku = b.sku\nORDER BY b.row_id, b.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH actor_store AS (
+  SELECT e.store_id
+  FROM employees e
+  WHERE e.id = 'emp_036'
+), req(row_id, qty, category_name, kind_name, brand, series, model, p1k, p1t, p1n, p2k, p2t, p2n, p3k, p3t, p3n, p4k, p4t, p4n, p5k, p5t, p5n) AS (
+  VALUES
+    ('L9UbC',7,'Valve and Connector','Valve and Connector','Giacomini','R Series','R 1PA-6JD','connector_type','ball valve',NULL,'diameter_mm',NULL,25,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL),
+    ('gfxN8',4,'Tool Box and Bag','Tool Box and Bag','Raaco','Modular CarryLite','1QB-902','storage_type','tool bag',NULL,'color_family','Black',NULL,'volume_l',NULL,12,NULL,NULL,NULL,NULL,NULL,NULL),
+    ('2qiVy',2,'Storage Bin and Organizer','Storage Bin and Organizer','Keter','Compact Stack','99Z-RIS','storage_type','organizer',NULL,'color_family','Gray',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL),
+    ('5UwF3',2,'Valve and Connector','Valve and Connector','AlcaPlast','Universal Basic','1CT-04J','connector_type','ball valve',NULL,'diameter_mm',NULL,25,'thread_type','3/4 inch',NULL,NULL,NULL,NULL,NULL,NULL,NULL),
+    ('Vf42c',5,'Tool Box and Bag','Tool Box and Bag','Stanley','Classic','STA CEQ-WUX','storage_type','tool box',NULL,'color_family','Orange',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL),
+    ('UfKe2',6,'Cordless Drill Driver','Cordless Drill Driver','Black+Decker','Home GTC','3PT-1Y9','voltage_v',NULL,12,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL),
+    ('W5KcM',1,'Nut Bolt and Washer','Nut Bolt and Washer','Wurth','Universal WU','30Y-BPU','fastener_type','washer',NULL,'diameter_mm',NULL,6,'length_mm',NULL,12,'pack_count_pcs',NULL,50,'fastener_type','threaded rod',NULL)
+), base AS (
+  SELECT
+    r.row_id,
+    r.qty,
+    p.sku,
+    p.path AS product_path,
+    p.brand,
+    p.series,
+    p.model,
+    c.name AS category_name,
+    k.name AS kind_name,
+    COALESCE(i.available_today,0) AS available_today
+  FROM req r
+  JOIN categories c ON c.name = r.category_name
+  JOIN product_kinds k ON k.category_id = c.id AND k.name = r.kind_name
+  JOIN products p ON p.category_id = c.id AND p.kind_id = k.id
+    AND p.brand = r.brand AND p.series = r.series AND p.model = r.model
+  LEFT JOIN actor_store s ON 1=1
+  LEFT JOIN inventory i ON i.store_id = s.store_id AND i.sku = p.sku
+)
+SELECT
+  b.row_id,
+  b.qty,
+  b.sku,
+  b.product_path,
+  b.available_today,
+  pp.key,
+  pp.value_text,
+  pp.value_number
+FROM base b
+LEFT JOIN product_properties pp ON pp.sku = b.sku
+ORDER BY b.row_id, b.sku, pp.key;
+SQL
+row_id,qty,sku,product_path,available_today,key,value_text,value_number
+Next step_2... Run a broader SQL lookup by brand+series+model for all requested rows, joining product_kinds/categories/properties and actor-store inventory. (22259 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH actor_store AS (\n  SELECT store_id FROM employees WHERE id='emp_036'\n), req(row_id, qty, brand, series, model) AS (\n  VALUES\n    ('L9UbC',7,'Giacomini','R Series','R 1PA-6JD'),\n    ('gfxN8',4,'Raaco','Modular CarryLite','1QB-902'),\n    ('2qiVy',2,'Keter','Compact Stack','99Z-RIS'),\n    ('5UwF3',2,'AlcaPlast','Universal Basic','1CT-04J'),\n    ('Vf42c',5,'Stanley','Classic','STA CEQ-WUX'),\n    ('UfKe2',6,'Black+Decker','Home GTC','3PT-1Y9'),\n    ('W5KcM',1,'Wurth','Universal WU','30Y-BPU')\n)\nSELECT\n  r.row_id,\n  r.qty,\n  p.sku,\n  p.path,\n  c.name AS category_name,\n  k.name AS kind_name,\n  p.brand,\n  p.series,\n  p.model,\n  COALESCE(i.available_today,0) AS available_today,\n  pp.key,\n  pp.value_text,\n  pp.value_number\nFROM req r\nJOIN products p\n  ON p.brand=r.brand AND p.series=r.series AND p.model=r.model\nJOIN categories c ON c.id=p.category_id\nJOIN product_kinds k ON k.id=p.kind_id\nLEFT JOIN product_properties pp ON pp.sku=p.sku\nLEFT JOIN actor_store s ON 1=1\nLEFT JOIN inventory i ON i.store_id=s.store_id AND i.sku=p.sku\nORDER BY r.row_id, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH actor_store AS (
+  SELECT store_id FROM employees WHERE id='emp_036'
+), req(row_id, qty, brand, series, model) AS (
+  VALUES
+    ('L9UbC',7,'Giacomini','R Series','R 1PA-6JD'),
+    ('gfxN8',4,'Raaco','Modular CarryLite','1QB-902'),
+    ('2qiVy',2,'Keter','Compact Stack','99Z-RIS'),
+    ('5UwF3',2,'AlcaPlast','Universal Basic','1CT-04J'),
+    ('Vf42c',5,'Stanley','Classic','STA CEQ-WUX'),
+    ('UfKe2',6,'Black+Decker','Home GTC','3PT-1Y9'),
+    ('W5KcM',1,'Wurth','Universal WU','30Y-BPU')
+)
+SELECT
+  r.row_id,
+  r.qty,
+  p.sku,
+  p.path,
+  c.name AS category_name,
+  k.name AS kind_name,
+  p.brand,
+  p.series,
+  p.model,
+  COALESCE(i.available_today,0) AS available_today,
+  pp.key,
+  pp.value_text,
+  pp.value_number
+FROM req r
+JOIN products p
+  ON p.brand=r.brand AND p.series=r.series AND p.model=r.model
+JOIN categories c ON c.id=p.category_id
+JOIN product_kinds k ON k.id=p.kind_id
+LEFT JOIN product_properties pp ON pp.sku=p.sku
+LEFT JOIN actor_store s ON 1=1
+LEFT JOIN inventory i ON i.store_id=s.store_id AND i.sku=p.sku
+ORDER BY r.row_id, p.sku, pp.key;
+SQL
+row_id,qty,sku,path,category_name,kind_name,brand,series,model,available_today,key,value_text,value_number
+L9UbC,7,PLB-19PYLEJQ,/proc/catalog/plumbing/valves_connectors/PLB-19PYLEJQ.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connection_type,compression,
+L9UbC,7,PLB-19PYLEJQ,/proc/catalog/plumbing/valves_connectors/PLB-19PYLEJQ.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connector_type,ball valve,
+L9UbC,7,PLB-19PYLEJQ,/proc/catalog/plumbing/valves_connectors/PLB-19PYLEJQ.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,diameter_mm,32,32
+L9UbC,7,PLB-19PYLEJQ,/proc/catalog/plumbing/valves_connectors/PLB-19PYLEJQ.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,material,brass,
+L9UbC,7,PLB-19PYLEJQ,/proc/catalog/plumbing/valves_connectors/PLB-19PYLEJQ.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,thread_type,3/4 inch,
+L9UbC,7,PLB-1D1ZJ0O4,/proc/catalog/plumbing/valves_connectors/PLB-1D1ZJ0O4.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connection_type,compression,
+L9UbC,7,PLB-1D1ZJ0O4,/proc/catalog/plumbing/valves_connectors/PLB-1D1ZJ0O4.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connector_type,faucet connector,
+L9UbC,7,PLB-1D1ZJ0O4,/proc/catalog/plumbing/valves_connectors/PLB-1D1ZJ0O4.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,diameter_mm,16,16
+L9UbC,7,PLB-1D1ZJ0O4,/proc/catalog/plumbing/valves_connectors/PLB-1D1ZJ0O4.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,material,brass,
+L9UbC,7,PLB-1D1ZJ0O4,/proc/catalog/plumbing/valves_connectors/PLB-1D1ZJ0O4.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,thread_type,1/2 inch,
+L9UbC,7,PLB-1DOG7S0Q,/proc/catalog/plumbing/valves_connectors/PLB-1DOG7S0Q.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connection_type,compression,
+L9UbC,7,PLB-1DOG7S0Q,/proc/catalog/plumbing/valves_connectors/PLB-1DOG7S0Q.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connector_type,faucet connector,
+L9UbC,7,PLB-1DOG7S0Q,/proc/catalog/plumbing/valves_connectors/PLB-1DOG7S0Q.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,diameter_mm,12,12
+L9UbC,7,PLB-1DOG7S0Q,/proc/catalog/plumbing/valves_connectors/PLB-1DOG7S0Q.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,material,brass,
+L9UbC,7,PLB-1DOG7S0Q,/proc/catalog/plumbing/valves_connectors/PLB-1DOG7S0Q.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,thread_type,1/2 inch,
+L9UbC,7,PLB-211AV8AW,/proc/catalog/plumbing/valves_connectors/PLB-211AV8AW.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,9,connection_type,compression,
+L9UbC,7,PLB-211AV8AW,/proc/catalog/plumbing/valves_connectors/PLB-211AV8AW.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,9,connector_type,faucet connector,
+L9UbC,7,PLB-211AV8AW,/proc/catalog/plumbing/valves_connectors/PLB-211AV8AW.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,9,diameter_mm,15,15
+L9UbC,7,PLB-211AV8AW,/proc/catalog/plumbing/valves_connectors/PLB-211AV8AW.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,9,material,brass,
+L9UbC,7,PLB-211AV8AW,/proc/catalog/plumbing/valves_connectors/PLB-211AV8AW.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,9,thread_type,3/4 inch,
+L9UbC,7,PLB-2B93WAPO,/proc/catalog/plumbing/valves_connectors/PLB-2B93WAPO.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connection_type,compression,
+L9UbC,7,PLB-2B93WAPO,/proc/catalog/plumbing/valves_connectors/PLB-2B93WAPO.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connector_type,ball valve,
+L9UbC,7,PLB-2B93WAPO,/proc/catalog/plumbing/valves_connectors/PLB-2B93WAPO.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,diameter_mm,20,20
+L9UbC,7,PLB-2B93WAPO,/proc/catalog/plumbing/valves_connectors/PLB-2B93WAPO.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,material,brass,
+L9UbC,7,PLB-2B93WAPO,/proc/catalog/plumbing/valves_connectors/PLB-2B93WAPO.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,thread_type,1/2 inch,
+L9UbC,7,PLB-2I4JKC8Y,/proc/catalog/plumbing/valves_connectors/PLB-2I4JKC8Y.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connection_type,compression,
+L9UbC,7,PLB-2I4JKC8Y,/proc/catalog/plumbing/valves_connectors/PLB-2I4JKC8Y.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connector_type,faucet connector,
+L9UbC,7,PLB-2I4JKC8Y,/proc/catalog/plumbing/valves_connectors/PLB-2I4JKC8Y.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,diameter_mm,15,15
+L9UbC,7,PLB-2I4JKC8Y,/proc/catalog/plumbing/valves_connectors/PLB-2I4JKC8Y.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,material,brass,
+L9UbC,7,PLB-2I4JKC8Y,/proc/catalog/plumbing/valves_connectors/PLB-2I4JKC8Y.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,thread_type,1 inch,
+L9UbC,7,PLB-2JM56EQT,/proc/catalog/plumbing/valves_connectors/PLB-2JM56EQT.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connection_type,compression,
+L9UbC,7,PLB-2JM56EQT,/proc/catalog/plumbing/valves_connectors/PLB-2JM56EQT.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connector_type,thread adapter,
+L9UbC,7,PLB-2JM56EQT,/proc/catalog/plumbing/valves_connectors/PLB-2JM56EQT.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,diameter_mm,32,32
+L9UbC,7,PLB-2JM56EQT,/proc/catalog/plumbing/valves_connectors/PLB-2JM56EQT.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,material,brass,
+L9UbC,7,PLB-2JM56EQT,/proc/catalog/plumbing/valves_connectors/PLB-2JM56EQT.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,thread_type,none,
+L9UbC,7,PLB-2LSWZMYJ,/proc/catalog/plumbing/valves_connectors/PLB-2LSWZMYJ.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connection_type,compression,
+L9UbC,7,PLB-2LSWZMYJ,/proc/catalog/plumbing/valves_connectors/PLB-2LSWZMYJ.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connector_type,ball valve,
+L9UbC,7,PLB-2LSWZMYJ,/proc/catalog/plumbing/valves_connectors/PLB-2LSWZMYJ.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,diameter_mm,20,20
+L9UbC,7,PLB-2LSWZMYJ,/proc/catalog/plumbing/valves_connectors/PLB-2LSWZMYJ.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,material,brass,
+L9UbC,7,PLB-2LSWZMYJ,/proc/catalog/plumbing/valves_connectors/PLB-2LSWZMYJ.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,thread_type,1 inch,
+L9UbC,7,PLB-2X2H6OED,/proc/catalog/plumbing/valves_connectors/PLB-2X2H6OED.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connection_type,compression,
+L9UbC,7,PLB-2X2H6OED,/proc/catalog/plumbing/valves_connectors/PLB-2X2H6OED.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connector_type,shower hose,
+L9UbC,7,PLB-2X2H6OED,/proc/catalog/plumbing/valves_connectors/PLB-2X2H6OED.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,diameter_mm,12,12
+L9UbC,7,PLB-2X2H6OED,/proc/catalog/plumbing/valves_connectors/PLB-2X2H6OED.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,material,brass,
+L9UbC,7,PLB-2X2H6OED,/proc/catalog/plumbing/valves_connectors/PLB-2X2H6OED.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,thread_type,1/2 inch,
+L9UbC,7,PLB-2XOXVFQZ,/proc/catalog/plumbing/valves_connectors/PLB-2XOXVFQZ.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connection_type,compression,
+L9UbC,7,PLB-2XOXVFQZ,/proc/catalog/plumbing/valves_connectors/PLB-2XOXVFQZ.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connector_type,shower hose,
+L9UbC,7,PLB-2XOXVFQZ,/proc/catalog/plumbing/valves_connectors/PLB-2XOXVFQZ.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,diameter_mm,16,16
+L9UbC,7,PLB-2XOXVFQZ,/proc/catalog/plumbing/valves_connectors/PLB-2XOXVFQZ.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,material,brass,
+L9UbC,7,PLB-2XOXVFQZ,/proc/catalog/plumbing/valves_connectors/PLB-2XOXVFQZ.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,thread_type,1/2 inch,
+L9UbC,7,PLB-3GT3P8W1,/proc/catalog/plumbing/valves_connectors/PLB-3GT3P8W1.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connection_type,compression,
+L9UbC,7,PLB-3GT3P8W1,/proc/catalog/plumbing/valves_connectors/PLB-3GT3P8W1.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,connector_type,ball valve,
+L9UbC,7,PLB-3GT3P8W1,/proc/catalog/plumbing/valves_connectors/PLB-3GT3P8W1.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,diameter_mm,40,40
+L9UbC,7,PLB-3GT3P8W1,/proc/catalog/plumbing/valves_connectors/PLB-3GT3P8W1.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,material,brass,
+L9UbC,7,PLB-3GT3P8W1,/proc/catalog/plumbing/valves_connectors/PLB-3GT3P8W1.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,0,thread_type,1/2 inch,
+L9UbC,7,PLB-INP2YHQ5,/proc/catalog/plumbing/valves_connectors/PLB-INP2YHQ5.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,6,connection_type,compression,
+L9UbC,7,PLB-INP2YHQ5,/proc/catalog/plumbing/valves_connectors/PLB-INP2YHQ5.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,6,connector_type,ball valve,
+L9UbC,7,PLB-INP2YHQ5,/proc/catalog/plumbing/valves_connectors/PLB-INP2YHQ5.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,6,diameter_mm,25,25
+L9UbC,7,PLB-INP2YHQ5,/proc/catalog/plumbing/valves_connectors/PLB-INP2YHQ5.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,6,material,brass,
+L9UbC,7,PLB-INP2YHQ5,/proc/catalog/plumbing/valves_connectors/PLB-INP2YHQ5.json,Plumbing,Valve and Connector,Giacomini,R Series,R 1PA-6JD,6,thread_type,1 inch,
+Vf42c,5,STO-11VKPJWP,/proc/catalog/storage/tool_boxes_bags/STO-11VKPJWP.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,4,color_family,black,
+Vf42c,5,STO-11VKPJWP,/proc/catalog/storage/tool_boxes_bags/STO-11VKPJWP.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,4,material,plastic,
+Vf42c,5,STO-11VKPJWP,/proc/catalog/storage/tool_boxes_bags/STO-11VKPJWP.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,4,stackable,system only,
+Vf42c,5,STO-11VKPJWP,/proc/catalog/storage/tool_boxes_bags/STO-11VKPJWP.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,4,storage_type,tool bag,
+Vf42c,5,STO-11VKPJWP,/proc/catalog/storage/tool_boxes_bags/STO-11VKPJWP.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,4,volume_l,8,8
+Vf42c,5,STO-1L2IJ3R1,/proc/catalog/storage/tool_boxes_bags/STO-1L2IJ3R1.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,color_family,yellow,
+Vf42c,5,STO-1L2IJ3R1,/proc/catalog/storage/tool_boxes_bags/STO-1L2IJ3R1.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,material,plastic,
+Vf42c,5,STO-1L2IJ3R1,/proc/catalog/storage/tool_boxes_bags/STO-1L2IJ3R1.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,stackable,yes,
+Vf42c,5,STO-1L2IJ3R1,/proc/catalog/storage/tool_boxes_bags/STO-1L2IJ3R1.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,storage_type,tool bag,
+Vf42c,5,STO-1L2IJ3R1,/proc/catalog/storage/tool_boxes_bags/STO-1L2IJ3R1.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,volume_l,60,60
+Vf42c,5,STO-1QNE5X3M,/proc/catalog/storage/tool_boxes_bags/STO-1QNE5X3M.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,color_family,clear,
+Vf42c,5,STO-1QNE5X3M,/proc/catalog/storage/tool_boxes_bags/STO-1QNE5X3M.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,material,plastic,
+Vf42c,5,STO-1QNE5X3M,/proc/catalog/storage/tool_boxes_bags/STO-1QNE5X3M.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,stackable,system only,
+Vf42c,5,STO-1QNE5X3M,/proc/catalog/storage/tool_boxes_bags/STO-1QNE5X3M.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,storage_type,sortainer,
+Vf42c,5,STO-1QNE5X3M,/proc/catalog/storage/tool_boxes_bags/STO-1QNE5X3M.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,volume_l,25,25
+Vf42c,5,STO-281RMFUG,/proc/catalog/storage/tool_boxes_bags/STO-281RMFUG.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,2,color_family,orange,
+Vf42c,5,STO-281RMFUG,/proc/catalog/storage/tool_boxes_bags/STO-281RMFUG.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,2,material,plastic,
+Vf42c,5,STO-281RMFUG,/proc/catalog/storage/tool_boxes_bags/STO-281RMFUG.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,2,stackable,system only,
+Vf42c,5,STO-281RMFUG,/proc/catalog/storage/tool_boxes_bags/STO-281RMFUG.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,2,storage_type,tool box,
+Vf42c,5,STO-281RMFUG,/proc/catalog/storage/tool_boxes_bags/STO-281RMFUG.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,2,volume_l,18,18
+Vf42c,5,STO-2F42QXUN,/proc/catalog/storage/tool_boxes_bags/STO-2F42QXUN.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,4,color_family,yellow,
+Vf42c,5,STO-2F42QXUN,/proc/catalog/storage/tool_boxes_bags/STO-2F42QXUN.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,4,material,plastic,
+Vf42c,5,STO-2F42QXUN,/proc/catalog/storage/tool_boxes_bags/STO-2F42QXUN.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,4,stackable,yes,
+Vf42c,5,STO-2F42QXUN,/proc/catalog/storage/tool_boxes_bags/STO-2F42QXUN.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,4,storage_type,tool bag,
+Vf42c,5,STO-2F42QXUN,/proc/catalog/storage/tool_boxes_bags/STO-2F42QXUN.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,4,volume_l,25,25
+Vf42c,5,STO-2RBBNXK9,/proc/catalog/storage/tool_boxes_bags/STO-2RBBNXK9.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,color_family,gray,
+Vf42c,5,STO-2RBBNXK9,/proc/catalog/storage/tool_boxes_bags/STO-2RBBNXK9.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,material,plastic,
+Vf42c,5,STO-2RBBNXK9,/proc/catalog/storage/tool_boxes_bags/STO-2RBBNXK9.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,stackable,yes,
+Vf42c,5,STO-2RBBNXK9,/proc/catalog/storage/tool_boxes_bags/STO-2RBBNXK9.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,storage_type,sortainer,
+Vf42c,5,STO-2RBBNXK9,/proc/catalog/storage/tool_boxes_bags/STO-2RBBNXK9.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,volume_l,12,12
+Vf42c,5,STO-2WKMJQ67,/proc/catalog/storage/tool_boxes_bags/STO-2WKMJQ67.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,4,color_family,red,
+Vf42c,5,STO-2WKMJQ67,/proc/catalog/storage/tool_boxes_bags/STO-2WKMJQ67.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,4,material,plastic,
+Vf42c,5,STO-2WKMJQ67,/proc/catalog/storage/tool_boxes_bags/STO-2WKMJQ67.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,4,stackable,system only,
+Vf42c,5,STO-2WKMJQ67,/proc/catalog/storage/tool_boxes_bags/STO-2WKMJQ67.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,4,storage_type,tool box,
+Vf42c,5,STO-2WKMJQ67,/proc/catalog/storage/tool_boxes_bags/STO-2WKMJQ67.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,4,volume_l,40,40
+Vf42c,5,STO-2Z4N793Q,/proc/catalog/storage/tool_boxes_bags/STO-2Z4N793Q.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,color_family,black,
+Vf42c,5,STO-2Z4N793Q,/proc/catalog/storage/tool_boxes_bags/STO-2Z4N793Q.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,material,plastic,
+Vf42c,5,STO-2Z4N793Q,/proc/catalog/storage/tool_boxes_bags/STO-2Z4N793Q.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,stackable,system only,
+Vf42c,5,STO-2Z4N793Q,/proc/catalog/storage/tool_boxes_bags/STO-2Z4N793Q.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,storage_type,tool box,
+Vf42c,5,STO-2Z4N793Q,/proc/catalog/storage/tool_boxes_bags/STO-2Z4N793Q.json,Storage and Organization,Tool Box and Bag,Stanley,Classic,STA CEQ-WUX,0,volume_l,5,5
+warning: result truncated at 100 rows
+Next step_3... Run a focused SQL query that checks exact brand/series/model/kind and required properties per RowID, and joins actor store inventory. (45064 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH actor_store AS (\n  SELECT store_id FROM employees WHERE id='emp_036'\n), req AS (\n  SELECT 'L9UbC' AS row_id, 7 AS qty, 'Giacomini' AS brand, 'R Series' AS series, 'R 1PA-6JD' AS model, 'Valve and Connector' AS kind_name UNION ALL\n  SELECT 'gfxN8',4,'Raaco','Modular CarryLite','1QB-902','Tool Box and Bag' UNION ALL\n  SELECT '2qiVy',2,'Keter','Compact Stack','99Z-RIS','Storage Bin and Organizer' UNION ALL\n  SELECT '5UwF3',2,'AlcaPlast','Universal Basic','1CT-04J','Valve and Connector' UNION ALL\n  SELECT 'Vf42c',5,'Stanley','Classic','STA CEQ-WUX','Tool Box and Bag' UNION ALL\n  SELECT 'UfKe2',6,'Black+Decker','Home GTC','3PT-1Y9','Cordless Drill Driver' UNION ALL\n  SELECT 'W5KcM',1,'Wurth','Universal WU','30Y-BPU','Nut Bolt and Washer'\n), base AS (\n  SELECT r.row_id, r.qty, p.sku, p.path,\n         COALESCE(i.available_today,0) AS available_today\n  FROM req r\n  JOIN products p ON p.brand=r.brand AND p.series=r.series AND p.model=r.model\n  JOIN product_kinds k ON k.id=p.kind_id AND k.name=r.kind_name\n  LEFT JOIN actor_store s ON 1=1\n  LEFT JOIN inventory i ON i.store_id=s.store_id AND i.sku=p.sku\n), matched AS (\n  SELECT b.* FROM base b\n  WHERE (\n    b.row_id='L9UbC' AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='connector_type' AND pp.value_text='ball valve') AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='diameter_mm' AND pp.value_number=25)\n  ) OR (\n    b.row_id='gfxN8' AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='storage_type' AND pp.value_text='tool bag') AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='color_family' AND lower(pp.value_text)='black') AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='volume_l' AND pp.value_number=12)\n  ) OR (\n    b.row_id='2qiVy' AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='storage_type' AND pp.value_text='organizer') AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='color_family' AND lower(pp.value_text)='gray')\n  ) OR (\n    b.row_id='5UwF3' AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='connector_type' AND pp.value_text='ball valve') AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='diameter_mm' AND pp.value_number=25) AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='thread_type' AND pp.value_text='3/4 inch')\n  ) OR (\n    b.row_id='Vf42c' AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='storage_type' AND pp.value_text='tool box') AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='color_family' AND lower(pp.value_text)='orange')\n  ) OR (\n    b.row_id='UfKe2' AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='voltage_v' AND pp.value_number=12)\n  ) OR (\n    b.row_id='W5KcM' AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='fastener_type' AND pp.value_text='washer') AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='diameter_mm' AND pp.value_number=6) AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='length_mm' AND pp.value_number=12) AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='pack_count_pcs' AND pp.value_number=50) AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='fastener_type' AND pp.value_text='threaded rod')\n  )\n)\nSELECT row_id, qty, sku, path, available_today\nFROM matched\nORDER BY row_id, sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH actor_store AS (
+  SELECT store_id FROM employees WHERE id='emp_036'
+), req AS (
+  SELECT 'L9UbC' AS row_id, 7 AS qty, 'Giacomini' AS brand, 'R Series' AS series, 'R 1PA-6JD' AS model, 'Valve and Connector' AS kind_name UNION ALL
+  SELECT 'gfxN8',4,'Raaco','Modular CarryLite','1QB-902','Tool Box and Bag' UNION ALL
+  SELECT '2qiVy',2,'Keter','Compact Stack','99Z-RIS','Storage Bin and Organizer' UNION ALL
+  SELECT '5UwF3',2,'AlcaPlast','Universal Basic','1CT-04J','Valve and Connector' UNION ALL
+  SELECT 'Vf42c',5,'Stanley','Classic','STA CEQ-WUX','Tool Box and Bag' UNION ALL
+  SELECT 'UfKe2',6,'Black+Decker','Home GTC','3PT-1Y9','Cordless Drill Driver' UNION ALL
+  SELECT 'W5KcM',1,'Wurth','Universal WU','30Y-BPU','Nut Bolt and Washer'
+), base AS (
+  SELECT r.row_id, r.qty, p.sku, p.path,
+         COALESCE(i.available_today,0) AS available_today
+  FROM req r
+  JOIN products p ON p.brand=r.brand AND p.series=r.series AND p.model=r.model
+  JOIN product_kinds k ON k.id=p.kind_id AND k.name=r.kind_name
+  LEFT JOIN actor_store s ON 1=1
+  LEFT JOIN inventory i ON i.store_id=s.store_id AND i.sku=p.sku
+), matched AS (
+  SELECT b.* FROM base b
+  WHERE (
+    b.row_id='L9UbC' AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='connector_type' AND pp.value_text='ball valve') AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='diameter_mm' AND pp.value_number=25)
+  ) OR (
+    b.row_id='gfxN8' AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='storage_type' AND pp.value_text='tool bag') AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='color_family' AND lower(pp.value_text)='black') AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='volume_l' AND pp.value_number=12)
+  ) OR (
+    b.row_id='2qiVy' AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='storage_type' AND pp.value_text='organizer') AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='color_family' AND lower(pp.value_text)='gray')
+  ) OR (
+    b.row_id='5UwF3' AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='connector_type' AND pp.value_text='ball valve') AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='diameter_mm' AND pp.value_number=25) AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='thread_type' AND pp.value_text='3/4 inch')
+  ) OR (
+    b.row_id='Vf42c' AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='storage_type' AND pp.value_text='tool box') AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='color_family' AND lower(pp.value_text)='orange')
+  ) OR (
+    b.row_id='UfKe2' AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='voltage_v' AND pp.value_number=12)
+  ) OR (
+    b.row_id='W5KcM' AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='fastener_type' AND pp.value_text='washer') AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='diameter_mm' AND pp.value_number=6) AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='length_mm' AND pp.value_number=12) AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='pack_count_pcs' AND pp.value_number=50) AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='fastener_type' AND pp.value_text='threaded rod')
+  )
+)
+SELECT row_id, qty, sku, path, available_today
+FROM matched
+ORDER BY row_id, sku;
+SQL
+row_id,qty,sku,path,available_today
+L9UbC,7,PLB-INP2YHQ5,/proc/catalog/plumbing/valves_connectors/PLB-INP2YHQ5.json,6
+Vf42c,5,STO-281RMFUG,/proc/catalog/storage/tool_boxes_bags/STO-281RMFUG.json,2
+Next step_4... Report completion with exact TSV output table. (17257 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved exact catalogue matches by SQL', 'Checked same-day availability in actor store', 'Prepared required TSV output in original row order'] message='RowID\tSKU\tin_stock\tmatch\nL9UbC\tPLB-INP2YHQ5\t6\tfalse\ngfxN8\t\t\tfalse\n2qiVy\t\t\tfalse\n5UwF3\t\t\tfalse\nVf42c\tSTO-281RMFUG\t2\tfalse\nUfKe2\t\t\tfalse\nW5KcM\t\t\tfalse' grounding_refs=['/proc/catalog/plumbing/valves_connectors/PLB-INP2YHQ5.json', '/proc/catalog/storage/tool_boxes_bags/STO-281RMFUG.json'] outcome='OUTCOME_OK' verified=True
+[33mcorrection 1/2: re-prompting[0m
+Next step_5... Query exact matched SKUs with required properties and join stores to return store path and available_today. (41826 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH actor AS (\n  SELECT e.id AS employee_id, e.store_id, s.path AS store_path\n  FROM employees e\n  JOIN stores s ON s.id = e.store_id\n  WHERE e.id = 'emp_036'\n), req AS (\n  SELECT 'L9UbC' AS row_id, 7 AS qty, 'Giacomini' AS brand, 'R Series' AS series, 'R 1PA-6JD' AS model, 'Valve and Connector' AS kind_name UNION ALL\n  SELECT 'gfxN8',4,'Raaco','Modular CarryLite','1QB-902','Tool Box and Bag' UNION ALL\n  SELECT '2qiVy',2,'Keter','Compact Stack','99Z-RIS','Storage Bin and Organizer' UNION ALL\n  SELECT '5UwF3',2,'AlcaPlast','Universal Basic','1CT-04J','Valve and Connector' UNION ALL\n  SELECT 'Vf42c',5,'Stanley','Classic','STA CEQ-WUX','Tool Box and Bag' UNION ALL\n  SELECT 'UfKe2',6,'Black+Decker','Home GTC','3PT-1Y9','Cordless Drill Driver' UNION ALL\n  SELECT 'W5KcM',1,'Wurth','Universal WU','30Y-BPU','Nut Bolt and Washer'\n), base AS (\n  SELECT r.row_id, r.qty, p.sku, p.path AS product_path, p.brand, p.series, p.model, k.name AS kind_name,\n         a.store_path, COALESCE(i.available_today,0) AS available_today\n  FROM req r\n  JOIN products p ON p.brand=r.brand AND p.series=r.series AND p.model=r.model\n  JOIN product_kinds k ON k.id=p.kind_id AND k.name=r.kind_name\n  CROSS JOIN actor a\n  LEFT JOIN inventory i ON i.store_id=a.store_id AND i.sku=p.sku\n), matched AS (\n  SELECT b.* FROM base b\n  WHERE (\n    b.row_id='L9UbC' AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='connector_type' AND pp.value_text='ball valve') AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='diameter_mm' AND pp.value_number=25)\n  ) OR (\n    b.row_id='gfxN8' AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='storage_type' AND pp.value_text='tool bag') AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='color_family' AND lower(pp.value_text)='black') AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='volume_l' AND pp.value_number=12)\n  ) OR (\n    b.row_id='2qiVy' AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='storage_type' AND pp.value_text='organizer') AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='color_family' AND lower(pp.value_text)='gray')\n  ) OR (\n    b.row_id='5UwF3' AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='connector_type' AND pp.value_text='ball valve') AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='diameter_mm' AND pp.value_number=25) AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='thread_type' AND pp.value_text='3/4 inch')\n  ) OR (\n    b.row_id='Vf42c' AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='storage_type' AND pp.value_text='tool box') AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='color_family' AND lower(pp.value_text)='orange')\n  ) OR (\n    b.row_id='UfKe2' AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='voltage_v' AND pp.value_number=12)\n  ) OR (\n    b.row_id='W5KcM' AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='fastener_type' AND pp.value_text='washer') AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='diameter_mm' AND pp.value_number=6) AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='length_mm' AND pp.value_number=12) AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='pack_count_pcs' AND pp.value_number=50) AND\n    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='fastener_type' AND pp.value_text='threaded rod')\n  )\n)\nSELECT m.row_id, m.qty, m.sku, m.product_path, m.brand, m.series, m.model, m.kind_name,\n       pp.key, pp.value_text, pp.value_number, m.store_path, m.available_today\nFROM matched m\nLEFT JOIN product_properties pp ON pp.sku=m.sku\nORDER BY m.row_id, m.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH actor AS (
+  SELECT e.id AS employee_id, e.store_id, s.path AS store_path
+  FROM employees e
+  JOIN stores s ON s.id = e.store_id
+  WHERE e.id = 'emp_036'
+), req AS (
+  SELECT 'L9UbC' AS row_id, 7 AS qty, 'Giacomini' AS brand, 'R Series' AS series, 'R 1PA-6JD' AS model, 'Valve and Connector' AS kind_name UNION ALL
+  SELECT 'gfxN8',4,'Raaco','Modular CarryLite','1QB-902','Tool Box and Bag' UNION ALL
+  SELECT '2qiVy',2,'Keter','Compact Stack','99Z-RIS','Storage Bin and Organizer' UNION ALL
+  SELECT '5UwF3',2,'AlcaPlast','Universal Basic','1CT-04J','Valve and Connector' UNION ALL
+  SELECT 'Vf42c',5,'Stanley','Classic','STA CEQ-WUX','Tool Box and Bag' UNION ALL
+  SELECT 'UfKe2',6,'Black+Decker','Home GTC','3PT-1Y9','Cordless Drill Driver' UNION ALL
+  SELECT 'W5KcM',1,'Wurth','Universal WU','30Y-BPU','Nut Bolt and Washer'
+), base AS (
+  SELECT r.row_id, r.qty, p.sku, p.path AS product_path, p.brand, p.series, p.model, k.name AS kind_name,
+         a.store_path, COALESCE(i.available_today,0) AS available_today
+  FROM req r
+  JOIN products p ON p.brand=r.brand AND p.series=r.series AND p.model=r.model
+  JOIN product_kinds k ON k.id=p.kind_id AND k.name=r.kind_name
+  CROSS JOIN actor a
+  LEFT JOIN inventory i ON i.store_id=a.store_id AND i.sku=p.sku
+), matched AS (
+  SELECT b.* FROM base b
+  WHERE (
+    b.row_id='L9UbC' AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='connector_type' AND pp.value_text='ball valve') AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='diameter_mm' AND pp.value_number=25)
+  ) OR (
+    b.row_id='gfxN8' AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='storage_type' AND pp.value_text='tool bag') AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='color_family' AND lower(pp.value_text)='black') AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='volume_l' AND pp.value_number=12)
+  ) OR (
+    b.row_id='2qiVy' AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='storage_type' AND pp.value_text='organizer') AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='color_family' AND lower(pp.value_text)='gray')
+  ) OR (
+    b.row_id='5UwF3' AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='connector_type' AND pp.value_text='ball valve') AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='diameter_mm' AND pp.value_number=25) AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='thread_type' AND pp.value_text='3/4 inch')
+  ) OR (
+    b.row_id='Vf42c' AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='storage_type' AND pp.value_text='tool box') AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='color_family' AND lower(pp.value_text)='orange')
+  ) OR (
+    b.row_id='UfKe2' AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='voltage_v' AND pp.value_number=12)
+  ) OR (
+    b.row_id='W5KcM' AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='fastener_type' AND pp.value_text='washer') AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='diameter_mm' AND pp.value_number=6) AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='length_mm' AND pp.value_number=12) AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='pack_count_pcs' AND pp.value_number=50) AND
+    EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=b.sku AND pp.key='fastener_type' AND pp.value_text='threaded rod')
+  )
+)
+SELECT m.row_id, m.qty, m.sku, m.product_path, m.brand, m.series, m.model, m.kind_name,
+       pp.key, pp.value_text, pp.value_number, m.store_path, m.available_today
+FROM matched m
+LEFT JOIN product_properties pp ON pp.sku=m.sku
+ORDER BY m.row_id, m.sku, pp.key;
+SQL
+row_id,qty,sku,product_path,brand,series,model,kind_name,key,value_text,value_number,store_path,available_today
+L9UbC,7,PLB-INP2YHQ5,/proc/catalog/plumbing/valves_connectors/PLB-INP2YHQ5.json,Giacomini,R Series,R 1PA-6JD,Valve and Connector,connection_type,compression,,/proc/stores/store_bratislava_stare_mesto.json,6
+L9UbC,7,PLB-INP2YHQ5,/proc/catalog/plumbing/valves_connectors/PLB-INP2YHQ5.json,Giacomini,R Series,R 1PA-6JD,Valve and Connector,connector_type,ball valve,,/proc/stores/store_bratislava_stare_mesto.json,6
+L9UbC,7,PLB-INP2YHQ5,/proc/catalog/plumbing/valves_connectors/PLB-INP2YHQ5.json,Giacomini,R Series,R 1PA-6JD,Valve and Connector,diameter_mm,25,25,/proc/stores/store_bratislava_stare_mesto.json,6
+L9UbC,7,PLB-INP2YHQ5,/proc/catalog/plumbing/valves_connectors/PLB-INP2YHQ5.json,Giacomini,R Series,R 1PA-6JD,Valve and Connector,material,brass,,/proc/stores/store_bratislava_stare_mesto.json,6
+L9UbC,7,PLB-INP2YHQ5,/proc/catalog/plumbing/valves_connectors/PLB-INP2YHQ5.json,Giacomini,R Series,R 1PA-6JD,Valve and Connector,thread_type,1 inch,,/proc/stores/store_bratislava_stare_mesto.json,6
+Vf42c,5,STO-281RMFUG,/proc/catalog/storage/tool_boxes_bags/STO-281RMFUG.json,Stanley,Classic,STA CEQ-WUX,Tool Box and Bag,color_family,orange,,/proc/stores/store_bratislava_stare_mesto.json,2
+Vf42c,5,STO-281RMFUG,/proc/catalog/storage/tool_boxes_bags/STO-281RMFUG.json,Stanley,Classic,STA CEQ-WUX,Tool Box and Bag,material,plastic,,/proc/stores/store_bratislava_stare_mesto.json,2
+Vf42c,5,STO-281RMFUG,/proc/catalog/storage/tool_boxes_bags/STO-281RMFUG.json,Stanley,Classic,STA CEQ-WUX,Tool Box and Bag,stackable,system only,,/proc/stores/store_bratislava_stare_mesto.json,2
+Vf42c,5,STO-281RMFUG,/proc/catalog/storage/tool_boxes_bags/STO-281RMFUG.json,Stanley,Classic,STA CEQ-WUX,Tool Box and Bag,storage_type,tool box,,/proc/stores/store_bratislava_stare_mesto.json,2
+Vf42c,5,STO-281RMFUG,/proc/catalog/storage/tool_boxes_bags/STO-281RMFUG.json,Stanley,Classic,STA CEQ-WUX,Tool Box and Bag,volume_l,18,18,/proc/stores/store_bratislava_stare_mesto.json,2
+Next step_6... Submit final report_completion with unchanged TSV output and complete grounding refs including store path. (14871 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Re-queried exact matched SKUs with required properties', 'Confirmed available_today from actor store rows', 'Confirmed store path for inventory grounding', 'Prepared final TSV in required order'] message='RowID\tSKU\tin_stock\tmatch\nL9UbC\tPLB-INP2YHQ5\t6\tfalse\ngfxN8\t\t\tfalse\n2qiVy\t\t\tfalse\n5UwF3\t\t\tfalse\nVf42c\tSTO-281RMFUG\t2\tfalse\nUfKe2\t\t\tfalse\nW5KcM\t\t\tfalse' grounding_refs=['/proc/catalog/plumbing/valves_connectors/PLB-INP2YHQ5.json', '/proc/catalog/storage/tool_boxes_bags/STO-281RMFUG.json', '/proc/stores/store_bratislava_stare_mesto.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Re-queried exact matched SKUs with required properties
+- Confirmed available_today from actor store rows
+- Confirmed store path for inventory grounding
+- Prepared final TSV in required order
+
+[34mAGENT SUMMARY: RowID	SKU	in_stock	match
+L9UbC	PLB-INP2YHQ5	6	false
+gfxN8			false
+2qiVy			false
+5UwF3			false
+Vf42c	STO-281RMFUG	2	false
+UfKe2			false
+W5KcM			false[0m
+- [34m/proc/catalog/plumbing/valves_connectors/PLB-INP2YHQ5.json[0m
+- [34m/proc/catalog/storage/tool_boxes_bags/STO-281RMFUG.json[0m
+- [34m/proc/stores/store_bratislava_stare_mesto.json[0m
