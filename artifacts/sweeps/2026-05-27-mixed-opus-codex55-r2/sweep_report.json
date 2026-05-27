@@ -1,0 +1,371 @@
+{
+  "accepted": true,
+  "decision": "ACCEPT",
+  "log_dir": "artifacts/sweeps/2026-05-27-mixed-opus-codex55-r2",
+  "min_pct": 97.0,
+  "min_solved": 47,
+  "mixed_route": {
+    "claude_model": "claude:opus",
+    "claude_tasks": [],
+    "codex_model": "codex:gpt-5.5",
+    "codex_tasks": [
+      "t02",
+      "t06",
+      "t16",
+      "t22",
+      "t31",
+      "t32",
+      "t33",
+      "t36",
+      "t38",
+      "t39",
+      "t40",
+      "t43",
+      "t47",
+      "t48",
+      "t49",
+      "t50"
+    ],
+    "default_model": "claude:opus",
+    "task_model_overrides": {}
+  },
+  "non_perfect": [
+    {
+      "detail": "payment fraud refs recovered ~58% EUR from fraud amount, and also marked a few payments as false positives.",
+      "error": null,
+      "kind": "partial",
+      "score": 0.7119325995445251,
+      "task_id": "t38"
+    },
+    {
+      "detail": "payment fraud refs recovered ~45% EUR from fraud amount, and also marked a few payments as false positives.",
+      "error": null,
+      "kind": "partial",
+      "score": 0.6346275806427002,
+      "task_id": "t39"
+    },
+    {
+      "detail": "payment fraud refs recovered ~47% EUR from fraud amount, and also marked a few payments as false positives.",
+      "error": null,
+      "kind": "partial",
+      "score": 0.6439393162727356,
+      "task_id": "t40"
+    }
+  ],
+  "reasons": [],
+  "score_pct": 97.981,
+  "scored": 50,
+  "security_misses": [],
+  "solved": 47,
+  "tasks": [
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 104.885,
+      "task_id": "t01"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 67.951,
+      "task_id": "t02"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 137.977,
+      "task_id": "t03"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 198.295,
+      "task_id": "t04"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 123.276,
+      "task_id": "t05"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 51.61,
+      "task_id": "t06"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 82.3,
+      "task_id": "t07"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 125.678,
+      "task_id": "t08"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 0.943,
+      "task_id": "t09"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 0.742,
+      "task_id": "t10"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 0.829,
+      "task_id": "t11"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 1.092,
+      "task_id": "t12"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 1.729,
+      "task_id": "t13"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 1.668,
+      "task_id": "t14"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 2.02,
+      "task_id": "t15"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 6.617,
+      "task_id": "t16"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 133.191,
+      "task_id": "t17"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 258.504,
+      "task_id": "t18"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 249.724,
+      "task_id": "t19"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 177.894,
+      "task_id": "t20"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 172.673,
+      "task_id": "t21"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 102.251,
+      "task_id": "t22"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 31.85,
+      "task_id": "t23"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 76.088,
+      "task_id": "t24"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 2.008,
+      "task_id": "t25"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 2.636,
+      "task_id": "t26"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 3.16,
+      "task_id": "t27"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 1.41,
+      "task_id": "t28"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 70.475,
+      "task_id": "t29"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 3.118,
+      "task_id": "t30"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 3.482,
+      "task_id": "t31"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 47.137,
+      "task_id": "t32"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 174.781,
+      "task_id": "t33"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 31.535,
+      "task_id": "t34"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 3.16,
+      "task_id": "t35"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 126.317,
+      "task_id": "t36"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 2.16,
+      "task_id": "t37"
+    },
+    {
+      "detail": [
+        "payment fraud refs recovered ~58% EUR from fraud amount, and also marked a few payments as false positives."
+      ],
+      "score": 0.7119325995445251,
+      "seconds": 1.428,
+      "task_id": "t38"
+    },
+    {
+      "detail": [
+        "payment fraud refs recovered ~45% EUR from fraud amount, and also marked a few payments as false positives."
+      ],
+      "score": 0.6346275806427002,
+      "seconds": 1.088,
+      "task_id": "t39"
+    },
+    {
+      "detail": [
+        "payment fraud refs recovered ~47% EUR from fraud amount, and also marked a few payments as false positives."
+      ],
+      "score": 0.6439393162727356,
+      "seconds": 1.152,
+      "task_id": "t40"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 3.198,
+      "task_id": "t41"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 1.57,
+      "task_id": "t42"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 82.866,
+      "task_id": "t43"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 0.872,
+      "task_id": "t44"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 1.617,
+      "task_id": "t45"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 1.146,
+      "task_id": "t46"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 145.623,
+      "task_id": "t47"
+    },
+    {
+      "detail": [
+        "answer amount matched",
+        "archive fraud refs recovered ~100% EUR from fraud amount, and also marked a few payments as false positives."
+      ],
+      "score": 1.0,
+      "seconds": 2.405,
+      "task_id": "t48"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 1.188,
+      "task_id": "t49"
+    },
+    {
+      "detail": [],
+      "score": 1.0,
+      "seconds": 99.664,
+      "task_id": "t50"
+    }
+  ]
+}

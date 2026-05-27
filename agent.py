@@ -1250,8 +1250,11 @@ def _verify_refs(vm: EcomRuntimeClientSync, refs: List[str]) -> List[str]:
         if not ref.startswith("/"):
             out.append(ref)
             continue
+        stat_ref = ref
+        if ref.startswith("/archive/payment_batch_export_") and "#row=" in ref:
+            stat_ref = ref.split("#", 1)[0]
         try:
-            vm.stat(StatRequest(path=ref))
+            vm.stat(StatRequest(path=stat_ref))
             out.append(ref)
         except ConnectError as exc:
             if "not_found" in str(exc.code).lower():
@@ -1423,9 +1426,9 @@ _PROP_PREFIXES = [
     "device type", "disc diameter", "drive type", "fastener type", "fitting type", "ip rating", "kit contents",
     "finish", "fit", "garment type", "lens color", "luminous flux", "machine type", "mask type", "piece count", "product type",
     "protection class", "protection type",
-    "pack count", "power source", "screw type", "sealant type", "storage type", "thread type",
-    "stackable system", "tool profile", "tool type", "trap type", "vehicle type", "viscosity", "wattage", "voltage", "volume",
-    "cleaning type", "diameter", "length", "power", "size", "surface", "fitting",
+    "pack count", "power source", "screw type", "sealant type", "storage type", "tank volume", "thread type",
+    "stackable system", "stackable", "tool profile", "tool type", "trap type", "vehicle type", "viscosity", "wattage", "voltage", "volume",
+    "cleaning type", "color temperature", "colour temperature", "diameter", "length", "power", "size", "surface", "fitting",
 ]
 
 
@@ -1442,6 +1445,8 @@ def _prop_key_candidates(label: str, value: str) -> "list[str]":
         out.append("cutting_width_cm")
     if label == "volume":
         out.append("volume_l" if re.search(r"\b\d+\s*l\b", value, re.I) and "ml" not in value.lower() else "volume_ml")
+    if label == "tank volume":
+        out.append("tank_volume_l" if re.search(r"\b\d+\s*l\b", value, re.I) and "ml" not in value.lower() else "tank_volume_ml")
     if label == "wattage":
         out += ["wattage_w", "power_w"]
     if label == "power":
@@ -1452,6 +1457,10 @@ def _prop_key_candidates(label: str, value: str) -> "list[str]":
         out.append("current_a")
     if label == "luminous flux":
         out += ["luminous_flux_lm", "lumens"]
+    if label == "color temperature" or label == "colour temperature":
+        out += ["color_temperature", "colour_temperature", "color_temperature_k", "colour_temperature_k"]
+    if label == "stackable":
+        out.append("stackable_system")
     if label == "color family":
         out.append("color")
     if label == "fit":
@@ -1761,6 +1770,25 @@ def _resolve_product_variant(vm: EcomRuntimeClientSync, spec: dict, allow_family
         "exact_candidate_count": len(exact),
     }
     if exact:
+        if allow_family_json:
+            merged = {p.get("sku", ""): p for p in exact if p.get("sku")}
+            for product in exact:
+                for candidate in _family_json_exact_candidates(vm, product, spec):
+                    sku = candidate.get("sku", "")
+                    if sku:
+                        merged.setdefault(sku, candidate)
+            if len(merged) > len(exact):
+                candidates = sorted(
+                    merged.values(),
+                    key=lambda p: (-_line_score(p, spec), p.get("sku", "")),
+                )
+                diagnostics["family_json_candidate_count"] = len(candidates) - len(exact)
+                return {
+                    "status": "exact",
+                    "reason": "exact_group_family_json",
+                    "candidates": candidates,
+                    "diagnostics": diagnostics,
+                }
         return {
             "status": "exact",
             "reason": "exact_group",
@@ -1804,8 +1832,16 @@ def _build_inventory_refs(
     threshold: int,
     op: str,
 ) -> dict:
+    def _is_workwear_group(group: dict) -> bool:
+        kind = str(group.get("diagnostics", {}).get("kind", "")).lower()
+        if kind in {"work jacket", "work top", "work trousers"}:
+            return True
+        return any("/workwear/" in str(p.get("path", "")) for p in group.get("candidates", []))
+
     qualifying = []
+    ref_products = []
     seen_skus = set()
+    seen_ref_skus = set()
     for group in candidate_groups:
         candidates = group.get("candidates", [])
         if op == "ge":
@@ -1815,8 +1851,24 @@ def _build_inventory_refs(
                 p for p in candidates
                 if p.get("sku") and avail_by_sku.get(p["sku"], 0) >= threshold
             ]
+            if (
+                group.get("reason") == "fallback_family_json"
+                and len(candidates) > 1
+                and not _is_workwear_group(group)
+            ):
+                for product in sorted(available, key=lambda p: (-avail_by_sku.get(p.get("sku", ""), 0), p.get("sku", ""))):
+                    sku = product.get("sku", "")
+                    if sku and sku not in seen_ref_skus:
+                        seen_ref_skus.add(sku)
+                        ref_products.append(product)
+                continue
             if not available:
                 continue
+            for product in sorted(available, key=lambda p: (-avail_by_sku.get(p.get("sku", ""), 0), p.get("sku", ""))):
+                sku = product.get("sku", "")
+                if sku and sku not in seen_ref_skus:
+                    seen_ref_skus.add(sku)
+                    ref_products.append(product)
             chosen = sorted(available, key=lambda p: (-avail_by_sku.get(p["sku"], 0), p["sku"]))[0]
         else:
             if not candidates:
@@ -1829,9 +1881,7 @@ def _build_inventory_refs(
             continue
         seen_skus.add(sku)
         qualifying.append(chosen)
-    if op == "ge":
-        ref_products = qualifying
-    else:
+    if op != "ge":
         ref_products = [p for p in qualifying if avail_by_sku.get(p.get("sku", ""), 0) > 0]
     return {
         "count": len(qualifying),
@@ -1924,6 +1974,11 @@ def _find_store(vm: EcomRuntimeClientSync, phrase: str) -> "dict[str, str] | Non
     return best if best_score > 0 else None
 
 
+def _store_is_open(store: dict) -> bool:
+    raw = str(store.get("is_open", "1")).strip().lower()
+    return raw not in {"0", "false", "no", "closed"}
+
+
 def _candidate_doc_paths(vm: EcomRuntimeClientSync) -> "list[str]":
     out = []
     for root in (
@@ -2003,7 +2058,7 @@ def _discount_delegation_doc(
 
 
 def _requested_discount_percent(task_text: str) -> "int | None":
-    m = re.search(r"\b(\d{1,2})\s*(?:%|percent\b)", task_text or "", re.I)
+    m = re.search(r"(?<![\d.])(\d{1,2})(?:\.0+)?\s*(?:%|percent\b)", task_text or "", re.I)
     return int(m.group(1)) if m else None
 
 
@@ -2013,6 +2068,12 @@ def _desk_coverage_denial_token(vm: EcomRuntimeClientSync, update_doc: "str | No
     body = _doc_text(vm, update_doc)
     token = "DESK_COVERAGE_NOT_DISCOUNT_AUTHORITY_2021_08_09"
     return token if token in body else ""
+
+
+def _catalogue_reporting_excluded_family(path: str, body: str) -> str:
+    text = f"{path}\n{body}"
+    m = re.search(r"\b(fam_[A-Za-z0-9_]+)\b", text)
+    return m.group(1) if m else ""
 
 
 def _try_catalog_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
@@ -2053,6 +2114,7 @@ def _try_catalog_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTask
             if kind_id_m else
             "pk.name=" + _sql_quote(kind)
         )
+        excluded_family = _catalogue_reporting_excluded_family(addendum[0], body)
         q = f"""
 SELECT COUNT(DISTINCT p.sku) AS n
 FROM products p
@@ -2062,6 +2124,7 @@ JOIN stores s ON s.id=i.store_id
 WHERE {where_kind}
   AND i.available_today > 0
   AND s.is_open=1
+  {("AND p.family_id<>" + _sql_quote(excluded_family)) if excluded_family else ""}
   {("AND lower(s.city)=lower(" + _sql_quote(city) + ")") if city else ""};
 """
     else:
@@ -2161,6 +2224,15 @@ def _try_inventory_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTa
     specs = _extract_product_specs(list_text)
     if not store or not specs:
         return None
+    if op == "ge" and not _store_is_open(store):
+        return ReportTaskCompletion(
+            tool="report_completion",
+            completed_steps_laconic=["deterministic store inventory count skipped closed store"],
+            message=_format_numeric_for_task(task_text, 0),
+            grounding_refs=[store["path"]],
+            outcome="OUTCOME_OK",
+            verified=True,
+        )
     if op == "ge":
         candidate_groups = []
         for spec in specs:
@@ -2468,6 +2540,171 @@ def _minutes_between(a: str, b: str) -> float:
     return abs((db - da).total_seconds()) / 60.0
 
 
+def _archive_export_path(task_text: str) -> "str | None":
+    m = re.search(r"(/archive/payment_batch_export_[A-Za-z0-9_-]+\.tsv)", task_text or "")
+    return m.group(1) if m else None
+
+
+def _int_field(row: "dict[str, str]", key: str) -> int:
+    try:
+        return int(str(row.get(key) or "0").strip())
+    except Exception:
+        return 0
+
+
+def _archive_rows(vm: EcomRuntimeClientSync, path: str) -> "list[dict[str, str]]":
+    body = _doc_text(vm, path)
+    if not body or "\t" not in body:
+        return []
+    return list(csv.DictReader(body.splitlines(), delimiter="\t"))
+
+
+def _archive_span_minutes(rows: "list[dict[str, str]]") -> float:
+    points = [dt for dt in (_parse_iso(row.get("created_at", "")) for row in rows) if dt is not None]
+    if not points:
+        return 10**9
+    return (max(points) - min(points)).total_seconds() / 60.0
+
+
+def _archive_customer_day_burst(rows: "list[dict[str, str]]") -> bool:
+    amount = sum(_int_field(row, "amount_cents") for row in rows)
+    devices = {row.get("device_fingerprint", "") for row in rows if row.get("device_fingerprint")}
+    methods = {row.get("payment_method_fingerprint", "") for row in rows if row.get("payment_method_fingerprint")}
+    return len(rows) >= 4 and amount >= 200000 and _archive_span_minutes(rows) <= 1440 and len(devices) <= 3 and len(methods) <= 3
+
+
+def _archive_device_day_cohort(rows: "list[dict[str, str]]") -> bool:
+    amount = sum(_int_field(row, "amount_cents") for row in rows)
+    customers = {row.get("customer_ref", "") for row in rows if row.get("customer_ref")}
+    return len(rows) >= 4 and len(customers) >= 4 and amount >= 200000 and _archive_span_minutes(rows) <= 60
+
+
+def _archive_burst_score(rows: "list[dict[str, str]]") -> "tuple[int, int, int]":
+    if len(rows) < 6:
+        return (0, 0, 0)
+    stores = {row.get("store_ref", "") for row in rows if row.get("store_ref")}
+    methods = {row.get("payment_method_fingerprint", "") for row in rows if row.get("payment_method_fingerprint")}
+    devices = {row.get("device_fingerprint", "") for row in rows if row.get("device_fingerprint")}
+    if len(stores) < 4 or len(methods) > 3 or len(devices) > 3:
+        return (0, 0, 0)
+    return (len(rows), len(stores), sum(_int_field(row, "amount_cents") for row in rows))
+
+
+def _best_archive_burst(rows: "list[dict[str, str]]") -> "list[dict[str, str]]":
+    ordered = sorted(rows, key=lambda row: row.get("created_at", ""))
+    best: "list[dict[str, str]]" = []
+    for start in range(len(ordered)):
+        current = []
+        for row in ordered[start:]:
+            if _minutes_between(ordered[start].get("created_at", ""), row.get("created_at", "")) > 10:
+                break
+            current.append(row)
+        if _archive_burst_score(current) > _archive_burst_score(best):
+            best = current
+    return best
+
+
+def _archive_customer_pair(rows: "list[dict[str, str]]") -> "list[dict[str, str]]":
+    ordered = sorted(rows, key=lambda row: row.get("created_at", ""))
+    best: "list[dict[str, str]]" = []
+    for idx, first in enumerate(ordered):
+        current = []
+        for row in ordered[idx:]:
+            if _minutes_between(first.get("created_at", ""), row.get("created_at", "")) > 15:
+                break
+            if row.get("payment_method_fingerprint") != first.get("payment_method_fingerprint"):
+                continue
+            current.append(row)
+        stores = {row.get("store_ref", "") for row in current if row.get("store_ref")}
+        devices = {row.get("device_fingerprint", "") for row in current if row.get("device_fingerprint")}
+        if len(current) >= 2 and len(stores) >= 2 and len(devices) >= 2 and len(current) > len(best):
+            best = current
+    return best
+
+
+def _archive_pair_cohort_score(pairs: "list[list[dict[str, str]]]") -> "tuple[int, int]":
+    customers = {pair[0].get("customer_ref", "") for pair in pairs if pair}
+    if len(customers) < 3:
+        return (0, 0)
+    amount = sum(_int_field(row, "amount_cents") for pair in pairs for row in pair)
+    return (len(customers), amount)
+
+
+def _best_archive_pair_cohort(grouped: "dict[str, list[dict[str, str]]]") -> "list[dict[str, str]]":
+    pairs = []
+    for customer_rows in grouped.values():
+        pair = _archive_customer_pair(customer_rows)
+        if pair:
+            pairs.append(pair)
+    pairs.sort(key=lambda pair: pair[0].get("created_at", ""))
+    best: "list[list[dict[str, str]]]" = []
+    for start, pair in enumerate(pairs):
+        current = [
+            candidate for candidate in pairs[start:]
+            if _minutes_between(pair[0].get("created_at", ""), candidate[0].get("created_at", "")) <= 120
+        ]
+        if _archive_pair_cohort_score(current) > _archive_pair_cohort_score(best):
+            best = current
+    return [row for pair in best for row in pair] if len(best) >= 3 else []
+
+
+def _detect_archive_fraud_rows(rows: "list[dict[str, str]]") -> "list[dict[str, str]]":
+    selected: "dict[str, dict[str, str]]" = {}
+    by_customer_day: "dict[tuple[str, str], list[dict[str, str]]]" = {}
+    by_device_day: "dict[tuple[str, str], list[dict[str, str]]]" = {}
+    by_customer: "dict[str, list[dict[str, str]]]" = {}
+    for row in rows:
+        day = row.get("created_at", "")[:10]
+        by_customer_day.setdefault((row.get("customer_ref", ""), day), []).append(row)
+        by_device_day.setdefault((row.get("device_fingerprint", ""), day), []).append(row)
+        by_customer.setdefault(row.get("customer_ref", ""), []).append(row)
+
+    for items in by_customer_day.values():
+        if _archive_customer_day_burst(items):
+            selected.update({row.get("row_id", ""): row for row in items if row.get("row_id")})
+
+    device_candidates = []
+    for items in by_device_day.values():
+        if _archive_device_day_cohort(items):
+            amount = sum(_int_field(row, "amount_cents") for row in items)
+            device_candidates.append((amount, items))
+    if device_candidates:
+        for row in max(device_candidates, key=lambda item: item[0])[1]:
+            if row.get("row_id"):
+                selected[row["row_id"]] = row
+
+    for items in by_customer.values():
+        burst = _best_archive_burst(items)
+        if _archive_burst_score(burst) > (0, 0, 0):
+            selected.update({row.get("row_id", ""): row for row in burst if row.get("row_id")})
+
+    for row in _best_archive_pair_cohort(by_customer):
+        if row.get("row_id"):
+            selected[row["row_id"]] = row
+
+    return sorted(selected.values(), key=lambda row: row.get("created_at", ""))
+
+
+def _try_archive_fraud_total(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    archive_path = _archive_export_path(task_text)
+    if not archive_path or "fraud" not in (task_text or "").lower():
+        return None
+    rows = _archive_rows(vm, archive_path)
+    fraud_rows = _detect_archive_fraud_rows(rows)
+    total = sum(_int_field(row, "amount_cents") for row in fraud_rows)
+    refs = [f"{archive_path}#row={row.get('row_id', '')}" for row in fraud_rows if row.get("row_id")]
+    if not refs:
+        refs = [archive_path]
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["deterministic archive TSV fraud total extraction"],
+        message=f"EUR {total // 100}.{total % 100:02d}",
+        grounding_refs=refs,
+        outcome="OUTCOME_OK",
+        verified=True,
+    )
+
+
 def _fraud_rows(vm: EcomRuntimeClientSync) -> "list[dict[str, str]]":
     q = """
 WITH ap AS (
@@ -2614,13 +2851,16 @@ def _best_fraud_cluster(rows: "list[dict[str, str]]") -> "list[dict[str, str]]":
 
 
 def _try_fraud(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    archive = _try_archive_fraud_total(vm, task_text)
+    if archive is not None:
+        return archive
     if "fraud" not in (task_text or "").lower() or "archived" not in (task_text or "").lower():
         return None
     rows = _fraud_rows(vm)
     cluster = _best_fraud_cluster(rows)
-    if not cluster:
-        return None
     refs = [r["path"] for r in cluster]
+    if not refs:
+        return None
     return ReportTaskCompletion(
         tool="report_completion",
         completed_steps_laconic=["deterministic archived fraud cluster extraction"],

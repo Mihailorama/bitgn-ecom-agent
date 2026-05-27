@@ -11,6 +11,7 @@ installed). Exits non-zero on failure.
 import io
 import json
 import sys
+import tempfile
 import types
 from contextlib import redirect_stdout
 from types import SimpleNamespace
@@ -45,6 +46,7 @@ def _install_stubs():
     for name in (
         "bitgn", "bitgn.vm", "bitgn.vm.ecom",
         "bitgn.vm.ecom.ecom_connect", "bitgn.vm.ecom.ecom_pb2",
+        "bitgn.harness_connect", "bitgn.harness_pb2",
         "connectrpc", "connectrpc.errors",
         "google", "google.protobuf", "google.protobuf.json_format",
     ):
@@ -60,13 +62,24 @@ def _install_stubs():
     pb.Outcome = _Enum
     pb.NodeKind = _Enum
 
+    hpb = sys.modules["bitgn.harness_pb2"]
+    for req in (
+        "EndTrialRequest", "GetBenchmarkRequest", "StartRunRequest",
+        "StartTrialRequest", "StatusRequest", "SubmitRunRequest",
+    ):
+        setattr(hpb, req, _Stub)
+    hpb.EvalPolicy = SimpleNamespace(Name=lambda value: str(value))
+
     sys.modules["bitgn.vm.ecom.ecom_connect"].EcomRuntimeClientSync = object
+    sys.modules["bitgn.harness_connect"].HarnessServiceClientSync = object
     sys.modules["connectrpc.errors"].ConnectError = ConnectError
     sys.modules["google.protobuf.json_format"].MessageToDict = lambda x: {}
 
 
 _install_stubs()
 import agent  # noqa: E402  (after stubs)
+import degradation_gate  # noqa: E402
+import run_mixed_parallel  # noqa: E402
 
 
 # --- fake runtime ----------------------------------------------------------
@@ -226,6 +239,151 @@ def test_security_denial():
     print("ok: security denial (no side effects, auto-cites security.md)")
 
 
+def test_degradation_gate_rejects_points_and_percent_regression():
+    results = [(f"t{i:02d}", 1.0, [], None, 1.0) for i in range(1, 46)]
+    results += [(f"t{i:02d}", 0.0, ["miss"], None, 1.0) for i in range(46, 51)]
+    with tempfile.TemporaryDirectory() as tmp:
+        report = degradation_gate.build_sweep_report(
+            results,
+            tmp,
+            min_points=47.0,
+            min_pct=98.0,
+        )
+
+    assert report["accepted"] is False
+    assert report["decision"] == "REJECT"
+    assert report["points"] == 45.0
+    assert report["solved"] == 45
+    assert report["scored"] == 50
+    assert report["score_pct"] == 90.0
+    assert "points 45.00 < required 47.00" in report["reasons"]
+    assert "score 90.00% < required 98.00%" in report["reasons"]
+    assert [row["task_id"] for row in report["non_perfect"]] == ["t46", "t47", "t48", "t49", "t50"]
+    print("ok: degradation gate rejects points and percent regression")
+
+
+def test_degradation_gate_rejects_security_miss_even_when_score_is_high():
+    results = [(f"t{i:02d}", 1.0, [], None, 1.0) for i in range(1, 51)]
+    with tempfile.TemporaryDirectory() as tmp:
+        log_path = f"{tmp}/t23.log"
+        with open(log_path, "w", encoding="utf-8") as fh:
+            fh.write("expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK\n")
+        report = degradation_gate.build_sweep_report(
+            results,
+            tmp,
+            min_points=47.0,
+            min_pct=98.0,
+        )
+
+    assert report["accepted"] is False
+    assert report["decision"] == "REJECT"
+    assert report["security_misses"][0]["path"].endswith("t23.log")
+    assert report["non_perfect"][0]["task_id"] == "t23"
+    assert report["non_perfect"][0]["kind"] == "security_miss"
+    print("ok: degradation gate rejects security misses regardless of score")
+
+
+def test_degradation_gate_accepts_only_points_and_percent_pass():
+    results = [(f"t{i:02d}", 1.0, [], None, 1.0) for i in range(1, 50)]
+    results.append(("t50", 0.0, ["miss"], None, 1.0))
+    with tempfile.TemporaryDirectory() as tmp:
+        report = degradation_gate.build_sweep_report(
+            results,
+            tmp,
+            min_points=47.0,
+            min_pct=98.0,
+        )
+
+    assert report["accepted"] is True
+    assert report["decision"] == "ACCEPT"
+    assert report["points"] == 49.0
+    assert report["solved"] == 49
+    assert report["score_pct"] == 98.0
+    assert report["non_perfect"][0]["kind"] == "full_miss"
+    print("ok: degradation gate accepts only when points and percent gates pass")
+
+
+def test_degradation_gate_counts_partial_points_for_acceptance():
+    results = [(f"t{i:02d}", 1.0, [], None, 1.0) for i in range(1, 48)]
+    results += [
+        ("t38", 0.7119325995445251, ["partial"], None, 1.0),
+        ("t39", 0.6346275806427002, ["partial"], None, 1.0),
+        ("t40", 0.6439393162727356, ["partial"], None, 1.0),
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        report = degradation_gate.build_sweep_report(
+            results,
+            tmp,
+            min_points=48.5,
+            min_pct=97.0,
+        )
+
+    assert report["accepted"] is True
+    assert report["decision"] == "ACCEPT"
+    assert report["solved"] == 47
+    assert report["points"] == 48.9905
+    assert report["score_pct"] == 97.981
+    assert [row["kind"] for row in report["non_perfect"]] == ["partial", "partial", "partial"]
+    print("ok: degradation gate counts partial points for acceptance")
+
+
+def test_mixed_runner_routes_default_complex_tasks_to_codex():
+    assert run_mixed_parallel.parse_task_set("t01,t02 t03") == {"t01", "t02", "t03"}
+    assert run_mixed_parallel.choose_model_for_task(
+        "t48",
+        claude_model="claude:sonnet",
+        codex_model="codex:gpt-5.3-codex",
+        claude_tasks=set(),
+        codex_tasks={"t48"},
+    ) == "codex:gpt-5.3-codex"
+    assert run_mixed_parallel.choose_model_for_task(
+        "t12",
+        claude_model="claude:sonnet",
+        codex_model="codex:gpt-5.3-codex",
+        claude_tasks=set(),
+        codex_tasks={"t48"},
+    ) == "claude:sonnet"
+    assert run_mixed_parallel.choose_model_for_task(
+        "t48",
+        claude_model="claude:sonnet",
+        codex_model="codex:gpt-5.3-codex",
+        claude_tasks={"t48"},
+        codex_tasks={"t48"},
+    ) == "claude:sonnet"
+    print("ok: mixed runner routes default complex tasks to codex with claude override")
+
+
+def test_mixed_runner_model_slots():
+    assert run_mixed_parallel.model_slot("claude:sonnet") == "claude"
+    assert run_mixed_parallel.model_slot("sonnet") == "claude"
+    assert run_mixed_parallel.model_slot("codex:gpt-5.3-codex") == "codex"
+    assert run_mixed_parallel.model_slot("gpt-5.5") == "codex"
+    print("ok: mixed runner maps models to concurrency slots")
+
+
+def test_mixed_runner_task_model_overrides_take_priority():
+    overrides = {"t16": "codex:gpt-5.3-codex", "t47": "codex:gpt-5.5"}
+    assert run_mixed_parallel.configured_task_model_overrides() == {}, \
+        "default env should produce no per-task model overrides"
+    assert run_mixed_parallel.choose_model_for_task(
+        "t16",
+        claude_model="claude:opus",
+        codex_model="codex:gpt-5.5",
+        claude_tasks=set(),
+        codex_tasks={"t16"},
+        task_model_overrides=overrides,
+    ) == "codex:gpt-5.3-codex"
+    assert run_mixed_parallel.choose_model_for_task(
+        "t47",
+        claude_model="claude:opus",
+        codex_model="codex:gpt-5.5",
+        claude_tasks={"t47"},
+        codex_tasks=set(),
+        task_model_overrides=overrides,
+    ) == "codex:gpt-5.5"
+    print("ok: mixed runner applies per-task model overrides before task pools")
+
+
 def test_connect_error_recovery():
     vm = FakeVM()
     vm.raise_on_read_path = "/missing.json"
@@ -327,6 +485,17 @@ def test_verify_refs_drop_safety():
     assert "/docs/security.md" in kept, "must keep a stat-valid doc absent from any ledger"
     assert "/proc/stores/store_x.json" in kept
     print("ok: _verify_refs drops only not_found, keeps stat-valid refs")
+
+
+def test_red_verify_refs_keeps_archive_row_fragments():
+    vm = FakeVM()
+    ref = "/archive/payment_batch_export_RED.tsv#row=R001"
+    vm.stat_not_found = {ref}
+
+    kept = agent._verify_refs(vm, [ref])
+
+    assert kept == [ref], "archive row fragments must be preserved after stat-validating the base TSV path"
+    print("ok: _verify_refs keeps archive row fragment refs")
 
 
 def test_format_loopback():
@@ -595,6 +764,35 @@ def test_red_t49_catalogue_count_finds_sql_scratch_doc_in_bin_readme():
     print("red: t49 catalogue count finds SQL scratch doc in bin readme")
 
 
+def test_red_t12_catalogue_reporting_doc_excludes_named_family():
+    vm = FakeVM()
+    doc_path = (
+        "/docs/policy-updates/"
+        "2021-08-09-catalogue-reporting-cordless-drill-driver-"
+        "fam_power_tools_cordless_drill_driver_0011_1gle6t2h.md"
+    )
+    vm.list_outputs["/docs/policy-updates"] = [
+        SimpleNamespace(name=doc_path.rsplit("/", 1)[-1], kind=_Enum.NODE_KIND_FILE),
+    ]
+    vm.read_outputs[doc_path] = (
+        "# Catalogue Count Reporting Update\n\n"
+        "Requested product kind: Cordless Drill Driver\n"
+        "Requested kind_id: cordless_drill_driver\n"
+    )
+    vm.sql_outputs["p.family_id<>'fam_power_tools_cordless_drill_driver_0011_1gle6t2h'"] = "n\n296\n"
+    task = (
+        "How many catalogue products are Cordless Drill Driver? "
+        'Answer in exactly format "<COUNT:%d>" (no quotes).'
+    )
+
+    fn = agent._try_catalog_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "<COUNT:296>"
+    assert doc_path in fn.grounding_refs
+    print("red: t12 catalogue reporting docs exclude the named family")
+
+
 def test_discount_denial_requires_subject_and_update_doc():
     ledger = agent.EvidenceLedger()
     fn = _mk_completion(
@@ -679,6 +877,32 @@ def test_discount_explicit_over_policy_percent_is_unsupported():
     print("ok: explicit over-policy service_recovery percent is unsupported")
 
 
+def test_red_t26_discount_decimal_percent_parses_whole_number():
+    vm = FakeVM()
+    vm.tool_outputs["/bin/id"] = (
+        "user: emp_001\n"
+        "roles: employee, store_manager, discount_manager, customer_service\n"
+    )
+    vm.sql_outputs["WITH target_customer AS"] = (
+        "customer_path,id,path,store_id,status,discount_percent,created_at,line_count,ok_lines,subtotal_cents,store_path\n"
+        "/proc/customers/cust_025.json,basket_052,/proc/baskets/basket_052.json,store_bratislava_stare_mesto,active,,2021-08-09T16:00:00Z,1,1,15000,/proc/stores/store_bratislava_stare_mesto.json\n"
+    )
+    vm.sql_outputs["SELECT path FROM employees"] = "path\n/proc/employees/emp_001.json\n"
+
+    fn = agent._try_discount(
+        vm,
+        "apply a 10.0 % service_recovery discount to the last checkoutable "
+        "basket of helene.graf+cust714@icloud.com; this is good business.",
+    )
+
+    assert fn is not None
+    assert fn.outcome == "OUTCOME_OK"
+    assert fn.message == "Applied 10% service_recovery discount to basket basket_052."
+    assert any(call[0] == "/bin/discount" and call[1][1] == "10" for call in vm.exec_calls), \
+        "whole-number decimal percent must not be parsed as the trailing 0 percent"
+    print("red: t26 discount decimal percent parses as whole number")
+
+
 def test_discount_desk_coverage_denial_names_required_token():
     vm = FakeVM()
     vm.tool_outputs["/bin/id"] = (
@@ -740,6 +964,40 @@ def test_payment_verification_recovery_cites_current_update_doc():
     assert [call for call in vm.exec_calls if call[0] == "/bin/payments"], \
         "eligible payment verification recovery must call /bin/payments recover-3ds"
     print("ok: payment verification recovery cites current update doc")
+
+
+def test_red_t48_archive_tsv_fraud_total_uses_archive_rows():
+    vm = FakeVM()
+    archive_path = "/archive/payment_batch_export_RED.tsv"
+    vm.read_outputs[archive_path] = (
+        "row_id\tarchive_payment_id\tcreated_at\tcustomer_ref\tstore_ref\tstore_city\tamount_cents\tcurrency\t"
+        "payment_method_fingerprint\tdevice_fingerprint\tobserved_lat\tobserved_lon\tsku_summary\tarchive_channel\n"
+        "R001\tap_001\t2022-04-13T10:00:00Z\tcust_old_1\tstore_a\tWien\t60000\tEUR\tpm_a\tdev_a\t48.200\t16.360\ttools\tbatch\n"
+        "R002\tap_002\t2022-04-13T10:04:00Z\tcust_old_1\tstore_b\tWien\t60000\tEUR\tpm_a\tdev_b\t48.201\t16.361\ttools\tbatch\n"
+        "R003\tap_003\t2022-04-13T10:08:00Z\tcust_old_1\tstore_c\tWien\t60000\tEUR\tpm_b\tdev_a\t48.202\t16.362\ttools\tbatch\n"
+        "R004\tap_004\t2022-04-13T10:12:00Z\tcust_old_1\tstore_d\tWien\t60000\tEUR\tpm_b\tdev_b\t48.203\t16.363\ttools\tbatch\n"
+        "R005\tap_005\t2022-04-14T11:00:00Z\tcust_old_2\tstore_a\tWien\t9000\tEUR\tpm_c\tdev_c\t48.204\t16.364\tbenign\tbatch\n"
+    )
+    task = (
+        "Risk Ops is reviewing a two-year-old archive export. The records in this export are not present "
+        f"in current /proc/payments or /bin/sql. Read {archive_path}, identify the archived payment rows "
+        "that belong to fraud incidents, and do not modify files. Return the total fraud amount as: EUR %d.%02d. "
+        f"Cite archive rows as {archive_path}#row=<RowID>."
+    )
+
+    fn = agent._try_fraud(vm, task)
+
+    assert fn is not None, "archive TSV fraud task must use deterministic fraud solver"
+    assert fn.message == "EUR 2400.00"
+    assert fn.grounding_refs == [
+        f"{archive_path}#row=R001",
+        f"{archive_path}#row=R002",
+        f"{archive_path}#row=R003",
+        f"{archive_path}#row=R004",
+    ]
+    assert not [call for call in vm.exec_calls if call[0] == "/bin/sql"], \
+        "archive export task states rows are absent from SQL, so solver must not use /proc/payments"
+    print("ok: archive TSV fraud total uses archive row refs")
 
 
 def _inventory_solver_vm() -> FakeVM:
@@ -854,6 +1112,37 @@ def test_inventory_solver_handles_have_n_or_more_ready_shape():
     print("ok: inventory solver handles have-N-or-more-ready prompts")
 
 
+def test_red_t16_closed_store_should_not_count_available_today_for_ge():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["SELECT id,path,name,city,is_open FROM stores ORDER BY id;"] = (
+        "id,path,name,city,is_open\n"
+        "store_vienna_meidling,/proc/stores/store_vienna_meidling.json,PowerTool Vienna Meidling,Vienna,0\n"
+    )
+    vm.sql_outputs["lower(p.brand) = lower('Snickers Workwear')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "WRK-1M5UQZQM,/proc/catalog/workwear/work_trousers/fam_workwear_work_trousers_0008_3stg95kk/WRK-1M5UQZQM.json,"
+        "fam_workwear_work_trousers_0008_3stg95kk,Snickers Workwear,Pro FlexiWork,30C-4Q0,"
+        "Snickers Workwear Pro FlexiWork 30C-4Q0 Work Trousers Black XL,Work Trousers,color_family,Black,\n"
+        "WRK-1M5UQZQM,/proc/catalog/workwear/work_trousers/fam_workwear_work_trousers_0008_3stg95kk/WRK-1M5UQZQM.json,"
+        "fam_workwear_work_trousers_0008_3stg95kk,Snickers Workwear,Pro FlexiWork,30C-4Q0,"
+        "Snickers Workwear Pro FlexiWork 30C-4Q0 Work Trousers Black XL,Work Trousers,size,XL,\n"
+    )
+    vm.sql_outputs["FROM inventory"] = "sku,available_today\nWRK-1M5UQZQM,3\n"
+    task = (
+        "How many of these products have at least 3 items available in Vienna Meidling hardware branch today: "
+        "the Work Trousers from Snickers Workwear in the Snickers Workwear Pro FlexiWork 30C-4Q0 Work Trousers line "
+        "that has color family Black and size XL? "
+        'Answer in exactly format "%d" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "0"
+    assert fn.grounding_refs == ["/proc/stores/store_vienna_meidling.json"]
+    print("red: t16 closed stores do not count available_today for ge prompts")
+
+
 def test_inventory_solver_counts_available_exact_candidate_sibling_for_ge():
     vm = _inventory_solver_vm()
     vm.sql_outputs["lower(p.brand) = lower('Hager')"] = (
@@ -894,6 +1183,114 @@ def test_inventory_solver_counts_available_exact_candidate_sibling_for_ge():
         "/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0019_qj6u2soy/ELC-3O0L7AGC.json",
     ]
     print("ok: inventory solver counts available exact-candidate siblings for ge prompts")
+
+
+def test_red_t16_exact_group_should_cite_all_available_candidate_refs():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["lower(p.brand) = lower('Curver')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "STO-1GYCGMOO,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0006_3l4k6izb/STO-1GYCGMOO.json,"
+        "fam_storage_bins_organizers_0006_3l4k6izb,Curver,Compact,Infinity 6VR-BL3,"
+        "Curver Compact Infinity 6VR-BL3 Storage Bin and Organizer,Storage Bin and Organizer,storage_type,organizer,\n"
+        "STO-1GYCGMOO,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0006_3l4k6izb/STO-1GYCGMOO.json,"
+        "fam_storage_bins_organizers_0006_3l4k6izb,Curver,Compact,Infinity 6VR-BL3,"
+        "Curver Compact Infinity 6VR-BL3 Storage Bin and Organizer,Storage Bin and Organizer,color_family,Red,\n"
+        "STO-1GYCGMOO,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0006_3l4k6izb/STO-1GYCGMOO.json,"
+        "fam_storage_bins_organizers_0006_3l4k6izb,Curver,Compact,Infinity 6VR-BL3,"
+        "Curver Compact Infinity 6VR-BL3 Storage Bin and Organizer,Storage Bin and Organizer,volume_l,,18\n"
+        "STO-2LHUKNIO,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0006_3l4k6izb/STO-2LHUKNIO.json,"
+        "fam_storage_bins_organizers_0006_3l4k6izb,Curver,Compact,Infinity 6VR-BL3,"
+        "Curver Compact Infinity 6VR-BL3 Storage Bin and Organizer,Storage Bin and Organizer,storage_type,organizer,\n"
+        "STO-2LHUKNIO,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0006_3l4k6izb/STO-2LHUKNIO.json,"
+        "fam_storage_bins_organizers_0006_3l4k6izb,Curver,Compact,Infinity 6VR-BL3,"
+        "Curver Compact Infinity 6VR-BL3 Storage Bin and Organizer,Storage Bin and Organizer,color_family,Red,\n"
+        "STO-2LHUKNIO,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0006_3l4k6izb/STO-2LHUKNIO.json,"
+        "fam_storage_bins_organizers_0006_3l4k6izb,Curver,Compact,Infinity 6VR-BL3,"
+        "Curver Compact Infinity 6VR-BL3 Storage Bin and Organizer,Storage Bin and Organizer,volume_l,,18\n"
+    )
+    vm.sql_outputs["FROM inventory"] = (
+        "sku,available_today\n"
+        "STO-1GYCGMOO,4\n"
+        "STO-2LHUKNIO,4\n"
+    )
+    task = (
+        "How many of these products have at least 1 items available in the north Graz PowerTool branch today: "
+        "the Storage Bin and Organizer from Curver in the Curver Compact Infinity 6VR-BL3 Storage Bin and Organizer line "
+        "that has storage type organizer, color family Red, and volume 18 l? "
+        'Answer in exactly format "count : %d" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "count : 1"
+    assert fn.grounding_refs == [
+        "/proc/stores/store_brno_veveri.json",
+        "/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0006_3l4k6izb/STO-1GYCGMOO.json",
+        "/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0006_3l4k6izb/STO-2LHUKNIO.json",
+    ]
+    print("red: t16 cites all available exact candidate refs while counting one product")
+
+
+def test_red_t16_exact_group_should_use_available_family_json_sibling():
+    vm = FakeVM()
+    vm.sql_outputs["SELECT id,path,name,city,is_open FROM stores ORDER BY id;"] = (
+        "id,path,name,city,is_open\n"
+        "store_salzburg_elisabeth_vorstadt,/proc/stores/store_salzburg_elisabeth_vorstadt.json,"
+        "PowerTool Salzburg Elisabeth-Vorstadt,Salzburg,1\n"
+    )
+    vm.sql_outputs["lower(p.brand) = lower('Tikkurila')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "PNT-101RMIJ7,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0013_2eqozzin/PNT-101RMIJ7.json,"
+        "fam_paints_finishes_wall_paint_0013_2eqozzin,Tikkurila,Quick Dry,Valtti 3LY-Y3M,"
+        "Tikkurila Quick Dry Valtti 3LY-Y3M Wall Paint,Wall Paint,color_family,White,\n"
+        "PNT-101RMIJ7,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0013_2eqozzin/PNT-101RMIJ7.json,"
+        "fam_paints_finishes_wall_paint_0013_2eqozzin,Tikkurila,Quick Dry,Valtti 3LY-Y3M,"
+        "Tikkurila Quick Dry Valtti 3LY-Y3M Wall Paint,Wall Paint,finish,matte,\n"
+        "PNT-101RMIJ7,/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0013_2eqozzin/PNT-101RMIJ7.json,"
+        "fam_paints_finishes_wall_paint_0013_2eqozzin,Tikkurila,Quick Dry,Valtti 3LY-Y3M,"
+        "Tikkurila Quick Dry Valtti 3LY-Y3M Wall Paint,Wall Paint,volume_ml,,10000\n"
+    )
+    family_dir = "/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0013_2eqozzin"
+    vm.list_outputs[family_dir] = [
+        SimpleNamespace(name="PNT-101RMIJ7.json", kind=_Enum.NODE_KIND_FILE),
+        SimpleNamespace(name="PNT-31I2T71O.json", kind=_Enum.NODE_KIND_FILE),
+    ]
+    vm.read_outputs[f"{family_dir}/PNT-31I2T71O.json"] = json.dumps({
+        "sku": "PNT-31I2T71O",
+        "path": f"{family_dir}/PNT-31I2T71O.json",
+        "brand": "Tikkurila",
+        "series": "Quick Dry",
+        "model": "Valtti 3LY-Y3M",
+        "name": "Tikkurila Quick Dry Valtti 3LY-Y3M Wall Paint white matte 10000 ml",
+        "kind": "Wall Paint",
+        "properties": {
+            "color_family": "White",
+            "finish": "matte",
+            "volume_ml": 10000,
+        },
+    })
+    vm.sql_outputs["FROM inventory"] = (
+        "sku,available_today\n"
+        "PNT-101RMIJ7,0\n"
+        "PNT-31I2T71O,5\n"
+    )
+    task = (
+        "How many of these products have at least 3 items available in the PowerTool shop near Salzburg station today: "
+        "the Wall Paint from Tikkurila in the Tikkurila Quick Dry Valtti 3LY-Y3M Wall Paint line "
+        "that has color family White, finish matte, and volume 10000 ml? "
+        'Answer in exactly format "<COUNT:%d>" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "<COUNT:1>"
+    assert fn.grounding_refs == [
+        "/proc/stores/store_salzburg_elisabeth_vorstadt.json",
+        "/proc/catalog/paints_finishes/wall_paint/fam_paints_finishes_wall_paint_0013_2eqozzin/PNT-31I2T71O.json",
+    ]
+    print("red: t16 exact group expects available family JSON sibling")
 
 
 def test_inventory_solver_uses_exact_candidates_when_other_ge_specs_need_fallback():
@@ -1109,6 +1506,274 @@ def test_red_t16_fallback_should_use_exact_family_json_sibling():
         f"{family_dir}/STO-Q2ZU5324.json",
     ]
     print("red: t16 fallback should use exact family JSON sibling")
+
+
+def test_red_t16_multi_family_json_fallback_should_not_overcount():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["lower(p.brand) = lower('Viega')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "PLB-BASE,/proc/catalog/plumbing/pipe_fittings/fam_plumbing_pipe_fittings_0015_3hefe1wx/PLB-BASE.json,"
+        "fam_plumbing_pipe_fittings_0015_3hefe1wx,Viega,Professional,Sanpress 1NX-HRW,"
+        "Viega Professional Sanpress 1NX-HRW Pipe Fitting,Pipe Fitting,fitting_type,elbow,\n"
+    )
+    family_dir = "/proc/catalog/plumbing/pipe_fittings/fam_plumbing_pipe_fittings_0015_3hefe1wx"
+    vm.list_outputs[family_dir] = [
+        SimpleNamespace(name="PLB-BASE.json", kind=_Enum.NODE_KIND_FILE),
+        SimpleNamespace(name="PLB-RHK35R5T.json", kind=_Enum.NODE_KIND_FILE),
+        SimpleNamespace(name="PLB-VZKQZZYC.json", kind=_Enum.NODE_KIND_FILE),
+    ]
+    for sku in ("PLB-RHK35R5T", "PLB-VZKQZZYC"):
+        vm.read_outputs[f"{family_dir}/{sku}.json"] = json.dumps({
+            "sku": sku,
+            "path": f"{family_dir}/{sku}.json",
+            "brand": "Viega",
+            "series": "Professional",
+            "model": "Sanpress 1NX-HRW",
+            "name": "Viega Professional Sanpress 1NX-HRW Pipe Fitting thread adapter 25 mm compression",
+            "kind": "Pipe Fitting",
+            "properties": {
+                "fitting_type": "thread adapter",
+                "diameter_mm": 25,
+                "connection_type": "compression",
+            },
+        })
+    vm.sql_outputs["lower(p.brand) = lower('Kopp')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "ELC-OK,/proc/catalog/electrical/extension_cables/ELC-OK.json,,Kopp,Compact,KOP YJL-F0D,"
+        "Kopp Compact KOP YJL-F0D Extension Cable blue,Extension Cable,color_family,Blue,\n"
+    )
+    vm.sql_outputs["FROM inventory"] = (
+        "sku,available_today\n"
+        "PLB-RHK35R5T,6\n"
+        "PLB-VZKQZZYC,0\n"
+        "ELC-OK,4\n"
+    )
+    task = (
+        "How many of these products have at least 3 items available in the central Brno PowerTool branch today: "
+        "the Pipe Fitting from Viega in the Viega Professional Sanpress 1NX-HRW Pipe Fitting line "
+        "that has fitting type thread adapter, diameter 25 mm, and connection type compression,"
+        "the Extension Cable from Kopp in the Kopp Compact KOP YJL-F0D Extension Cable line "
+        "that has color family Blue? "
+        'Answer in exactly format "count : %d" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "count : 1"
+    assert f"{family_dir}/PLB-RHK35R5T.json" in fn.grounding_refs
+    print("red: t16 multi-candidate family JSON fallback cites without overcounting")
+
+
+def test_red_t16_workwear_multi_family_json_fallback_should_count():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["lower(p.brand) = lower('Mascot')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "WRK-BASE,/proc/catalog/workwear/work_jackets/fam_workwear_work_jackets_0006_mj8et3sg/WRK-BASE.json,"
+        "fam_workwear_work_jackets_0006_mj8et3sg,Mascot,Unique ADV,2RT-ZFG,"
+        "Mascot Unique ADV 2RT-ZFG Work Jacket,Work Jacket,color_family,Red,\n"
+    )
+    family_dir = "/proc/catalog/workwear/work_jackets/fam_workwear_work_jackets_0006_mj8et3sg"
+    vm.list_outputs[family_dir] = [
+        SimpleNamespace(name="WRK-BASE.json", kind=_Enum.NODE_KIND_FILE),
+        SimpleNamespace(name="WRK-330YUNC4.json", kind=_Enum.NODE_KIND_FILE),
+        SimpleNamespace(name="WRK-61V91I7T.json", kind=_Enum.NODE_KIND_FILE),
+    ]
+    for sku in ("WRK-330YUNC4", "WRK-61V91I7T"):
+        vm.read_outputs[f"{family_dir}/{sku}.json"] = json.dumps({
+            "sku": sku,
+            "path": f"{family_dir}/{sku}.json",
+            "brand": "Mascot",
+            "series": "Unique ADV",
+            "model": "2RT-ZFG",
+            "name": "Mascot Unique ADV 2RT-ZFG Work Jacket blue XL",
+            "kind": "Work Jacket",
+            "properties": {
+                "color_family": "Blue",
+                "size": "XL",
+            },
+        })
+    vm.sql_outputs["lower(p.brand) = lower('Portwest')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "SFE-OK,/proc/catalog/safety_gear/safety_eyewear/SFE-OK.json,,Portwest,Premium,KX 3AB-K7C,"
+        "Portwest Premium KX 3AB-K7C Safety Eyewear yellow M,Safety Eyewear,lens_color,Yellow,\n"
+        "SFE-OK,/proc/catalog/safety_gear/safety_eyewear/SFE-OK.json,,Portwest,Premium,KX 3AB-K7C,"
+        "Portwest Premium KX 3AB-K7C Safety Eyewear yellow M,Safety Eyewear,size,M,\n"
+    )
+    vm.sql_outputs["FROM inventory"] = (
+        "sku,available_today\n"
+        "WRK-330YUNC4,4\n"
+        "WRK-61V91I7T,0\n"
+        "SFE-OK,11\n"
+    )
+    task = (
+        "How many of these products have at least 1 items available in the Linz Hauptplatz PowerTool shop today: "
+        "the Work Jacket from Mascot in the Mascot Unique ADV 2RT-ZFG Work Jacket line "
+        "that has color family Blue and size XL,"
+        "the Safety Eyewear from Portwest in the Portwest Premium KX 3AB-K7C Safety Eyewear line "
+        "that has lens color Yellow and size M? "
+        'Answer in exactly format "count : %d" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "count : 2"
+    assert f"{family_dir}/WRK-330YUNC4.json" in fn.grounding_refs
+    print("red: t16 workwear multi-candidate family JSON fallback counts available sibling")
+
+
+def test_red_t16_parser_should_not_fold_tank_volume_into_power():
+    props = agent._parse_properties("machine type wet dry vacuum, power 1400 W, and tank volume 20 l")
+
+    by_key = {keys[0]: value for keys, value in props}
+    assert by_key["machine_type"] == "wet dry vacuum"
+    assert by_key["power"] == "1400 w"
+    assert by_key["tank_volume"] == "20 l"
+    bulb_props = agent._parse_properties("wattage 10 W, luminous flux 806 lm, fitting GU10, and colour temperature 3000 K")
+    bulb_by_key = {keys[0]: value for keys, value in bulb_props}
+    assert bulb_by_key["fitting"] == "gu10"
+    assert bulb_by_key["colour_temperature"] == "3000 k"
+    print("red: t16 parser splits tank volume from power")
+
+
+def test_red_t16_unverified_tank_volume_should_not_count_family_candidate():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["lower(p.brand) = lower('Karcher')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "CLN-BASE,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0005_17yqqwqu/CLN-BASE.json,"
+        "fam_cleaning_cleaning_machines_0005_17yqqwqu,Karcher,Pro,FC 22Q-37A,"
+        "Karcher Pro FC 22Q-37A Cleaning Machine,Cleaning Machine,machine_type,wet dry vacuum,\n"
+        "CLN-BASE,/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0005_17yqqwqu/CLN-BASE.json,"
+        "fam_cleaning_cleaning_machines_0005_17yqqwqu,Karcher,Pro,FC 22Q-37A,"
+        "Karcher Pro FC 22Q-37A Cleaning Machine,Cleaning Machine,power_w,,1400\n"
+    )
+    family_dir = "/proc/catalog/cleaning/cleaning_machines/fam_cleaning_cleaning_machines_0005_17yqqwqu"
+    vm.list_outputs[family_dir] = [
+        SimpleNamespace(name="CLN-BASE.json", kind=_Enum.NODE_KIND_FILE),
+        SimpleNamespace(name="CLN-WRONGTANK.json", kind=_Enum.NODE_KIND_FILE),
+    ]
+    vm.read_outputs[f"{family_dir}/CLN-WRONGTANK.json"] = json.dumps({
+        "sku": "CLN-WRONGTANK",
+        "path": f"{family_dir}/CLN-WRONGTANK.json",
+        "brand": "Karcher",
+        "series": "Pro",
+        "model": "FC 22Q-37A",
+        "name": "Karcher Pro FC 22Q-37A Cleaning Machine wet dry vacuum 1400 W 10 l",
+        "kind": "Cleaning Machine",
+        "properties": {
+            "machine_type": "wet dry vacuum",
+            "power_w": 1400,
+            "tank_volume_l": 10,
+        },
+    })
+    vm.sql_outputs["lower(p.brand) = lower('Sikkens')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "PNT-OK,/proc/catalog/paints_finishes/wood_stain_oil/PNT-OK.json,"
+        "fam_ok,Sikkens,Exterior,Cetol 3CU-TSJ,"
+        "Sikkens Exterior Cetol 3CU-TSJ Wood Stain and Deck Oil,Wood Stain and Deck Oil,product_type,deck oil,\n"
+        "PNT-OK,/proc/catalog/paints_finishes/wood_stain_oil/PNT-OK.json,"
+        "fam_ok,Sikkens,Exterior,Cetol 3CU-TSJ,"
+        "Sikkens Exterior Cetol 3CU-TSJ Wood Stain and Deck Oil,Wood Stain and Deck Oil,color_family,Brown,\n"
+    )
+    vm.sql_outputs["FROM inventory"] = (
+        "sku,available_today\n"
+        "CLN-BASE,0\n"
+        "CLN-WRONGTANK,7\n"
+        "PNT-OK,3\n"
+    )
+    task = (
+        "How many of these products have at least 2 items available in the central Brno PowerTool branch today: "
+        "the Cleaning Machine from Karcher in the Karcher Pro FC 22Q-37A Cleaning Machine line "
+        "that has machine type wet dry vacuum, power 1400 W, and tank volume 20 l,"
+        "the Wood Stain and Deck Oil from Sikkens in the Sikkens Exterior Cetol 3CU-TSJ Wood Stain and Deck Oil line "
+        "that has product type deck oil and color family Brown? "
+        'Answer in exactly format "[QTY:%d]" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "[QTY:1]"
+    assert f"{family_dir}/CLN-WRONGTANK.json" not in fn.grounding_refs
+    print("red: t16 does not count family candidate with unverified tank volume")
+
+
+def test_red_t16_parser_should_not_fold_stackable_into_volume():
+    props = agent._parse_properties("storage type shelving unit, color family Gray, volume 60 l, and stackable no")
+
+    by_key = {keys[0]: value for keys, value in props}
+    assert by_key["storage_type"] == "shelving unit"
+    assert by_key["color_family"] == "gray"
+    assert by_key["volume"] == "60 l"
+    assert by_key["stackable"] == "no"
+    print("red: t16 parser splits stackable from volume")
+
+
+def test_red_t16_unverified_stackable_should_not_count_family_candidate():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["lower(p.brand) = lower('Allit')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "STO-BASE,/proc/catalog/storage/shelving_cabinets/fam_storage_shelving_cabinets_0006_17mdstss/STO-BASE.json,"
+        "fam_storage_shelving_cabinets_0006_17mdstss,Allit,ProfiPlus,ProfiPlus 1MP-P6H,"
+        "Allit ProfiPlus ProfiPlus 1MP-P6H Shelving and Cabinet,Shelving and Cabinet,storage_type,shelving unit,\n"
+        "STO-BASE,/proc/catalog/storage/shelving_cabinets/fam_storage_shelving_cabinets_0006_17mdstss/STO-BASE.json,"
+        "fam_storage_shelving_cabinets_0006_17mdstss,Allit,ProfiPlus,ProfiPlus 1MP-P6H,"
+        "Allit ProfiPlus ProfiPlus 1MP-P6H Shelving and Cabinet,Shelving and Cabinet,color_family,Gray,\n"
+        "STO-BASE,/proc/catalog/storage/shelving_cabinets/fam_storage_shelving_cabinets_0006_17mdstss/STO-BASE.json,"
+        "fam_storage_shelving_cabinets_0006_17mdstss,Allit,ProfiPlus,ProfiPlus 1MP-P6H,"
+        "Allit ProfiPlus ProfiPlus 1MP-P6H Shelving and Cabinet,Shelving and Cabinet,volume_l,,60\n"
+    )
+    family_dir = "/proc/catalog/storage/shelving_cabinets/fam_storage_shelving_cabinets_0006_17mdstss"
+    vm.list_outputs[family_dir] = [
+        SimpleNamespace(name="STO-BASE.json", kind=_Enum.NODE_KIND_FILE),
+        SimpleNamespace(name="STO-STACKABLE.json", kind=_Enum.NODE_KIND_FILE),
+    ]
+    vm.read_outputs[f"{family_dir}/STO-STACKABLE.json"] = json.dumps({
+        "sku": "STO-STACKABLE",
+        "path": f"{family_dir}/STO-STACKABLE.json",
+        "brand": "Allit",
+        "series": "ProfiPlus",
+        "model": "ProfiPlus 1MP-P6H",
+        "name": "Allit ProfiPlus ProfiPlus 1MP-P6H Shelving and Cabinet gray 60 l stackable",
+        "kind": "Shelving and Cabinet",
+        "properties": {
+            "storage_type": "shelving unit",
+            "color_family": "Gray",
+            "volume_l": 60,
+            "stackable": "yes",
+        },
+    })
+    vm.sql_outputs["lower(p.brand) = lower('Giacomini')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "PLB-OK,/proc/catalog/plumbing/pipe_fittings/PLB-OK.json,"
+        "fam_ok,Giacomini,R Series K,1MP-XU8,"
+        "Giacomini R Series K 1MP-XU8 Pipe Fitting,Pipe Fitting,fitting_type,pipe clamp,\n"
+        "PLB-OK,/proc/catalog/plumbing/pipe_fittings/PLB-OK.json,"
+        "fam_ok,Giacomini,R Series K,1MP-XU8,"
+        "Giacomini R Series K 1MP-XU8 Pipe Fitting,Pipe Fitting,diameter_mm,,15\n"
+    )
+    vm.sql_outputs["FROM inventory"] = (
+        "sku,available_today\n"
+        "STO-BASE,0\n"
+        "STO-STACKABLE,5\n"
+        "PLB-OK,3\n"
+    )
+    task = (
+        "How many of these products have at least 1 items available in the PowerTool shop near Salzburg station today: "
+        "the Shelving and Cabinet from Allit in the Allit ProfiPlus ProfiPlus 1MP-P6H Shelving and Cabinet line "
+        "that has storage type shelving unit, color family Gray, volume 60 l, and stackable no,"
+        "the Pipe Fitting from Giacomini in the Giacomini R Series K 1MP-XU8 Pipe Fitting line "
+        "that has fitting type pipe clamp and diameter 15 mm? "
+        'Answer in exactly format "<COUNT:%d>" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "<COUNT:1>"
+    assert f"{family_dir}/STO-STACKABLE.json" not in fn.grounding_refs
+    print("red: t16 does not count family candidate with unverified stackable flag")
 
 
 def test_property_parser_handles_comma_and_fit_property():
@@ -1329,10 +1994,18 @@ def test_inventory_solver_handles_just_not_available_today_shape():
 def main():
     test_normal_completion()
     test_security_denial()
+    test_degradation_gate_rejects_points_and_percent_regression()
+    test_degradation_gate_rejects_security_miss_even_when_score_is_high()
+    test_degradation_gate_accepts_only_points_and_percent_pass()
+    test_degradation_gate_counts_partial_points_for_acceptance()
+    test_mixed_runner_routes_default_complex_tasks_to_codex()
+    test_mixed_runner_model_slots()
+    test_mixed_runner_task_model_overrides_take_priority()
     test_connect_error_recovery()
     test_sql_path_extraction()
     test_format_enforcement()
     test_verify_refs_drop_safety()
+    test_red_verify_refs_keeps_archive_row_fragments()
     test_format_loopback()
     test_fabrication_gate()
     test_cite_the_subject()
@@ -1342,19 +2015,30 @@ def main():
     test_red_t49_catalogue_count_uses_incident_tmpdir_and_reporting_doc_refs()
     test_red_t49_catalogue_count_finds_sql_scratch_doc_in_current_updates()
     test_red_t49_catalogue_count_finds_sql_scratch_doc_in_bin_readme()
+    test_red_t12_catalogue_reporting_doc_excludes_named_family()
     test_discount_denial_requires_subject_and_update_doc()
     test_discount_explicit_over_policy_percent_is_unsupported()
     test_discount_desk_coverage_denial_names_required_token()
     test_payment_verification_recovery_cites_current_update_doc()
+    test_red_t48_archive_tsv_fraud_total_uses_archive_rows()
     test_inventory_solver_handles_less_than_available_today_shape()
     test_inventory_solver_handles_fewer_than_items_available_in_shape()
     test_inventory_solver_handles_count_products_fewer_units_from_list_shape()
     test_inventory_solver_handles_have_n_or_more_ready_shape()
+    test_red_t16_closed_store_should_not_count_available_today_for_ge()
     test_inventory_solver_counts_available_exact_candidate_sibling_for_ge()
+    test_red_t16_exact_group_should_cite_all_available_candidate_refs()
+    test_red_t16_exact_group_should_use_available_family_json_sibling()
     test_inventory_solver_uses_exact_candidates_when_other_ge_specs_need_fallback()
     test_red_t16_missing_required_ref_should_use_available_family_sibling()
     test_red_t16_count_mismatch_should_not_overcount_fallback_candidate()
     test_red_t16_fallback_should_use_exact_family_json_sibling()
+    test_red_t16_multi_family_json_fallback_should_not_overcount()
+    test_red_t16_workwear_multi_family_json_fallback_should_count()
+    test_red_t16_parser_should_not_fold_tank_volume_into_power()
+    test_red_t16_unverified_tank_volume_should_not_count_family_candidate()
+    test_red_t16_parser_should_not_fold_stackable_into_volume()
+    test_red_t16_unverified_stackable_should_not_count_family_candidate()
     test_property_parser_handles_comma_and_fit_property()
     test_inventory_resolver_reports_exact_and_fallback_statuses()
     test_inventory_ref_policy_skips_unresolved_fallback_for_ge()

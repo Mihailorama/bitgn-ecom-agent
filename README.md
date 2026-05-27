@@ -9,10 +9,11 @@ tools such as `/bin/sql`) over the schema published at
 [buf.build/bitgn/api](https://buf.build/bitgn/api), and drives an LLM with
 [Schema-Guided Reasoning](https://abdullin.com/schema-guided-reasoning/).
 
-Current accepted scoring milestone: `46/47` with `codex:gpt-5.3-codex` at
-`PARALLEL=6`, commit `e4a2d41`, tag
-`bench-ecom1-dev-v47-46of47-20260526`. Later lower-scoring portfolio runs are
-diagnostic evidence only, not the baseline state.
+Current accepted leaderboard milestone: `48.9905/50` points (`97.981%`) with
+mixed `claude:opus` + `codex:gpt-5.5`, logs
+`artifacts/sweeps/2026-05-27-mixed-opus-codex55-r2/`. The previous codex-only
+milestone remains `46/47` with `codex:gpt-5.3-codex` at `PARALLEL=6`, commit
+`e4a2d41`, tag `bench-ecom1-dev-v47-46of47-20260526`.
 
 ## Why this scores well
 
@@ -51,7 +52,8 @@ every provider.
 
 | Context | `MODEL_ID` | Auth | Why |
 |---|---|---|---|
-| **Leaderboard attempts** | `codex:gpt-5.3-codex` | local `codex` CLI over ChatGPT OAuth | current strongest profile for this agent |
+| **Leaderboard attempts** | mixed `claude:opus` + `codex:gpt-5.5` | local Claude/Codex CLIs over OAuth | current best saved leaderboard profile |
+| Codex-only baseline | `codex:gpt-5.3-codex` | local `codex` CLI over ChatGPT OAuth | previous strongest single-profile baseline |
 | Regression canary | `claude:sonnet` | local `claude` CLI over OAuth | cheaper validation, but lower current score |
 | Gemini CLI comparison | `agy` | local Antigravity CLI over Google AI Pro OAuth | available, but currently slower and less stable |
 | API fallback | `gpt-5.5` / `openai/...` | `OPENAI_API_KEY` | LiteLLM-backed OpenAI path |

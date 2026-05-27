@@ -7,7 +7,23 @@ these diagrams and one validation gate in the risk table.
 
 ## Current Milestone
 
-As of 2026-05-26, the current saved scoring milestone is:
+As of 2026-05-27, the current saved leaderboard milestone is:
+
+- Milestone profile: mixed `claude:opus` + `codex:gpt-5.5`.
+- Full-sweep result: `48.9905/50` points (`97.981%`) with `47/50` perfect
+  tasks. The three non-perfect tasks were partial fraud scores: `t38`, `t39`,
+  and `t40`.
+- Accepted sweep logs:
+  `artifacts/sweeps/2026-05-27-mixed-opus-codex55-r2/`.
+- Local wall time: `461s`; leaderboard time: `1:12:27`. The mixed runner now
+  logs model slot wait and platform-open timing separately for future sweeps.
+
+The operational target is leaderboard points, not perfect-task count. Perfect
+count remains useful triage, but fractional task scores count toward the goal.
+
+## Previous Codex Milestone
+
+As of 2026-05-26, the previous codex-only scoring milestone was:
 
 - Milestone commit: `e4a2d41` (`Route t45 have-ready inventory wording`).
 - Documentation commit: `a7de1b5` (`Record v47 46-of-47 milestone retrospective`).
@@ -19,16 +35,15 @@ As of 2026-05-26, the current saved scoring milestone is:
 - Milestone retrospective and test-data index:
   `artifacts/milestones/2026-05-26-v47-46of47-retrospective.md`.
 
-The active operational target is absolute solved count, not percentage alone.
-The benchmark denominator changed during the work (`44 -> 46 -> 47`), so a
-change only counts as progress if a full sweep raises or preserves the accepted
-absolute solved-count target.
+The benchmark denominator changed during the work (`44 -> 46 -> 47 -> 50`), so
+a change only counts as progress if a full sweep raises or preserves the
+accepted points target and is security-clean.
 
-Later diagnostic runs that scored fewer solved tasks are not the current state.
+Later diagnostic runs that scored fewer points are not the current state.
 In particular, the 2026-05-27 portfolio comparison is evidence about backend
 behavior on the then-current 48-task denominator, but its best codex result was
-`44/48`; it must not replace the accepted `46/47` milestone as the baseline for
-future development.
+`44/48`; it must not replace the accepted `48.9905/50` mixed milestone as the
+leaderboard baseline for future development.
 
 ## Historical Rollback Point
 
@@ -77,6 +92,28 @@ Key properties:
 - Full sweeps append to `RESULTS.md`; partial sweeps only write logs.
 - Platform-reported time is not the same as local wall time. Use local wall time
   for iteration speed, but trust BitGN platform time for leaderboard speed.
+
+## Mixed Runner
+
+`run_mixed_parallel.py` is a separate diagnostic runner. It must not replace
+`run_parallel.py` until a full mixed sweep proves it preserves or improves the
+accepted gates.
+
+Required shape:
+
+- One `StartRun` and one platform-provided list of trial ids.
+- Each worker calls `start_trial()` first, then routes by `trial.task_id`.
+- Simple/deterministic tasks may run on `CLAUDE_MODEL_ID=claude:sonnet`.
+- Fragile resolver, fraud, archive, quote, ambiguous, and security-sensitive
+  tasks stay on `CODEX_MODEL_ID=codex:gpt-5.3-codex` unless evidence says
+  otherwise.
+- `MIXED_PARALLEL` can be 12, but per-model semaphores cap concurrency:
+  `MIXED_CLAUDE_LIMIT=6` and `MIXED_CODEX_LIMIT=6`.
+- The runner writes `route_manifest.json` and `sweep_report.json` in the unique
+  `SWEEP_LOG_DIR`.
+
+Promotion rule: a mixed sweep is diagnostic evidence only unless it passes the
+same points, percent, and security gates as the accepted profile.
 
 ## Agent Loop
 
@@ -324,7 +361,7 @@ flowchart TD
     Smoke --> Targeted[Targeted task + touched-family regression]
     Targeted --> Security[Security grep]
     Security --> Full[Full sweep with unique SWEEP_LOG_DIR]
-    Full --> Accept{Absolute solved count >= accepted target and security clean?}
+    Full --> Accept{Points >= accepted target and security clean?}
     Accept -->|yes| Record[Update RESULTS, notes, artifacts, commit]
     Accept -->|no| Reject[Keep logs, document signal, revert or do not promote]
     Design --> Red
@@ -341,7 +378,7 @@ flowchart TD
    or global ref policy.
 4. Targeted pass is only a local signal. It is not leaderboard progress.
 5. A change is accepted only by a full sweep that is security-clean and raises or
-   preserves the accepted absolute solved-count target.
+   preserves the accepted points target.
 6. Use a unique `SWEEP_LOG_DIR` for every full attempt. Do not overwrite the
    milestone logs with a noisier repeat.
 7. Always grep for security misses before commit:
@@ -349,7 +386,10 @@ flowchart TD
 8. Commit the code, tests, `RESULTS.md`, notes, and logs atomically. If the
    change is not accepted, keep diagnostic logs only when they explain a rejected
    design.
-9. Push only after explicit approval.
+9. Mixed-model optimization is mandatory diagnostic work before tournament mode:
+   use `run_mixed_parallel.py`, never rewrite the accepted `run_parallel.py`
+   path for this experiment.
+10. Push only after explicit approval.
 
 ### Acceptance Levels
 
@@ -358,15 +398,15 @@ flowchart TD
 | RED/GREEN smoke | Unit-level deterministic behavior works | No, unless followed by targeted/full evidence |
 | Targeted pass | The named task shape can pass | No, not by itself |
 | Family regression pass | Adjacent known tasks did not fail in that sample | Still no, not by itself |
-| Full sweep preserves solved target | Safe maintenance / documentation-worthy | Yes, if security clean |
-| Full sweep raises absolute solved count | Scoring milestone | Yes, tag and document |
+| Full sweep preserves points target | Safe maintenance / documentation-worthy | Yes, if security clean |
+| Full sweep raises points target | Scoring milestone | Yes, tag and document |
 
 ### Current Stable Target
 
-The accepted target is `46` solved tasks on `bitgn/ecom1-dev` v47. The next
-accepted scoring improvement must reach `47/47` or repeatedly preserve `46/47`
-while closing the known `t16` failure. A full sweep below `46` solved may still
-be useful variance evidence, but it is not a promoted state.
+The accepted target is `48.9905/50` points on `bitgn/ecom1-dev` v50. The next
+accepted scoring improvement must preserve at least that points total, preserve
+the configured percent gate, and remain security-clean. Perfect-count movement
+is diagnostic unless it changes the points total.
 
 ## Promotion Contract
 
@@ -377,8 +417,8 @@ A change can be promoted only if all are true:
 - Target tasks pass with saved logs.
 - Full sweep is security-clean:
   `rg "expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK" <logs>`.
-- The full-sweep result improves or preserves the accepted absolute solved-count
-  target without moving failures into a more serious family.
+- The full-sweep result improves or preserves the accepted points target without
+  moving failures into a more serious family.
 - `RESULTS.md` and `BENCHMARK_NOTES.md` explain what changed and why.
 
 If a change improves targeted tasks but regresses a different family in a full

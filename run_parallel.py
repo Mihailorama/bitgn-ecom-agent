@@ -33,6 +33,7 @@ from bitgn.harness_pb2 import (
 from connectrpc.errors import ConnectError
 
 from agent import run_agent
+from degradation_gate import build_sweep_report, format_gate_summary, write_sweep_report
 
 BITGN_URL = os.getenv("BITGN_HOST") or os.getenv("BENCHMARK_HOST") or "https://api.bitgn.com"
 BITGN_API_KEY = os.getenv("BITGN_API_KEY") or ""
@@ -40,6 +41,8 @@ BENCH_ID = os.getenv("BENCH_ID") or os.getenv("BENCHMARK_ID") or "bitgn/ecom1-de
 MODEL_ID = os.getenv("MODEL_ID") or "gpt-5.5"
 PARALLEL = int(os.getenv("PARALLEL", "6"))
 LOG_DIR = os.getenv("SWEEP_LOG_DIR", "/tmp/sweep_logs")
+MIN_ACCEPTED_POINTS = float(os.getenv("MIN_ACCEPTED_POINTS", os.getenv("MIN_ACCEPTED_SOLVED", "48.9905")))
+MIN_ACCEPTED_PCT = float(os.getenv("MIN_ACCEPTED_PCT", "97"))
 
 
 def _retry(fn, attempts: int = 5):
@@ -164,17 +167,28 @@ def main() -> None:
     pct = passed = 0
     if scored:
         passed = sum(1 for s in scored if s >= 0.999)
-        pct = sum(scored) / len(scored) * 100
+        points = sum(scored)
+        pct = points / len(scored) * 100
         avg = sum(times) / len(times) if times else 0
         slowest = max(times) if times else 0
         print(
-            f"\nFINAL: {pct:.2f}%  ({passed}/{len(scored)} perfect, {len(scored)} scored)\n"
+            f"\nFINAL: {pct:.2f}%  ({points:.2f}/{len(scored)} points, "
+            f"{passed}/{len(scored)} perfect)\n"
             f"SPEED: wall {wall:.0f}s | avg/task {avg:.0f}s | slowest {slowest:.0f}s | "
             f"parallel {PARALLEL}"
         )
         # Record score-vs-speed per model for full sweeps (skip partial reruns).
         if not task_filter and os.getenv("NO_RESULTS_APPEND") != "1":
             _append_result(MODEL_ID, pct, passed, len(scored), wall, avg, PARALLEL)
+    report = build_sweep_report(
+        results,
+        LOG_DIR,
+        min_points=MIN_ACCEPTED_POINTS,
+        min_pct=MIN_ACCEPTED_PCT,
+    )
+    report_path = write_sweep_report(report, LOG_DIR)
+    print(format_gate_summary(report))
+    print(f"gate report: {report_path}")
     print(f"per-task logs: {LOG_DIR}/<task>.log")
 
 

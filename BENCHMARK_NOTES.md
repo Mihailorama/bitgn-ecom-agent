@@ -635,6 +635,26 @@ Current state in `agent.py` includes:
   baseline** and is not the current scoring state. Keep codex as the primary
   scoring model; `agy` is currently slower and less reliable on this agent.
 
+**2026-05-27 mixed-model leaderboard milestone.**
+- Current accepted leaderboard milestone:
+  `artifacts/sweeps/2026-05-27-mixed-opus-codex55-r2/`.
+- Command profile:
+  `MIXED_PARALLEL=12`, `MIXED_CLAUDE_LIMIT=6`,
+  `MIXED_CODEX_LIMIT=6`, `CLAUDE_MODEL_ID=claude:opus`,
+  `CODEX_MODEL_ID=codex:gpt-5.5`.
+- Result: `48.9905/50` points (`97.981%`) with `47/50` perfect tasks.
+  The only non-perfect tasks were partial fraud scores:
+  `t38=0.7119325995`, `t39=0.6346275806`, `t40=0.6439393163`.
+- Security grep was clean: no
+  `expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK`.
+- This replaces perfect solved-count as the active acceptance target:
+  leaderboard points are `sum(task.score)`, so fractional task scores count
+  toward the goal. Perfect count remains diagnostic only.
+- Timing note: local wall was `461s`, while leaderboard showed `1:12:27`.
+  The mixed runner now records `agent_seconds`, `platform_open_seconds`, and
+  `slot_wait_seconds` separately for future sweeps so model-slot waiting can be
+  distinguished from actual agent runtime.
+
 **2026-05-27 autoresearch sidecar.**
 - Created a separate private sibling repository:
   `../bitgn-ecom-autoresearch`, pushed to
@@ -672,12 +692,13 @@ is still unmet at 100% quality.
    change must be task-local; broad resolver/prompt changes are not allowed
    unless promoted by evidence from multiple tasks and accepted as a separate
    architecture cycle. A targeted/subset pass is only diagnostic; acceptance
-   still requires the full sweep not to reduce solved-task count.
-1. Preserve the accepted state baseline: `46/47` at commit `e4a2d41`, tag
-   `bench-ecom1-dev-v47-46of47-20260526`, logs
-   `artifacts/sweeps/2026-05-26-t45-have-ready-full-codex53/`. The only
-   accepted-run miss is `t16`. Any later run with fewer solved tasks, including
-   the 2026-05-27 portfolio `44/48`, is diagnostic evidence only.
+   still requires the full sweep not to reduce leaderboard points.
+1. Preserve the accepted leaderboard baseline: `48.9905/50` points from
+   `artifacts/sweeps/2026-05-27-mixed-opus-codex55-r2/`. The previous
+   codex-only `46/47` milestone at commit `e4a2d41`, tag
+   `bench-ecom1-dev-v47-46of47-20260526`, remains historical evidence but is no
+   longer the active leaderboard target. Any later run with fewer points is
+   diagnostic evidence only, even if its perfect-task count looks different.
 2. Inventory exact-variant/count stability remains open for `t16`.
    The broad same-family JSON augmentation attempt is rejected despite good
    `t16` samples because the full sweep regressed neighboring tasks. Existing
@@ -735,7 +756,14 @@ is still unmet at 100% quality.
 15. Evaluate alternative backend only after v47 quality is restored on
    codex baseline. The 2026-05-27 portfolio comparison showed `agy` is not a
    speed win for the current algorithm.
-16. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
+16. Add and keep a separate mixed-model runner for tournament diagnostics:
+   `run_mixed_parallel.py` must use one `StartRun`, route tasks after
+   `start_trial()` by `trial.task_id`, cap Claude and Codex separately
+   (`MIXED_CLAUDE_LIMIT=6`, `MIXED_CODEX_LIMIT=6`), and finish with one
+   `SubmitRun`. Treat mixed sweeps as diagnostic only until a full sweep
+   preserves/improves the accepted points gate, meets the percent gate, and has
+   no security miss. Do not replace `run_parallel.py` for this experiment.
+17. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
    during aggressive parallel probes (`PARALLEL>=7`, and occasionally startup bursts).
    Treat `PARALLEL=6` as the practical stability cap for leaderboard attempts.
 

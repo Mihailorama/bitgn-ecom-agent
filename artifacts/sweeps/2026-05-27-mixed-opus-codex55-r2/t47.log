@@ -1,0 +1,616 @@
+TASK t47 (model codex:gpt-5.5, slot codex)
+INSTRUCTION: I'm preparing a quote for a customer from this pasted product list. Check each row against our exact catalogue and my store's same-day availability.
+
+Input format:
+RowID	description	quantity
+
+Return exactly this tab-separated output table, including the header, with rows in the same order:
+RowID	SKU	in_stock	match
+
+If the description is not an exact catalogue product, leave SKU and in_stock empty and set match=false. If the product exists, set in_stock to the quantity available today in my store (reference all matched SKUs in response). set `match` field true only when the exact product exists and in_stock is at least the requested quantity.
+
+Rows:
+4gfU5	the Trimmer and Blower from Husqvarna in the Husqvarna Compact 435 2ID-D4H Trimmer and Blower line that has tool type grass trimmer, power source petrol, and cutting width 18 cm	4
+3WiNF	the Corded Angle Grinder from DeWalt in the DeWalt Professional DCG 2BH-302 Corded Angle Grinder line that has disc diameter 150 mm and power 1500 W and has disc diameter 125 mm	3
+EdBNN	the Storage Bin and Organizer from Keter in the Keter Compact Stack 99Z-RIS Storage Bin and Organizer line that has storage type stacking box and color family Blue	5
+6t12J	the Cordless Saw and Sander from Makita in the Makita Precision DDF 26V-AVZ Cordless Saw and Sander line that has tool type jigsaw and voltage 36 V	1
+U3Ppb	the Adhesive and Glue from Ceresit in the Ceresit Universal CT OY1-0BK Adhesive and Glue line that has adhesive type mounting adhesive and color family White	6
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- claude
+|   |-- codex
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- os-and-tooling-incidents-and-workarounds.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- os-and-tooling-incidents-and-workarounds.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2024-07-17T20:49:48Z
+[32mAUTO[0m: /bin/id
+user: emp_016
+roles: employee, store_manager, discount_manager, refund_manager, inventory_viewer, fulfillment_viewer, customer_service
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Run a focused SQL query returning employee store path plus candidate product paths/SKUs/properties/inventory for the five described rows. (37404 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH active_store AS (\n  SELECT e.id AS employee_id, e.path AS employee_path, s.id AS store_id, s.path AS store_path, s.name AS store_name\n  FROM employees e\n  JOIN stores s ON s.id = e.store_id\n  WHERE e.id = 'emp_016'\n), requested(rowid, descr, req_qty, brand, series, model, kind_name) AS (\n  VALUES\n    ('4gfU5','Husqvarna Compact 435 2ID-D4H Trimmer and Blower grass trimmer petrol 18 cm',4,'Husqvarna','Compact 435','2ID-D4H','Trimmer and Blower'),\n    ('3WiNF','DeWalt Professional DCG 2BH-302 Corded Angle Grinder disc 150 and 125 power 1500',3,'DeWalt','Professional DCG','2BH-302','Corded Angle Grinder'),\n    ('EdBNN','Keter Compact Stack 99Z-RIS Storage Bin and Organizer stacking box Blue',5,'Keter','Compact Stack','99Z-RIS','Storage Bin and Organizer'),\n    ('6t12J','Makita Precision DDF 26V-AVZ Cordless Saw and Sander jigsaw 36 V',1,'Makita','Precision DDF','26V-AVZ','Cordless Saw and Sander'),\n    ('U3Ppb','Ceresit Universal CT OY1-0BK Adhesive and Glue mounting adhesive White',6,'Ceresit','Universal CT','OY1-0BK','Adhesive and Glue')\n)\nSELECT\n  r.rowid,\n  r.req_qty,\n  ast.employee_id,\n  ast.employee_path,\n  ast.store_id,\n  ast.store_path,\n  p.sku,\n  p.path AS product_path,\n  p.brand,\n  p.series,\n  p.model,\n  pk.name AS kind_name,\n  p.name,\n  pp.key,\n  pp.value_text,\n  pp.value_number,\n  i.available_today\nFROM requested r\nCROSS JOIN active_store ast\nLEFT JOIN products p\n  ON p.brand = r.brand\n AND p.series = r.series\n AND p.model = r.model\nLEFT JOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku\nLEFT JOIN inventory i ON i.store_id = ast.store_id AND i.sku = p.sku\nORDER BY r.rowid, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH active_store AS (
+  SELECT e.id AS employee_id, e.path AS employee_path, s.id AS store_id, s.path AS store_path, s.name AS store_name
+  FROM employees e
+  JOIN stores s ON s.id = e.store_id
+  WHERE e.id = 'emp_016'
+), requested(rowid, descr, req_qty, brand, series, model, kind_name) AS (
+  VALUES
+    ('4gfU5','Husqvarna Compact 435 2ID-D4H Trimmer and Blower grass trimmer petrol 18 cm',4,'Husqvarna','Compact 435','2ID-D4H','Trimmer and Blower'),
+    ('3WiNF','DeWalt Professional DCG 2BH-302 Corded Angle Grinder disc 150 and 125 power 1500',3,'DeWalt','Professional DCG','2BH-302','Corded Angle Grinder'),
+    ('EdBNN','Keter Compact Stack 99Z-RIS Storage Bin and Organizer stacking box Blue',5,'Keter','Compact Stack','99Z-RIS','Storage Bin and Organizer'),
+    ('6t12J','Makita Precision DDF 26V-AVZ Cordless Saw and Sander jigsaw 36 V',1,'Makita','Precision DDF','26V-AVZ','Cordless Saw and Sander'),
+    ('U3Ppb','Ceresit Universal CT OY1-0BK Adhesive and Glue mounting adhesive White',6,'Ceresit','Universal CT','OY1-0BK','Adhesive and Glue')
+)
+SELECT
+  r.rowid,
+  r.req_qty,
+  ast.employee_id,
+  ast.employee_path,
+  ast.store_id,
+  ast.store_path,
+  p.sku,
+  p.path AS product_path,
+  p.brand,
+  p.series,
+  p.model,
+  pk.name AS kind_name,
+  p.name,
+  pp.key,
+  pp.value_text,
+  pp.value_number,
+  i.available_today
+FROM requested r
+CROSS JOIN active_store ast
+LEFT JOIN products p
+  ON p.brand = r.brand
+ AND p.series = r.series
+ AND p.model = r.model
+LEFT JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku
+LEFT JOIN inventory i ON i.store_id = ast.store_id AND i.sku = p.sku
+ORDER BY r.rowid, p.sku, pp.key;
+SQL
+rowid,req_qty,employee_id,employee_path,store_id,store_path,sku,product_path,brand,series,model,kind_name,name,key,value_text,value_number,available_today
+3WiNF,3,emp_016,/proc/employees/emp_016.json,store_graz_lend,/proc/stores/store_graz_lend.json,,,,,,,,,,,
+4gfU5,4,emp_016,/proc/employees/emp_016.json,store_graz_lend,/proc/stores/store_graz_lend.json,,,,,,,,,,,
+6t12J,1,emp_016,/proc/employees/emp_016.json,store_graz_lend,/proc/stores/store_graz_lend.json,,,,,,,,,,,
+EdBNN,5,emp_016,/proc/employees/emp_016.json,store_graz_lend,/proc/stores/store_graz_lend.json,,,,,,,,,,,
+U3Ppb,6,emp_016,/proc/employees/emp_016.json,store_graz_lend,/proc/stores/store_graz_lend.json,,,,,,,,,,,
+Next step_2... Run broader SQL candidate searches by brand and model/name/property text for the five rows. (20614 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH active_store AS (\n  SELECT e.id AS employee_id, e.path AS employee_path, s.id AS store_id, s.path AS store_path\n  FROM employees e\n  JOIN stores s ON s.id = e.store_id\n  WHERE e.id = 'emp_016'\n), candidates AS (\n  SELECT '4gfU5' AS rowid, 4 AS req_qty, p.*\n  FROM products p\n  WHERE p.brand = 'Husqvarna' AND (p.name LIKE '%Trimmer%' OR p.name LIKE '%Blower%' OR p.model LIKE '%2ID%' OR p.series LIKE '%Compact%')\n  UNION ALL\n  SELECT '3WiNF', 3, p.*\n  FROM products p\n  WHERE p.brand = 'DeWalt' AND (p.name LIKE '%Angle Grinder%' OR p.model LIKE '%2BH%' OR p.series LIKE '%Professional%')\n  UNION ALL\n  SELECT 'EdBNN', 5, p.*\n  FROM products p\n  WHERE p.brand = 'Keter' AND (p.name LIKE '%Storage Bin%' OR p.name LIKE '%Organizer%' OR p.model LIKE '%99Z%' OR p.series LIKE '%Stack%')\n  UNION ALL\n  SELECT '6t12J', 1, p.*\n  FROM products p\n  WHERE p.brand = 'Makita' AND (p.name LIKE '%Saw%' OR p.name LIKE '%Sander%' OR p.model LIKE '%26V%' OR p.series LIKE '%Precision%')\n  UNION ALL\n  SELECT 'U3Ppb', 6, p.*\n  FROM products p\n  WHERE p.brand = 'Ceresit' AND (p.name LIKE '%Adhesive%' OR p.name LIKE '%Glue%' OR p.model LIKE '%OY1%' OR p.series LIKE '%Universal%')\n)\nSELECT\n  c.rowid,\n  c.req_qty,\n  ast.employee_path,\n  ast.store_path,\n  c.sku,\n  c.path AS product_path,\n  c.brand,\n  c.series,\n  c.model,\n  pk.name AS kind_name,\n  c.name,\n  pp.key,\n  pp.value_text,\n  pp.value_number,\n  i.available_today\nFROM candidates c\nCROSS JOIN active_store ast\nLEFT JOIN product_kinds pk ON pk.id = c.kind_id\nLEFT JOIN product_properties pp ON pp.sku = c.sku\nLEFT JOIN inventory i ON i.store_id = ast.store_id AND i.sku = c.sku\nORDER BY c.rowid, c.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH active_store AS (
+  SELECT e.id AS employee_id, e.path AS employee_path, s.id AS store_id, s.path AS store_path
+  FROM employees e
+  JOIN stores s ON s.id = e.store_id
+  WHERE e.id = 'emp_016'
+), candidates AS (
+  SELECT '4gfU5' AS rowid, 4 AS req_qty, p.*
+  FROM products p
+  WHERE p.brand = 'Husqvarna' AND (p.name LIKE '%Trimmer%' OR p.name LIKE '%Blower%' OR p.model LIKE '%2ID%' OR p.series LIKE '%Compact%')
+  UNION ALL
+  SELECT '3WiNF', 3, p.*
+  FROM products p
+  WHERE p.brand = 'DeWalt' AND (p.name LIKE '%Angle Grinder%' OR p.model LIKE '%2BH%' OR p.series LIKE '%Professional%')
+  UNION ALL
+  SELECT 'EdBNN', 5, p.*
+  FROM products p
+  WHERE p.brand = 'Keter' AND (p.name LIKE '%Storage Bin%' OR p.name LIKE '%Organizer%' OR p.model LIKE '%99Z%' OR p.series LIKE '%Stack%')
+  UNION ALL
+  SELECT '6t12J', 1, p.*
+  FROM products p
+  WHERE p.brand = 'Makita' AND (p.name LIKE '%Saw%' OR p.name LIKE '%Sander%' OR p.model LIKE '%26V%' OR p.series LIKE '%Precision%')
+  UNION ALL
+  SELECT 'U3Ppb', 6, p.*
+  FROM products p
+  WHERE p.brand = 'Ceresit' AND (p.name LIKE '%Adhesive%' OR p.name LIKE '%Glue%' OR p.model LIKE '%OY1%' OR p.series LIKE '%Universal%')
+)
+SELECT
+  c.rowid,
+  c.req_qty,
+  ast.employee_path,
+  ast.store_path,
+  c.sku,
+  c.path AS product_path,
+  c.brand,
+  c.series,
+  c.model,
+  pk.name AS kind_name,
+  c.name,
+  pp.key,
+  pp.value_text,
+  pp.value_number,
+  i.available_today
+FROM candidates c
+CROSS JOIN active_store ast
+LEFT JOIN product_kinds pk ON pk.id = c.kind_id
+LEFT JOIN product_properties pp ON pp.sku = c.sku
+LEFT JOIN inventory i ON i.store_id = ast.store_id AND i.sku = c.sku
+ORDER BY c.rowid, c.sku, pp.key;
+SQL
+rowid,req_qty,employee_path,store_path,sku,product_path,brand,series,model,kind_name,name,key,value_text,value_number,available_today
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-16AS57H5,/proc/catalog/power_tools/corded_angle_grinder/PWR-16AS57H5.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 150mm 2200W,disc_diameter_mm,150,150,6
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-16AS57H5,/proc/catalog/power_tools/corded_angle_grinder/PWR-16AS57H5.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 150mm 2200W,power_source,corded,,6
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-16AS57H5,/proc/catalog/power_tools/corded_angle_grinder/PWR-16AS57H5.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 150mm 2200W,power_w,2200,2200,6
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-16AS57H5,/proc/catalog/power_tools/corded_angle_grinder/PWR-16AS57H5.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 150mm 2200W,speed_control,variable speed,,6
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-16AS57H5,/proc/catalog/power_tools/corded_angle_grinder/PWR-16AS57H5.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 150mm 2200W,voltage_v,230,230,6
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1DHWI8JI,/proc/catalog/power_tools/corded_angle_grinder/PWR-1DHWI8JI.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 125mm 650W,disc_diameter_mm,125,125,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1DHWI8JI,/proc/catalog/power_tools/corded_angle_grinder/PWR-1DHWI8JI.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 125mm 650W,power_source,corded,,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1DHWI8JI,/proc/catalog/power_tools/corded_angle_grinder/PWR-1DHWI8JI.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 125mm 650W,power_w,650,650,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1DHWI8JI,/proc/catalog/power_tools/corded_angle_grinder/PWR-1DHWI8JI.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 125mm 650W,speed_control,variable speed,,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1DHWI8JI,/proc/catalog/power_tools/corded_angle_grinder/PWR-1DHWI8JI.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 125mm 650W,voltage_v,230,230,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1E761LR2,/proc/catalog/power_tools/corded_angle_grinder/PWR-1E761LR2.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 125mm 850W,disc_diameter_mm,125,125,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1E761LR2,/proc/catalog/power_tools/corded_angle_grinder/PWR-1E761LR2.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 125mm 850W,power_source,corded,,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1E761LR2,/proc/catalog/power_tools/corded_angle_grinder/PWR-1E761LR2.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 125mm 850W,power_w,850,850,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1E761LR2,/proc/catalog/power_tools/corded_angle_grinder/PWR-1E761LR2.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 125mm 850W,speed_control,variable speed,,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1E761LR2,/proc/catalog/power_tools/corded_angle_grinder/PWR-1E761LR2.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 125mm 850W,voltage_v,230,230,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1H6JLEE9,/proc/catalog/power_tools/corded_angle_grinder/PWR-1H6JLEE9.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 230mm 850W,disc_diameter_mm,230,230,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1H6JLEE9,/proc/catalog/power_tools/corded_angle_grinder/PWR-1H6JLEE9.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 230mm 850W,power_source,corded,,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1H6JLEE9,/proc/catalog/power_tools/corded_angle_grinder/PWR-1H6JLEE9.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 230mm 850W,power_w,850,850,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1H6JLEE9,/proc/catalog/power_tools/corded_angle_grinder/PWR-1H6JLEE9.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 230mm 850W,speed_control,variable speed,,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1H6JLEE9,/proc/catalog/power_tools/corded_angle_grinder/PWR-1H6JLEE9.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 230mm 850W,voltage_v,230,230,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1Y7EG1OE,/proc/catalog/power_tools/corded_angle_grinder/PWR-1Y7EG1OE.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 150mm 1500W,disc_diameter_mm,150,150,8
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1Y7EG1OE,/proc/catalog/power_tools/corded_angle_grinder/PWR-1Y7EG1OE.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 150mm 1500W,power_source,corded,,8
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1Y7EG1OE,/proc/catalog/power_tools/corded_angle_grinder/PWR-1Y7EG1OE.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 150mm 1500W,power_w,1500,1500,8
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1Y7EG1OE,/proc/catalog/power_tools/corded_angle_grinder/PWR-1Y7EG1OE.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 150mm 1500W,speed_control,variable speed,,8
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-1Y7EG1OE,/proc/catalog/power_tools/corded_angle_grinder/PWR-1Y7EG1OE.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 150mm 1500W,voltage_v,230,230,8
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-2E0RRPMV,/proc/catalog/power_tools/corded_angle_grinder/PWR-2E0RRPMV.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 115mm 1500W,disc_diameter_mm,115,115,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-2E0RRPMV,/proc/catalog/power_tools/corded_angle_grinder/PWR-2E0RRPMV.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 115mm 1500W,power_source,corded,,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-2E0RRPMV,/proc/catalog/power_tools/corded_angle_grinder/PWR-2E0RRPMV.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 115mm 1500W,power_w,1500,1500,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-2E0RRPMV,/proc/catalog/power_tools/corded_angle_grinder/PWR-2E0RRPMV.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 115mm 1500W,speed_control,variable speed,,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-2E0RRPMV,/proc/catalog/power_tools/corded_angle_grinder/PWR-2E0RRPMV.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 115mm 1500W,voltage_v,230,230,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-2PE6PW65,/proc/catalog/power_tools/corded_angle_grinder/PWR-2PE6PW65.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 180mm 850W,disc_diameter_mm,180,180,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-2PE6PW65,/proc/catalog/power_tools/corded_angle_grinder/PWR-2PE6PW65.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 180mm 850W,power_source,corded,,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-2PE6PW65,/proc/catalog/power_tools/corded_angle_grinder/PWR-2PE6PW65.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 180mm 850W,power_w,850,850,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-2PE6PW65,/proc/catalog/power_tools/corded_angle_grinder/PWR-2PE6PW65.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 180mm 850W,speed_control,variable speed,,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-2PE6PW65,/proc/catalog/power_tools/corded_angle_grinder/PWR-2PE6PW65.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 180mm 850W,voltage_v,230,230,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-2VGIHQXT,/proc/catalog/power_tools/corded_angle_grinder/PWR-2VGIHQXT.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 125mm 1100W,disc_diameter_mm,125,125,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-2VGIHQXT,/proc/catalog/power_tools/corded_angle_grinder/PWR-2VGIHQXT.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 125mm 1100W,power_source,corded,,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-2VGIHQXT,/proc/catalog/power_tools/corded_angle_grinder/PWR-2VGIHQXT.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 125mm 1100W,power_w,1100,1100,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-2VGIHQXT,/proc/catalog/power_tools/corded_angle_grinder/PWR-2VGIHQXT.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 125mm 1100W,speed_control,variable speed,,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-2VGIHQXT,/proc/catalog/power_tools/corded_angle_grinder/PWR-2VGIHQXT.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 125mm 1100W,voltage_v,230,230,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-CZKSSFIW,/proc/catalog/power_tools/corded_angle_grinder/PWR-CZKSSFIW.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 180mm 2200W,disc_diameter_mm,180,180,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-CZKSSFIW,/proc/catalog/power_tools/corded_angle_grinder/PWR-CZKSSFIW.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 180mm 2200W,power_source,corded,,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-CZKSSFIW,/proc/catalog/power_tools/corded_angle_grinder/PWR-CZKSSFIW.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 180mm 2200W,power_w,2200,2200,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-CZKSSFIW,/proc/catalog/power_tools/corded_angle_grinder/PWR-CZKSSFIW.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 180mm 2200W,speed_control,variable speed,,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-CZKSSFIW,/proc/catalog/power_tools/corded_angle_grinder/PWR-CZKSSFIW.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 180mm 2200W,voltage_v,230,230,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-PFV987VW,/proc/catalog/power_tools/corded_angle_grinder/PWR-PFV987VW.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 230mm 1100W,disc_diameter_mm,230,230,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-PFV987VW,/proc/catalog/power_tools/corded_angle_grinder/PWR-PFV987VW.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 230mm 1100W,power_source,corded,,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-PFV987VW,/proc/catalog/power_tools/corded_angle_grinder/PWR-PFV987VW.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 230mm 1100W,power_w,1100,1100,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-PFV987VW,/proc/catalog/power_tools/corded_angle_grinder/PWR-PFV987VW.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 230mm 1100W,speed_control,variable speed,,
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-PFV987VW,/proc/catalog/power_tools/corded_angle_grinder/PWR-PFV987VW.json,DeWalt,Professional,DCG 2BH-302,Corded Angle Grinder,DeWalt Professional DCG 2BH-302 Corded Angle Grinder 230mm 1100W,voltage_v,230,230,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-11GTINJY,/proc/catalog/garden_tools/trimmers_blowers/GRD-11GTINJY.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower hedge trimmer battery 24cm,battery_platform,18v-system,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-11GTINJY,/proc/catalog/garden_tools/trimmers_blowers/GRD-11GTINJY.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower hedge trimmer battery 24cm,cutting_width_cm,24,24,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-11GTINJY,/proc/catalog/garden_tools/trimmers_blowers/GRD-11GTINJY.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower hedge trimmer battery 24cm,power_source,battery,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-11GTINJY,/proc/catalog/garden_tools/trimmers_blowers/GRD-11GTINJY.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower hedge trimmer battery 24cm,tool_type,hedge trimmer,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-18JL5BCY,/proc/catalog/garden_tools/trimmers_blowers/GRD-18JL5BCY.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower leaf blower battery 18cm,battery_platform,18v-system,,5
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-18JL5BCY,/proc/catalog/garden_tools/trimmers_blowers/GRD-18JL5BCY.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower leaf blower battery 18cm,cutting_width_cm,18,18,5
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-18JL5BCY,/proc/catalog/garden_tools/trimmers_blowers/GRD-18JL5BCY.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower leaf blower battery 18cm,power_source,battery,,5
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-18JL5BCY,/proc/catalog/garden_tools/trimmers_blowers/GRD-18JL5BCY.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower leaf blower battery 18cm,tool_type,leaf blower,,5
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-1KVEBYM1,/proc/catalog/garden_tools/trimmers_blowers/GRD-1KVEBYM1.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower leaf blower battery 24cm,battery_platform,18v-system,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-1KVEBYM1,/proc/catalog/garden_tools/trimmers_blowers/GRD-1KVEBYM1.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower leaf blower battery 24cm,cutting_width_cm,24,24,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-1KVEBYM1,/proc/catalog/garden_tools/trimmers_blowers/GRD-1KVEBYM1.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower leaf blower battery 24cm,power_source,battery,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-1KVEBYM1,/proc/catalog/garden_tools/trimmers_blowers/GRD-1KVEBYM1.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower leaf blower battery 24cm,tool_type,leaf blower,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-26Q4XIJH,/proc/catalog/garden_tools/trimmers_blowers/GRD-26Q4XIJH.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower grass trimmer battery 42cm,battery_platform,18v-system,,1
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-26Q4XIJH,/proc/catalog/garden_tools/trimmers_blowers/GRD-26Q4XIJH.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower grass trimmer battery 42cm,cutting_width_cm,42,42,1
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-26Q4XIJH,/proc/catalog/garden_tools/trimmers_blowers/GRD-26Q4XIJH.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower grass trimmer battery 42cm,power_source,battery,,1
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-26Q4XIJH,/proc/catalog/garden_tools/trimmers_blowers/GRD-26Q4XIJH.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower grass trimmer battery 42cm,tool_type,grass trimmer,,1
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-279IXD8Z,/proc/catalog/garden_tools/trimmers_blowers/GRD-279IXD8Z.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower hedge trimmer battery 42cm,battery_platform,18v-system,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-279IXD8Z,/proc/catalog/garden_tools/trimmers_blowers/GRD-279IXD8Z.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower hedge trimmer battery 42cm,cutting_width_cm,42,42,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-279IXD8Z,/proc/catalog/garden_tools/trimmers_blowers/GRD-279IXD8Z.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower hedge trimmer battery 42cm,power_source,battery,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-279IXD8Z,/proc/catalog/garden_tools/trimmers_blowers/GRD-279IXD8Z.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower hedge trimmer battery 42cm,tool_type,hedge trimmer,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-2DFX9GHY,/proc/catalog/garden_tools/trimmers_blowers/GRD-2DFX9GHY.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower water pump corded 32cm,battery_platform,corded,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-2DFX9GHY,/proc/catalog/garden_tools/trimmers_blowers/GRD-2DFX9GHY.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower water pump corded 32cm,cutting_width_cm,32,32,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-2DFX9GHY,/proc/catalog/garden_tools/trimmers_blowers/GRD-2DFX9GHY.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower water pump corded 32cm,power_source,corded,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-2DFX9GHY,/proc/catalog/garden_tools/trimmers_blowers/GRD-2DFX9GHY.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower water pump corded 32cm,tool_type,water pump,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-2MR966Q0,/proc/catalog/garden_tools/trimmers_blowers/GRD-2MR966Q0.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower hedge trimmer petrol 42cm,battery_platform,petrol,,10
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-2MR966Q0,/proc/catalog/garden_tools/trimmers_blowers/GRD-2MR966Q0.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower hedge trimmer petrol 42cm,cutting_width_cm,42,42,10
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-2MR966Q0,/proc/catalog/garden_tools/trimmers_blowers/GRD-2MR966Q0.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower hedge trimmer petrol 42cm,power_source,petrol,,10
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-2MR966Q0,/proc/catalog/garden_tools/trimmers_blowers/GRD-2MR966Q0.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower hedge trimmer petrol 42cm,tool_type,hedge trimmer,,10
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-2RYU8TMY,/proc/catalog/garden_tools/trimmers_blowers/GRD-2RYU8TMY.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower grass trimmer petrol 18cm,battery_platform,petrol,,4
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-2RYU8TMY,/proc/catalog/garden_tools/trimmers_blowers/GRD-2RYU8TMY.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower grass trimmer petrol 18cm,cutting_width_cm,18,18,4
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-2RYU8TMY,/proc/catalog/garden_tools/trimmers_blowers/GRD-2RYU8TMY.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower grass trimmer petrol 18cm,power_source,petrol,,4
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-2RYU8TMY,/proc/catalog/garden_tools/trimmers_blowers/GRD-2RYU8TMY.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower grass trimmer petrol 18cm,tool_type,grass trimmer,,4
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-G1I9PG9Q,/proc/catalog/garden_tools/trimmers_blowers/GRD-G1I9PG9Q.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower pressure sprayer battery 18cm,battery_platform,36v-system,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-G1I9PG9Q,/proc/catalog/garden_tools/trimmers_blowers/GRD-G1I9PG9Q.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower pressure sprayer battery 18cm,cutting_width_cm,18,18,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-G1I9PG9Q,/proc/catalog/garden_tools/trimmers_blowers/GRD-G1I9PG9Q.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower pressure sprayer battery 18cm,power_source,battery,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-G1I9PG9Q,/proc/catalog/garden_tools/trimmers_blowers/GRD-G1I9PG9Q.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower pressure sprayer battery 18cm,tool_type,pressure sprayer,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-SOLPPB8B,/proc/catalog/garden_tools/trimmers_blowers/GRD-SOLPPB8B.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower water pump petrol 24cm,battery_platform,petrol,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-SOLPPB8B,/proc/catalog/garden_tools/trimmers_blowers/GRD-SOLPPB8B.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower water pump petrol 24cm,cutting_width_cm,24,24,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-SOLPPB8B,/proc/catalog/garden_tools/trimmers_blowers/GRD-SOLPPB8B.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower water pump petrol 24cm,power_source,petrol,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-SOLPPB8B,/proc/catalog/garden_tools/trimmers_blowers/GRD-SOLPPB8B.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower water pump petrol 24cm,tool_type,water pump,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-V9AHE1NO,/proc/catalog/garden_tools/trimmers_blowers/GRD-V9AHE1NO.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower grass trimmer petrol 42cm,battery_platform,petrol,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-V9AHE1NO,/proc/catalog/garden_tools/trimmers_blowers/GRD-V9AHE1NO.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower grass trimmer petrol 42cm,cutting_width_cm,42,42,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-V9AHE1NO,/proc/catalog/garden_tools/trimmers_blowers/GRD-V9AHE1NO.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower grass trimmer petrol 42cm,power_source,petrol,,
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-V9AHE1NO,/proc/catalog/garden_tools/trimmers_blowers/GRD-V9AHE1NO.json,Husqvarna,Compact,435 2ID-D4H,Trimmer and Blower,Husqvarna Compact 435 2ID-D4H Trimmer and Blower grass trimmer petrol 42cm,tool_type,grass trimmer,,
+6t12J,1,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-15EID2UX,/proc/catalog/power_tools/cordless_saw_sander/PWR-15EID2UX.json,Makita,Precision,DDF 26V-AVZ,Cordless Saw and Sander,Makita Precision DDF 26V-AVZ Cordless Saw and Sander orbital sander 18V case,battery_platform,18v-system,,
+6t12J,1,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-15EID2UX,/proc/catalog/power_tools/cordless_saw_sander/PWR-15EID2UX.json,Makita,Precision,DDF 26V-AVZ,Cordless Saw and Sander,Makita Precision DDF 26V-AVZ Cordless Saw and Sander orbital sander 18V case,kit_contents,case,,
+6t12J,1,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-15EID2UX,/proc/catalog/power_tools/cordless_saw_sander/PWR-15EID2UX.json,Makita,Precision,DDF 26V-AVZ,Cordless Saw and Sander,Makita Precision DDF 26V-AVZ Cordless Saw and Sander orbital sander 18V case,power_source,battery,,
+6t12J,1,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-15EID2UX,/proc/catalog/power_tools/cordless_saw_sander/PWR-15EID2UX.json,Makita,Precision,DDF 26V-AVZ,Cordless Saw and Sander,Makita Precision DDF 26V-AVZ Cordless Saw and Sander orbital sander 18V case,tool_type,orbital sander,,
+6t12J,1,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-15EID2UX,/proc/catalog/power_tools/cordless_saw_sander/PWR-15EID2UX.json,Makita,Precision,DDF 26V-AVZ,Cordless Saw and Sander,Makita Precision DDF 26V-AVZ Cordless Saw and Sander orbital sander 18V case,voltage_v,18,18,
+6t12J,1,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-19KDUD1W,/proc/catalog/power_tools/cordless_saw_sander/PWR-19KDUD1W.json,Makita,Precision,DDF 26V-AVZ,Cordless Saw and Sander,Makita Precision DDF 26V-AVZ Cordless Saw and Sander jigsaw 12V case,battery_platform,12v-system,,
+warning: result truncated at 100 rows
+Next step_3... Run focused SQL with property predicates for exact described variants and same-store available_today. (34233 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH active_store AS (\n  SELECT e.id AS employee_id, e.path AS employee_path, s.id AS store_id, s.path AS store_path\n  FROM employees e\n  JOIN stores s ON s.id = e.store_id\n  WHERE e.id = 'emp_016'\n), requested(rowid, req_qty, brand, series, model, kind_name) AS (\n  VALUES\n    ('4gfU5',4,'Husqvarna','Compact','435 2ID-D4H','Trimmer and Blower'),\n    ('3WiNF',3,'DeWalt','Professional','DCG 2BH-302','Corded Angle Grinder'),\n    ('EdBNN',5,'Keter','Compact Stack','99Z-RIS','Storage Bin and Organizer'),\n    ('6t12J',1,'Makita','Precision','DDF 26V-AVZ','Cordless Saw and Sander'),\n    ('U3Ppb',6,'Ceresit','Universal CT','OY1-0BK','Adhesive and Glue')\n), exact_candidates AS (\n  SELECT r.rowid, r.req_qty, p.sku, p.path AS product_path\n  FROM requested r\n  JOIN products p ON p.brand = r.brand AND p.series = r.series AND p.model = r.model\n  JOIN product_kinds pk ON pk.id = p.kind_id AND pk.name = r.kind_name\n  WHERE (\n    r.rowid = '4gfU5'\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='tool_type' AND pp.value_text='grass trimmer')\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='power_source' AND pp.value_text='petrol')\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='cutting_width_cm' AND pp.value_number=18)\n  ) OR (\n    r.rowid = '3WiNF'\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='disc_diameter_mm' AND pp.value_number=150)\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='power_w' AND pp.value_number=1500)\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='disc_diameter_mm' AND pp.value_number=125)\n  ) OR (\n    r.rowid = 'EdBNN'\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='storage_type' AND pp.value_text='stacking box')\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='color_family' AND pp.value_text='Blue')\n  ) OR (\n    r.rowid = '6t12J'\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='tool_type' AND pp.value_text='jigsaw')\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='voltage_v' AND pp.value_number=36)\n  ) OR (\n    r.rowid = 'U3Ppb'\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='adhesive_type' AND pp.value_text='mounting adhesive')\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='color_family' AND pp.value_text='White')\n  )\n)\nSELECT\n  r.rowid,\n  r.req_qty,\n  ast.employee_path,\n  ast.store_path,\n  ec.sku,\n  ec.product_path,\n  COALESCE(i.available_today, 0) AS available_today,\n  GROUP_CONCAT(pp.key || '=' || pp.value_text, '; ') AS properties\nFROM requested r\nCROSS JOIN active_store ast\nLEFT JOIN exact_candidates ec ON ec.rowid = r.rowid\nLEFT JOIN inventory i ON i.store_id = ast.store_id AND i.sku = ec.sku\nLEFT JOIN product_properties pp ON pp.sku = ec.sku\nGROUP BY r.rowid, r.req_qty, ast.employee_path, ast.store_path, ec.sku, ec.product_path, i.available_today\nORDER BY CASE r.rowid WHEN '4gfU5' THEN 1 WHEN '3WiNF' THEN 2 WHEN 'EdBNN' THEN 3 WHEN '6t12J' THEN 4 WHEN 'U3Ppb' THEN 5 END;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH active_store AS (
+  SELECT e.id AS employee_id, e.path AS employee_path, s.id AS store_id, s.path AS store_path
+  FROM employees e
+  JOIN stores s ON s.id = e.store_id
+  WHERE e.id = 'emp_016'
+), requested(rowid, req_qty, brand, series, model, kind_name) AS (
+  VALUES
+    ('4gfU5',4,'Husqvarna','Compact','435 2ID-D4H','Trimmer and Blower'),
+    ('3WiNF',3,'DeWalt','Professional','DCG 2BH-302','Corded Angle Grinder'),
+    ('EdBNN',5,'Keter','Compact Stack','99Z-RIS','Storage Bin and Organizer'),
+    ('6t12J',1,'Makita','Precision','DDF 26V-AVZ','Cordless Saw and Sander'),
+    ('U3Ppb',6,'Ceresit','Universal CT','OY1-0BK','Adhesive and Glue')
+), exact_candidates AS (
+  SELECT r.rowid, r.req_qty, p.sku, p.path AS product_path
+  FROM requested r
+  JOIN products p ON p.brand = r.brand AND p.series = r.series AND p.model = r.model
+  JOIN product_kinds pk ON pk.id = p.kind_id AND pk.name = r.kind_name
+  WHERE (
+    r.rowid = '4gfU5'
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='tool_type' AND pp.value_text='grass trimmer')
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='power_source' AND pp.value_text='petrol')
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='cutting_width_cm' AND pp.value_number=18)
+  ) OR (
+    r.rowid = '3WiNF'
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='disc_diameter_mm' AND pp.value_number=150)
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='power_w' AND pp.value_number=1500)
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='disc_diameter_mm' AND pp.value_number=125)
+  ) OR (
+    r.rowid = 'EdBNN'
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='storage_type' AND pp.value_text='stacking box')
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='color_family' AND pp.value_text='Blue')
+  ) OR (
+    r.rowid = '6t12J'
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='tool_type' AND pp.value_text='jigsaw')
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='voltage_v' AND pp.value_number=36)
+  ) OR (
+    r.rowid = 'U3Ppb'
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='adhesive_type' AND pp.value_text='mounting adhesive')
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='color_family' AND pp.value_text='White')
+  )
+)
+SELECT
+  r.rowid,
+  r.req_qty,
+  ast.employee_path,
+  ast.store_path,
+  ec.sku,
+  ec.product_path,
+  COALESCE(i.available_today, 0) AS available_today,
+  GROUP_CONCAT(pp.key || '=' || pp.value_text, '; ') AS properties
+FROM requested r
+CROSS JOIN active_store ast
+LEFT JOIN exact_candidates ec ON ec.rowid = r.rowid
+LEFT JOIN inventory i ON i.store_id = ast.store_id AND i.sku = ec.sku
+LEFT JOIN product_properties pp ON pp.sku = ec.sku
+GROUP BY r.rowid, r.req_qty, ast.employee_path, ast.store_path, ec.sku, ec.product_path, i.available_today
+ORDER BY CASE r.rowid WHEN '4gfU5' THEN 1 WHEN '3WiNF' THEN 2 WHEN 'EdBNN' THEN 3 WHEN '6t12J' THEN 4 WHEN 'U3Ppb' THEN 5 END;
+SQL
+rowid,req_qty,employee_path,store_path,sku,product_path,available_today,properties
+4gfU5,4,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,GRD-2RYU8TMY,/proc/catalog/garden_tools/trimmers_blowers/GRD-2RYU8TMY.json,4,battery_platform=petrol; cutting_width_cm=18; power_source=petrol; tool_type=grass trimmer
+3WiNF,3,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,,,0,
+EdBNN,5,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,,,0,
+6t12J,1,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,PWR-B5QBGC0T,/proc/catalog/power_tools/cordless_saw_sander/PWR-B5QBGC0T.json,0,battery_platform=xl-system; kit_contents=bare tool; power_source=battery; tool_type=jigsaw; voltage_v=36
+U3Ppb,6,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,,,0,
+Next step_4... Run focused SQL for Keter Compact Stack 99Z-RIS and Ceresit Universal CT OY1-0BK candidate SKUs, properties, and same-store availability. (24776 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH active_store AS (\n  SELECT e.path AS employee_path, s.id AS store_id, s.path AS store_path\n  FROM employees e\n  JOIN stores s ON s.id = e.store_id\n  WHERE e.id = 'emp_016'\n), candidates AS (\n  SELECT 'EdBNN' AS rowid, 5 AS req_qty, p.*\n  FROM products p\n  JOIN product_kinds pk ON pk.id = p.kind_id\n  WHERE p.brand = 'Keter'\n    AND (p.series LIKE '%Compact%' OR p.series LIKE '%Stack%' OR p.model LIKE '%99Z%' OR p.name LIKE '%Storage Bin%' OR p.name LIKE '%Organizer%')\n  UNION ALL\n  SELECT 'U3Ppb' AS rowid, 6 AS req_qty, p.*\n  FROM products p\n  JOIN product_kinds pk ON pk.id = p.kind_id\n  WHERE p.brand = 'Ceresit'\n    AND (p.series LIKE '%Universal%' OR p.model LIKE '%OY1%' OR p.name LIKE '%Adhesive%' OR p.name LIKE '%Glue%')\n)\nSELECT\n  c.rowid,\n  c.req_qty,\n  ast.employee_path,\n  ast.store_path,\n  c.sku,\n  c.path AS product_path,\n  c.brand,\n  c.series,\n  c.model,\n  pk.name AS kind_name,\n  c.name,\n  COALESCE(i.available_today,0) AS available_today,\n  GROUP_CONCAT(pp.key || '=' || pp.value_text, '; ') AS properties\nFROM candidates c\nCROSS JOIN active_store ast\nJOIN product_kinds pk ON pk.id = c.kind_id\nLEFT JOIN inventory i ON i.store_id = ast.store_id AND i.sku = c.sku\nLEFT JOIN product_properties pp ON pp.sku = c.sku\nGROUP BY c.rowid, c.req_qty, ast.employee_path, ast.store_path, c.sku, c.path, c.brand, c.series, c.model, pk.name, c.name, i.available_today\nORDER BY c.rowid, c.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH active_store AS (
+  SELECT e.path AS employee_path, s.id AS store_id, s.path AS store_path
+  FROM employees e
+  JOIN stores s ON s.id = e.store_id
+  WHERE e.id = 'emp_016'
+), candidates AS (
+  SELECT 'EdBNN' AS rowid, 5 AS req_qty, p.*
+  FROM products p
+  JOIN product_kinds pk ON pk.id = p.kind_id
+  WHERE p.brand = 'Keter'
+    AND (p.series LIKE '%Compact%' OR p.series LIKE '%Stack%' OR p.model LIKE '%99Z%' OR p.name LIKE '%Storage Bin%' OR p.name LIKE '%Organizer%')
+  UNION ALL
+  SELECT 'U3Ppb' AS rowid, 6 AS req_qty, p.*
+  FROM products p
+  JOIN product_kinds pk ON pk.id = p.kind_id
+  WHERE p.brand = 'Ceresit'
+    AND (p.series LIKE '%Universal%' OR p.model LIKE '%OY1%' OR p.name LIKE '%Adhesive%' OR p.name LIKE '%Glue%')
+)
+SELECT
+  c.rowid,
+  c.req_qty,
+  ast.employee_path,
+  ast.store_path,
+  c.sku,
+  c.path AS product_path,
+  c.brand,
+  c.series,
+  c.model,
+  pk.name AS kind_name,
+  c.name,
+  COALESCE(i.available_today,0) AS available_today,
+  GROUP_CONCAT(pp.key || '=' || pp.value_text, '; ') AS properties
+FROM candidates c
+CROSS JOIN active_store ast
+JOIN product_kinds pk ON pk.id = c.kind_id
+LEFT JOIN inventory i ON i.store_id = ast.store_id AND i.sku = c.sku
+LEFT JOIN product_properties pp ON pp.sku = c.sku
+GROUP BY c.rowid, c.req_qty, ast.employee_path, ast.store_path, c.sku, c.path, c.brand, c.series, c.model, pk.name, c.name, i.available_today
+ORDER BY c.rowid, c.sku;
+SQL
+rowid,req_qty,employee_path,store_path,sku,product_path,brand,series,model,kind_name,name,available_today,properties
+EdBNN,5,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,STO-1FDFK3XJ,/proc/catalog/storage/bins_organizers/STO-1FDFK3XJ.json,Keter,Compact,Stack 99Z-RIS,Storage Bin and Organizer,Keter Compact Stack 99Z-RIS Storage Bin and Organizer organizer 18l Purple,0,color_family=purple; material=polypropylene; stackable=system only; storage_type=organizer; volume_l=18
+EdBNN,5,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,STO-1RRB2B4R,/proc/catalog/storage/bins_organizers/STO-1RRB2B4R.json,Keter,Compact,Stack 99Z-RIS,Storage Bin and Organizer,Keter Compact Stack 99Z-RIS Storage Bin and Organizer organizer 3l Gray,0,color_family=gray; material=polypropylene; stackable=yes; storage_type=organizer; volume_l=3
+EdBNN,5,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,STO-2MMQ52RL,/proc/catalog/storage/bins_organizers/STO-2MMQ52RL.json,Keter,Compact,Stack 99Z-RIS,Storage Bin and Organizer,Keter Compact Stack 99Z-RIS Storage Bin and Organizer organizer 8l Red,5,color_family=red; material=polypropylene; stackable=yes; storage_type=organizer; volume_l=8
+EdBNN,5,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,STO-2OLNYNLB,/proc/catalog/storage/bins_organizers/STO-2OLNYNLB.json,Keter,Compact,Stack 99Z-RIS,Storage Bin and Organizer,Keter Compact Stack 99Z-RIS Storage Bin and Organizer storage bin 8l Gray,0,color_family=gray; material=polypropylene; stackable=yes; storage_type=storage bin; volume_l=8
+EdBNN,5,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,STO-2TX3KZDK,/proc/catalog/storage/bins_organizers/STO-2TX3KZDK.json,Keter,Compact,Stack 99Z-RIS,Storage Bin and Organizer,Keter Compact Stack 99Z-RIS Storage Bin and Organizer storage bin 3l Gray,0,color_family=gray; material=polypropylene; stackable=yes; storage_type=storage bin; volume_l=3
+EdBNN,5,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,STO-2YADCO1L,/proc/catalog/storage/bins_organizers/STO-2YADCO1L.json,Keter,Compact,Stack 99Z-RIS,Storage Bin and Organizer,Keter Compact Stack 99Z-RIS Storage Bin and Organizer organizer 25l Red,0,color_family=red; material=polypropylene; stackable=system only; storage_type=organizer; volume_l=25
+EdBNN,5,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,STO-3SS6BXJA,/proc/catalog/storage/bins_organizers/STO-3SS6BXJA.json,Keter,Compact,Stack 99Z-RIS,Storage Bin and Organizer,Keter Compact Stack 99Z-RIS Storage Bin and Organizer stacking box 40l Blue,3,color_family=blue; material=polypropylene; stackable=system only; storage_type=stacking box; volume_l=40
+EdBNN,5,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,STO-3TFQFVTE,/proc/catalog/storage/bins_organizers/STO-3TFQFVTE.json,Keter,Compact,Stack 99Z-RIS,Storage Bin and Organizer,Keter Compact Stack 99Z-RIS Storage Bin and Organizer parts case 25l Blue,0,color_family=blue; material=polypropylene; stackable=system only; storage_type=parts case; volume_l=25
+EdBNN,5,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,STO-6YYD02TA,/proc/catalog/storage/bins_organizers/STO-6YYD02TA.json,Keter,Compact,Stack 99Z-RIS,Storage Bin and Organizer,Keter Compact Stack 99Z-RIS Storage Bin and Organizer stacking box 8l Green,0,color_family=green; material=polypropylene; stackable=no; storage_type=stacking box; volume_l=8
+EdBNN,5,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,STO-8SWXO8E2,/proc/catalog/storage/bins_organizers/STO-8SWXO8E2.json,Keter,Compact,Stack 99Z-RIS,Storage Bin and Organizer,Keter Compact Stack 99Z-RIS Storage Bin and Organizer organizer 12l Clear,2,color_family=clear; material=polypropylene; stackable=yes; storage_type=organizer; volume_l=12
+EdBNN,5,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,STO-E203T9GV,/proc/catalog/storage/bins_organizers/STO-E203T9GV.json,Keter,Compact,Stack 99Z-RIS,Storage Bin and Organizer,Keter Compact Stack 99Z-RIS Storage Bin and Organizer storage bin 12l Red,0,color_family=red; material=polypropylene; stackable=yes; storage_type=storage bin; volume_l=12
+EdBNN,5,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,STO-EKLVV6QG,/proc/catalog/storage/bins_organizers/STO-EKLVV6QG.json,Keter,Compact,Stack 99Z-RIS,Storage Bin and Organizer,Keter Compact Stack 99Z-RIS Storage Bin and Organizer stacking box 25l Red,0,color_family=red; material=polypropylene; stackable=yes; storage_type=stacking box; volume_l=25
+U3Ppb,6,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,ADH-17TOZTO0,/proc/catalog/adhesives_sealants/adhesives_glues/ADH-17TOZTO0.json,Ceresit,Universal,CT OY1-0BK,Adhesive and Glue,Ceresit Universal CT OY1-0BK Adhesive and Glue contact adhesive Clear 300ml,0,adhesive_type=contact adhesive; chemistry=hybrid polymer; color_family=clear; use_area=wood; volume_ml=300
+U3Ppb,6,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,ADH-1FMNDXRZ,/proc/catalog/adhesives_sealants/adhesives_glues/ADH-1FMNDXRZ.json,Ceresit,Universal,CT OY1-0BK,Adhesive and Glue,Ceresit Universal CT OY1-0BK Adhesive and Glue contact adhesive Clear 50ml,0,adhesive_type=contact adhesive; chemistry=hybrid polymer; color_family=clear; use_area=wood; volume_ml=50
+U3Ppb,6,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,ADH-1KK1CM8Q,/proc/catalog/adhesives_sealants/adhesives_glues/ADH-1KK1CM8Q.json,Ceresit,Universal,CT OY1-0BK,Adhesive and Glue,Ceresit Universal CT OY1-0BK Adhesive and Glue mounting adhesive Clear 300ml,0,adhesive_type=mounting adhesive; chemistry=hybrid polymer; color_family=clear; use_area=wood; volume_ml=300
+U3Ppb,6,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,ADH-3L71TVNS,/proc/catalog/adhesives_sealants/adhesives_glues/ADH-3L71TVNS.json,Ceresit,Universal,CT OY1-0BK,Adhesive and Glue,Ceresit Universal CT OY1-0BK Adhesive and Glue tile adhesive Black 50ml,5,adhesive_type=tile adhesive; chemistry=hybrid polymer; color_family=black; use_area=wood; volume_ml=50
+U3Ppb,6,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,ADH-IME6JDEE,/proc/catalog/adhesives_sealants/adhesives_glues/ADH-IME6JDEE.json,Ceresit,Universal,CT OY1-0BK,Adhesive and Glue,Ceresit Universal CT OY1-0BK Adhesive and Glue threadlocker Gray 100ml,3,adhesive_type=threadlocker; chemistry=hybrid polymer; color_family=gray; use_area=wood; volume_ml=100
+U3Ppb,6,/proc/employees/emp_016.json,/proc/stores/store_graz_lend.json,ADH-ZETMY225,/proc/catalog/adhesives_sealants/adhesives_glues/ADH-ZETMY225.json,Ceresit,Universal,CT OY1-0BK,Adhesive and Glue,Ceresit Universal CT OY1-0BK Adhesive and Glue mounting adhesive White 250ml,9,adhesive_type=mounting adhesive; chemistry=hybrid polymer; color_family=white; use_area=wood; volume_ml=250
+Next step_5... Report the requested TSV exactly. (27518 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved active employee store as store_graz_lend.', 'Matched exact catalogue variants by stated properties and checked same-store available_today.', 'Prepared requested TSV in original row order.'] message='RowID\tSKU\tin_stock\tmatch\n4gfU5\tGRD-2RYU8TMY\t4\ttrue\n3WiNF\t\t\tfalse\nEdBNN\tSTO-3SS6BXJA\t3\tfalse\n6t12J\tPWR-B5QBGC0T\t0\tfalse\nU3Ppb\tADH-ZETMY225\t9\ttrue' grounding_refs=['/AGENTS.MD', '/proc/employees/emp_016.json', '/proc/stores/store_graz_lend.json', '/proc/catalog/garden_tools/trimmers_blowers/GRD-2RYU8TMY.json', '/proc/catalog/storage/bins_organizers/STO-3SS6BXJA.json', '/proc/catalog/power_tools/cordless_saw_sander/PWR-B5QBGC0T.json', '/proc/catalog/adhesives_sealants/adhesives_glues/ADH-ZETMY225.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Resolved active employee store as store_graz_lend.
+- Matched exact catalogue variants by stated properties and checked same-store available_today.
+- Prepared requested TSV in original row order.
+
+[34mAGENT SUMMARY: RowID	SKU	in_stock	match
+4gfU5	GRD-2RYU8TMY	4	true
+3WiNF			false
+EdBNN	STO-3SS6BXJA	3	false
+6t12J	PWR-B5QBGC0T	0	false
+U3Ppb	ADH-ZETMY225	9	true[0m
+- [34m/AGENTS.MD[0m
+- [34m/proc/employees/emp_016.json[0m
+- [34m/proc/stores/store_graz_lend.json[0m
+- [34m/proc/catalog/garden_tools/trimmers_blowers/GRD-2RYU8TMY.json[0m
+- [34m/proc/catalog/storage/bins_organizers/STO-3SS6BXJA.json[0m
+- [34m/proc/catalog/power_tools/cordless_saw_sander/PWR-B5QBGC0T.json[0m
+- [34m/proc/catalog/adhesives_sealants/adhesives_glues/ADH-ZETMY225.json[0m
