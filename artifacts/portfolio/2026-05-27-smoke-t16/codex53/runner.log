@@ -1,0 +1,10 @@
+Connecting to BitGN: ok
+EVAL_POLICY_OPEN bitgn/ecom1-dev: 48 tasks | model codex:gpt-5.3-codex | parallel 6 | logs artifacts/portfolio/2026-05-27-smoke-t16/codex53/tasks
+[done] t16: 0.00 (2s)
+
+==== SUMMARY ====
+t16: 0.00 (2s)  | answer missing required reference '/proc/catalog/cleaning/cloths_mops_wipes/fam_cleaning_cloths_mops_wipes_0006_1rc3cvbj/CLN-2EYTXGKX.json'
+
+FINAL: 0.00%  (0/1 perfect, 1 scored)
+SPEED: wall 6s | avg/task 2s | slowest 2s | parallel 6
+per-task logs: artifacts/portfolio/2026-05-27-smoke-t16/codex53/tasks/<task>.log

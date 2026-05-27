@@ -1,0 +1,10 @@
+Connecting to BitGN: ok
+EVAL_POLICY_OPEN bitgn/ecom1-dev: 48 tasks | model agy | parallel 4 | logs artifacts/portfolio/2026-05-27-smoke-t16/agy/tasks
+[done] t16: 0.00 (1s)
+
+==== SUMMARY ====
+t16: 0.00 (1s)  | answer missing required reference '/proc/catalog/electrical/extension_cables/fam_electrical_extension_cables_0018_2ugaxsd9/ELC-OAFV9HP7.json'
+
+FINAL: 0.00%  (0/1 perfect, 1 scored)
+SPEED: wall 6s | avg/task 1s | slowest 1s | parallel 4
+per-task logs: artifacts/portfolio/2026-05-27-smoke-t16/agy/tasks/<task>.log

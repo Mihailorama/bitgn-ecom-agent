@@ -1,0 +1,10 @@
+Connecting to BitGN: ok
+EVAL_POLICY_OPEN bitgn/ecom1-dev: 48 tasks | model claude:sonnet | parallel 4 | logs artifacts/portfolio/2026-05-27-smoke-t16/sonnet/tasks
+[done] t16: 1.00 (1s)
+
+==== SUMMARY ====
+t16: 1.00 (1s)
+
+FINAL: 100.00%  (1/1 perfect, 1 scored)
+SPEED: wall 6s | avg/task 1s | slowest 1s | parallel 4
+per-task logs: artifacts/portfolio/2026-05-27-smoke-t16/sonnet/tasks/<task>.log

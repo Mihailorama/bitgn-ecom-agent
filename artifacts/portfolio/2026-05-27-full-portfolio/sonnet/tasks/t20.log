@@ -1,0 +1,379 @@
+TASK t20 (model claude:sonnet)
+INSTRUCTION: I can visit any PowerTool branch in Graz today. Across every Graz branch, including branches with 0 availability, how many units of product (the Nut Bolt and Washer from Dresselhaus in the Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer line that has fastener type threaded rod, diameter 10 mm, and length 20 mm) are available today? Answer exactly as "[QTY:%d]" and cite every city store record plus the product record.
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2021-08-09T16:52:43Z
+[32mAUTO[0m: /bin/id
+user: anonymous
+roles: GUEST
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query products+product_properties to find the exact SKU (30042 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,\n       pp.key, pp.value_text, pp.value_number\nFROM products p\nJOIN product_properties pp ON p.sku = pp.sku\nWHERE p.brand LIKE '%Dresselhaus%'\n  AND (p.series LIKE '%3AW-77A%' OR p.model LIKE '%3AW-77A%' OR p.name LIKE '%3AW-77A%')\nORDER BY p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT p.sku, p.path, p.brand, p.series, p.model, p.name,
+       pp.key, pp.value_text, pp.value_number
+FROM products p
+JOIN product_properties pp ON p.sku = pp.sku
+WHERE p.brand LIKE '%Dresselhaus%'
+  AND (p.series LIKE '%3AW-77A%' OR p.model LIKE '%3AW-77A%' OR p.name LIKE '%3AW-77A%')
+ORDER BY p.sku, pp.key;
+SQL
+sku,path,brand,series,model,name,key,value_text,value_number
+FST-11VGD561,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-11VGD561.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer nut 8mm 12mm 50pc,diameter_mm,8,8
+FST-11VGD561,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-11VGD561.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer nut 8mm 12mm 50pc,fastener_type,nut,
+FST-11VGD561,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-11VGD561.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer nut 8mm 12mm 50pc,length_mm,12,12
+FST-11VGD561,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-11VGD561.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer nut 8mm 12mm 50pc,material,steel,
+FST-11VGD561,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-11VGD561.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer nut 8mm 12mm 50pc,pack_count,50,50
+FST-1PU30CMV,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-1PU30CMV.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 4mm 20mm 200pc,diameter_mm,4,4
+FST-1PU30CMV,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-1PU30CMV.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 4mm 20mm 200pc,fastener_type,threaded rod,
+FST-1PU30CMV,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-1PU30CMV.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 4mm 20mm 200pc,length_mm,20,20
+FST-1PU30CMV,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-1PU30CMV.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 4mm 20mm 200pc,material,steel,
+FST-1PU30CMV,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-1PU30CMV.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 4mm 20mm 200pc,pack_count,200,200
+FST-1R4AZHKE,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-1R4AZHKE.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 5mm 50mm 200pc,diameter_mm,5,5
+FST-1R4AZHKE,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-1R4AZHKE.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 5mm 50mm 200pc,fastener_type,bolt,
+FST-1R4AZHKE,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-1R4AZHKE.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 5mm 50mm 200pc,length_mm,50,50
+FST-1R4AZHKE,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-1R4AZHKE.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 5mm 50mm 200pc,material,steel,
+FST-1R4AZHKE,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-1R4AZHKE.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 5mm 50mm 200pc,pack_count,200,200
+FST-1XX7HOUS,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-1XX7HOUS.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 5mm 40mm 200pc,diameter_mm,5,5
+FST-1XX7HOUS,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-1XX7HOUS.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 5mm 40mm 200pc,fastener_type,machine screw,
+FST-1XX7HOUS,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-1XX7HOUS.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 5mm 40mm 200pc,length_mm,40,40
+FST-1XX7HOUS,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-1XX7HOUS.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 5mm 40mm 200pc,material,steel,
+FST-1XX7HOUS,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-1XX7HOUS.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 5mm 40mm 200pc,pack_count,200,200
+FST-21J5K97O,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-21J5K97O.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 6mm 30mm 100pc,diameter_mm,6,6
+FST-21J5K97O,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-21J5K97O.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 6mm 30mm 100pc,fastener_type,bolt,
+FST-21J5K97O,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-21J5K97O.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 6mm 30mm 100pc,length_mm,30,30
+FST-21J5K97O,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-21J5K97O.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 6mm 30mm 100pc,material,steel,
+FST-21J5K97O,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-21J5K97O.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 6mm 30mm 100pc,pack_count,100,100
+FST-29JZ73CU,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-29JZ73CU.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 5mm 40mm 50pc,diameter_mm,5,5
+FST-29JZ73CU,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-29JZ73CU.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 5mm 40mm 50pc,fastener_type,threaded rod,
+FST-29JZ73CU,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-29JZ73CU.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 5mm 40mm 50pc,length_mm,40,40
+FST-29JZ73CU,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-29JZ73CU.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 5mm 40mm 50pc,material,steel,
+FST-29JZ73CU,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-29JZ73CU.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 5mm 40mm 50pc,pack_count,50,50
+FST-2A6IWMXO,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2A6IWMXO.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 10mm 30mm 10pc,diameter_mm,10,10
+FST-2A6IWMXO,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2A6IWMXO.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 10mm 30mm 10pc,fastener_type,threaded rod,
+FST-2A6IWMXO,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2A6IWMXO.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 10mm 30mm 10pc,length_mm,30,30
+FST-2A6IWMXO,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2A6IWMXO.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 10mm 30mm 10pc,material,steel,
+FST-2A6IWMXO,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2A6IWMXO.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 10mm 30mm 10pc,pack_count,10,10
+FST-2E76NSFN,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2E76NSFN.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 4mm 30mm 200pc,diameter_mm,4,4
+FST-2E76NSFN,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2E76NSFN.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 4mm 30mm 200pc,fastener_type,bolt,
+FST-2E76NSFN,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2E76NSFN.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 4mm 30mm 200pc,length_mm,30,30
+FST-2E76NSFN,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2E76NSFN.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 4mm 30mm 200pc,material,steel,
+FST-2E76NSFN,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2E76NSFN.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 4mm 30mm 200pc,pack_count,200,200
+FST-2MQU0XI9,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2MQU0XI9.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 6mm 80mm 100pc,diameter_mm,6,6
+FST-2MQU0XI9,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2MQU0XI9.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 6mm 80mm 100pc,fastener_type,threaded rod,
+FST-2MQU0XI9,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2MQU0XI9.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 6mm 80mm 100pc,length_mm,80,80
+FST-2MQU0XI9,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2MQU0XI9.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 6mm 80mm 100pc,material,steel,
+FST-2MQU0XI9,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2MQU0XI9.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 6mm 80mm 100pc,pack_count,100,100
+FST-2O0F4MLW,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2O0F4MLW.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 4mm 50mm 200pc,diameter_mm,4,4
+FST-2O0F4MLW,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2O0F4MLW.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 4mm 50mm 200pc,fastener_type,bolt,
+FST-2O0F4MLW,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2O0F4MLW.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 4mm 50mm 200pc,length_mm,50,50
+FST-2O0F4MLW,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2O0F4MLW.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 4mm 50mm 200pc,material,steel,
+FST-2O0F4MLW,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2O0F4MLW.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 4mm 50mm 200pc,pack_count,200,200
+FST-2O21CDVL,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2O21CDVL.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 4mm 30mm 10pc,diameter_mm,4,4
+FST-2O21CDVL,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2O21CDVL.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 4mm 30mm 10pc,fastener_type,bolt,
+FST-2O21CDVL,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2O21CDVL.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 4mm 30mm 10pc,length_mm,30,30
+FST-2O21CDVL,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2O21CDVL.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 4mm 30mm 10pc,material,steel,
+FST-2O21CDVL,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2O21CDVL.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 4mm 30mm 10pc,pack_count,10,10
+FST-2O9742FC,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2O9742FC.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer washer 10mm 12mm 10pc,diameter_mm,10,10
+FST-2O9742FC,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2O9742FC.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer washer 10mm 12mm 10pc,fastener_type,washer,
+FST-2O9742FC,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2O9742FC.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer washer 10mm 12mm 10pc,length_mm,12,12
+FST-2O9742FC,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2O9742FC.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer washer 10mm 12mm 10pc,material,steel,
+FST-2O9742FC,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2O9742FC.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer washer 10mm 12mm 10pc,pack_count,10,10
+FST-2Q31ZF7C,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2Q31ZF7C.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 6mm 80mm 25pc,diameter_mm,6,6
+FST-2Q31ZF7C,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2Q31ZF7C.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 6mm 80mm 25pc,fastener_type,machine screw,
+FST-2Q31ZF7C,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2Q31ZF7C.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 6mm 80mm 25pc,length_mm,80,80
+FST-2Q31ZF7C,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2Q31ZF7C.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 6mm 80mm 25pc,material,steel,
+FST-2Q31ZF7C,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2Q31ZF7C.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 6mm 80mm 25pc,pack_count,25,25
+FST-2R0FBB7D,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2R0FBB7D.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 10mm 40mm 25pc,diameter_mm,10,10
+FST-2R0FBB7D,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2R0FBB7D.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 10mm 40mm 25pc,fastener_type,bolt,
+FST-2R0FBB7D,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2R0FBB7D.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 10mm 40mm 25pc,length_mm,40,40
+FST-2R0FBB7D,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2R0FBB7D.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 10mm 40mm 25pc,material,steel,
+FST-2R0FBB7D,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2R0FBB7D.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 10mm 40mm 25pc,pack_count,25,25
+FST-2T2QBLVX,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2T2QBLVX.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 4mm 40mm 25pc,diameter_mm,4,4
+FST-2T2QBLVX,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2T2QBLVX.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 4mm 40mm 25pc,fastener_type,machine screw,
+FST-2T2QBLVX,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2T2QBLVX.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 4mm 40mm 25pc,length_mm,40,40
+FST-2T2QBLVX,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2T2QBLVX.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 4mm 40mm 25pc,material,steel,
+FST-2T2QBLVX,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-2T2QBLVX.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 4mm 40mm 25pc,pack_count,25,25
+FST-3BV3VRTS,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3BV3VRTS.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 8mm 80mm 50pc,diameter_mm,8,8
+FST-3BV3VRTS,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3BV3VRTS.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 8mm 80mm 50pc,fastener_type,bolt,
+FST-3BV3VRTS,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3BV3VRTS.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 8mm 80mm 50pc,length_mm,80,80
+FST-3BV3VRTS,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3BV3VRTS.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 8mm 80mm 50pc,material,steel,
+FST-3BV3VRTS,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3BV3VRTS.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer bolt 8mm 80mm 50pc,pack_count,50,50
+FST-3O1RDYLA,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3O1RDYLA.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 8mm 40mm 10pc,diameter_mm,8,8
+FST-3O1RDYLA,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3O1RDYLA.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 8mm 40mm 10pc,fastener_type,machine screw,
+FST-3O1RDYLA,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3O1RDYLA.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 8mm 40mm 10pc,length_mm,40,40
+FST-3O1RDYLA,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3O1RDYLA.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 8mm 40mm 10pc,material,steel,
+FST-3O1RDYLA,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3O1RDYLA.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 8mm 40mm 10pc,pack_count,10,10
+FST-3ONWRMX0,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3ONWRMX0.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 10mm 20mm 25pc,diameter_mm,10,10
+FST-3ONWRMX0,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3ONWRMX0.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 10mm 20mm 25pc,fastener_type,threaded rod,
+FST-3ONWRMX0,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3ONWRMX0.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 10mm 20mm 25pc,length_mm,20,20
+FST-3ONWRMX0,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3ONWRMX0.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 10mm 20mm 25pc,material,steel,
+FST-3ONWRMX0,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3ONWRMX0.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 10mm 20mm 25pc,pack_count,25,25
+FST-3SM1XQQA,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3SM1XQQA.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 5mm 30mm 100pc,diameter_mm,5,5
+FST-3SM1XQQA,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3SM1XQQA.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 5mm 30mm 100pc,fastener_type,threaded rod,
+FST-3SM1XQQA,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3SM1XQQA.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 5mm 30mm 100pc,length_mm,30,30
+FST-3SM1XQQA,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3SM1XQQA.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 5mm 30mm 100pc,material,steel,
+FST-3SM1XQQA,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3SM1XQQA.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer threaded rod 5mm 30mm 100pc,pack_count,100,100
+FST-3TRNIL3C,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3TRNIL3C.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 4mm 100mm 100pc,diameter_mm,4,4
+FST-3TRNIL3C,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3TRNIL3C.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 4mm 100mm 100pc,fastener_type,machine screw,
+FST-3TRNIL3C,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3TRNIL3C.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 4mm 100mm 100pc,length_mm,100,100
+FST-3TRNIL3C,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3TRNIL3C.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 4mm 100mm 100pc,material,steel,
+FST-3TRNIL3C,/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3TRNIL3C.json,Dresselhaus,Pro Pack,Pro 3AW-77A,Dresselhaus Pro Pack Pro 3AW-77A Nut Bolt and Washer machine screw 4mm 100mm 100pc,pack_count,100,100
+warning: result truncated at 100 rows
+Next step_2... Query stores where city=Graz to get store ids and paths (25398 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="SELECT s.id, s.path, s.name, s.city, s.is_open,\n       COALESCE(i.available_today, 0) AS available_today\nFROM stores s\nLEFT JOIN inventory i ON i.store_id = s.id AND i.sku = 'FST-3ONWRMX0'\nWHERE s.city = 'Graz';"
+[32mOUT[0m: /bin/sql <<'SQL'
+SELECT s.id, s.path, s.name, s.city, s.is_open,
+       COALESCE(i.available_today, 0) AS available_today
+FROM stores s
+LEFT JOIN inventory i ON i.store_id = s.id AND i.sku = 'FST-3ONWRMX0'
+WHERE s.city = 'Graz';
+SQL
+id,path,name,city,is_open,available_today
+store_graz_jakomini,/proc/stores/store_graz_jakomini.json,PowerTool Graz Jakomini,Graz,1,0
+store_graz_lend,/proc/stores/store_graz_lend.json,PowerTool Graz Lend,Graz,1,4
+Next step_3... Report completion (12010 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Identified SKU FST-3ONWRMX0 as threaded rod, diameter 10mm, length 20mm from Dresselhaus Pro Pack Pro 3AW-77A', 'Found 2 Graz stores via SQL LEFT JOIN inventory', 'Summed available_today: 0 (Jakomini) + 4 (Lend) = 4'] message='[QTY:4]' grounding_refs=['/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3ONWRMX0.json', '/proc/stores/store_graz_jakomini.json', '/proc/stores/store_graz_lend.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Identified SKU FST-3ONWRMX0 as threaded rod, diameter 10mm, length 20mm from Dresselhaus Pro Pack Pro 3AW-77A
+- Found 2 Graz stores via SQL LEFT JOIN inventory
+- Summed available_today: 0 (Jakomini) + 4 (Lend) = 4
+
+[34mAGENT SUMMARY: [QTY:4][0m
+- [34m/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0010_2y2ia2jn/FST-3ONWRMX0.json[0m
+- [34m/proc/stores/store_graz_jakomini.json[0m
+- [34m/proc/stores/store_graz_lend.json[0m

@@ -1,0 +1,84 @@
+{
+  "created_utc": "2026-05-27T07:20:42.715657+00:00",
+  "tasks": null,
+  "results": [
+    {
+      "profile": {
+        "name": "codex53",
+        "model_id": "codex:gpt-5.3-codex",
+        "parallel": 6
+      },
+      "returncode": 0,
+      "elapsed_seconds": 362.33387899398804,
+      "out_dir": "artifacts/portfolio/2026-05-27-full-portfolio/codex53",
+      "command": [
+        "uv",
+        "run",
+        "python",
+        "run_parallel.py"
+      ],
+      "summary": {
+        "pct": 91.67,
+        "perfect": 44,
+        "total": 48,
+        "scored": 48,
+        "wall_seconds": 361,
+        "avg_task_seconds": 30,
+        "slowest_seconds": 175,
+        "parallel": 6
+      }
+    },
+    {
+      "profile": {
+        "name": "sonnet",
+        "model_id": "claude:sonnet",
+        "parallel": 4
+      },
+      "returncode": 0,
+      "elapsed_seconds": 877.1309640407562,
+      "out_dir": "artifacts/portfolio/2026-05-27-full-portfolio/sonnet",
+      "command": [
+        "uv",
+        "run",
+        "python",
+        "run_parallel.py"
+      ],
+      "summary": {
+        "pct": 83.33,
+        "perfect": 40,
+        "total": 48,
+        "scored": 48,
+        "wall_seconds": 876,
+        "avg_task_seconds": 50,
+        "slowest_seconds": 423,
+        "parallel": 4
+      }
+    },
+    {
+      "profile": {
+        "name": "agy",
+        "model_id": "agy",
+        "parallel": 4
+      },
+      "returncode": 0,
+      "elapsed_seconds": 1025.747787952423,
+      "out_dir": "artifacts/portfolio/2026-05-27-full-portfolio/agy",
+      "command": [
+        "uv",
+        "run",
+        "python",
+        "run_parallel.py"
+      ],
+      "summary": {
+        "pct": 70.83,
+        "perfect": 34,
+        "total": 48,
+        "scored": 48,
+        "wall_seconds": 1025,
+        "avg_task_seconds": 85,
+        "slowest_seconds": 494,
+        "parallel": 4
+      }
+    }
+  ]
+}

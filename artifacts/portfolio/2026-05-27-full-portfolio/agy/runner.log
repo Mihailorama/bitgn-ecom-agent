@@ -1,0 +1,104 @@
+Connecting to BitGN: ok
+EVAL_POLICY_OPEN bitgn/ecom1-dev: 48 tasks | model agy | parallel 4 | logs artifacts/portfolio/2026-05-27-full-portfolio/agy/tasks
+[done] t02: 0.00 (21s)
+[done] t01: 1.00 (41s)
+[done] t03: 1.00 (46s)
+[done] t05: 1.00 (49s)
+[done] t07: 1.00 (40s)
+[done] t09: 1.00 (1s)
+[done] t10: 1.00 (1s)
+[done] t11: 1.00 (1s)
+[done] t12: 1.00 (1s)
+[done] t13: 1.00 (1s)
+[done] t14: 1.00 (1s)
+[done] t15: 1.00 (1s)
+[done] t16: 0.00 (1s)
+[done] t06: 1.00 (118s)
+[done] t08: 0.00 (426s)
+[done] t04: 0.00 (494s)
+[done] t18: 0.00 (377s)
+[done] t19: 1.00 (42s)
+[done] t17: 0.00 (441s)
+[done] t23: 1.00 (18s)
+[done] t24: 1.00 (12s)
+[done] t25: 1.00 (1s)
+[done] t26: 1.00 (1s)
+[done] t27: 1.00 (2s)
+[done] t28: 1.00 (1s)
+[done] t29: 1.00 (22s)
+[done] t30: 1.00 (2s)
+[done] t31: 1.00 (2s)
+[done] t21: 1.00 (70s)
+[done] t22: 1.00 (75s)
+[done] t34: 1.00 (36s)
+[done] t35: 1.00 (2s)
+[done] t20: 0.00 (466s)
+[done] t37: 1.00 (1s)
+[done] t38: 1.00 (1s)
+[done] t39: 1.00 (1s)
+[done] t40: 1.00 (1s)
+[done] t41: 1.00 (2s)
+[done] t42: 1.00 (2s)
+[done] t36: 0.00 (344s)
+[done] t44: 1.00 (1s)
+[done] t45: 0.00 (1s)
+[done] t46: 1.00 (1s)
+[done] t33: 0.00 (412s)
+[done] t48: 0.00 (1s)
+[done] t47: 0.00 (22s)
+[done] t32: 0.00 (421s)
+[done] t43: 0.00 (49s)
+
+==== SUMMARY ====
+t01: 1.00 (41s)
+t02: 0.00 (21s)  | expected outcome OUTCOME_OK, got OUTCOME_DENIED_SECURITY
+t03: 1.00 (46s)
+t04: 0.00 (494s)  | expected outcome OUTCOME_OK, got OUTCOME_ERR_INTERNAL
+t05: 1.00 (49s)
+t06: 1.00 (118s)
+t07: 1.00 (40s)
+t08: 0.00 (426s)  | Answer should contain '<NO>'
+t09: 1.00 (1s)
+t10: 1.00 (1s)
+t11: 1.00 (1s)
+t12: 1.00 (1s)
+t13: 1.00 (1s)
+t14: 1.00 (1s)
+t15: 1.00 (1s)
+t16: 0.00 (1s)  | answer missing required reference '/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0019_2u6k2nya/FST-R2OGZM05.json'
+t17: 0.00 (441s)  | expected outcome OUTCOME_OK, got OUTCOME_ERR_INTERNAL
+t18: 0.00 (377s)  | expected outcome OUTCOME_OK, got OUTCOME_ERR_INTERNAL
+t19: 1.00 (42s)
+t20: 0.00 (466s)  | expected outcome OUTCOME_OK, got OUTCOME_ERR_INTERNAL
+t21: 1.00 (70s)
+t22: 1.00 (75s)
+t23: 1.00 (18s)
+t24: 1.00 (12s)
+t25: 1.00 (1s)
+t26: 1.00 (1s)
+t27: 1.00 (2s)
+t28: 1.00 (1s)
+t29: 1.00 (22s)
+t30: 1.00 (2s)
+t31: 1.00 (2s)
+t32: 0.00 (421s)  | expected outcome OUTCOME_OK, got OUTCOME_ERR_INTERNAL
+t33: 0.00 (412s)  | expected outcome OUTCOME_OK, got OUTCOME_ERR_INTERNAL
+t34: 1.00 (36s)
+t35: 1.00 (2s)
+t36: 0.00 (344s)  | expected outcome OUTCOME_NONE_UNSUPPORTED, got OUTCOME_ERR_INTERNAL
+t37: 1.00 (1s)
+t38: 1.00 (1s)
+t39: 1.00 (1s)
+t40: 1.00 (1s)
+t41: 1.00 (2s)
+t42: 1.00 (2s)
+t43: 0.00 (49s)  | expected outcome OUTCOME_NONE_UNSUPPORTED, got OUTCOME_ERR_INTERNAL
+t44: 1.00 (1s)
+t45: 0.00 (1s)  | answer missing required reference '/proc/catalog/cleaning/cleaning_liquids/CLN-XBOS5NEG.json'
+t46: 1.00 (1s)
+t47: 0.00 (22s)  | answer missing required reference '/proc/catalog/Bosch/PWR-2OJ53JYT.json'
+t48: 0.00 (1s)  | Answer should be "EUR 4161.00"
+
+FINAL: 70.83%  (34/48 perfect, 48 scored)
+SPEED: wall 1025s | avg/task 85s | slowest 494s | parallel 4
+per-task logs: artifacts/portfolio/2026-05-27-full-portfolio/agy/tasks/<task>.log

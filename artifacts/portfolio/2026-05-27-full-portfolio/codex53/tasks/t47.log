@@ -1,0 +1,623 @@
+TASK t47 (model codex:gpt-5.3-codex)
+INSTRUCTION: I'm preparing a quote for a customer from this pasted product list. Check each row against our exact catalogue and my store's same-day availability.
+
+Input format:
+RowID	description	quantity
+
+Return exactly this tab-separated output table, including the header, with rows in the same order:
+RowID	SKU	in_stock	match
+
+If the description is not an exact catalogue product, leave SKU and in_stock empty and set match=false. If the product exists, set in_stock to the quantity available today in my store (reference all matched SKUs in response). set `match` field true only when the exact product exists and in_stock is at least the requested quantity.
+
+Rows:
+e2wxG	the Extension Cable from Wago in the Wago Compact 222 3V7-GBQ Extension Cable line that has color family Gray and length 1 m	4
+JhzA9	the Cleaning Liquid from Karcher in the Karcher WD SC 1PM-1UM Cleaning Liquid line that has cleaner type drain cleaner and volume 750 ml	9
+hnS23	the Chainsaw from Stihl in the Stihl AK System HSA DUW-0VN Chainsaw line that has power source battery, bar length 30 cm, and battery platform 36v-system	4
+XvNLM	the Wood and Drywall Screw from Spax in the Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw line that has screw type machine screw and diameter 4 mm and has pack count 25 pcs	3
+cKFaw	the Engine Oil from Castrol in the Castrol All Season GTX 3PP-ZPA Engine Oil line that has volume 5000 ml, viscosity 5W-40, and vehicle type van and has volume 250 ml	2
+B4PgL	the Metal and Concrete Paint from Hammerite in the Hammerite Quick Dry HAM 22B-SYZ Metal and Concrete Paint line that has product type facade paint	3
+--------------------------------------------------------------------------------
+[32mAUTO[0m: tree -L 2 /
+/
+|-- AGENTS.MD
+|-- bin
+|   |-- checkout
+|   |-- date
+|   |-- discount
+|   |-- id
+|   |-- payments
+|   |-- README.md
+|   `-- sql
+|-- docs
+|   |-- checkout.md
+|   |-- discounts.md
+|   |-- merchant-continuity-and-critical-incidents.md
+|   |-- payments
+|   |-- powertools-agentic-os-origin-story.md
+|   |-- README.md
+|   |-- returns.md
+|   |-- security.md
+|   |-- store-associate-exception-handbook.md
+|   `-- warehouse-systems-migration-runbook.md
+|-- proc
+|   |-- baskets
+|   |-- catalog
+|   |-- customers
+|   |-- employees
+|   |-- payments
+|   |-- README.md
+|   |-- returns
+|   `-- stores
+`-- run
+    `-- actions
+[32mAUTO[0m: cat /AGENTS.MD
+# Founding principles of Agentic E-Commerce OS System (v2/PROD)
+
+
+0. This is not a generic shop folder: it is the live working memory of the PowerTools agentic OS. Every employee, contractor, and assistant touching this system should prioritize a bandwidth-aligned review of the creation story at [/docs/powertools-agentic-os-origin-story.md](/docs/powertools-agentic-os-origin-story.md) so the legacy is not accidentally flattened into mere procedure.
+1. readme.md files take role of agents.md. Trust them, follow the chain of command.
+2. All paths are / rooted (pass as such to tools and OS ops).
+
+## Key locations
+
+- Catalogue is in proc/catalog, stores are in proc/stores
+- Employee profiles are in proc/employees
+- Customer profiles are in proc/customers, baskets are in proc/baskets, payments are in proc/payments
+- Tools are in `/bin`, they have `--help` arg to describe capabilities especially 
+- Commerce policies are in `docs`, including checkout, discounts, payments, returns, and security
+
+## Important tools
+
+- see sql tool that takes SQLite query as stdin. It operates with the state of the entire catalogue at the start of the session. Query `sqlite_schema` to see the schema, for example `/bin/sql 'select name, sql from sqlite_schema where sql is not null order by type, name;'`. Note that inventory lives only in SQL projections
+- id tool returns identity of the user/customer/guest under which we are running current request.
+- use discount tool to manage basket discounts
+- use payments tool to manage payment workflow state and supported refund approval/finalization
+
+## Important things
+
+- When responding with reference - provide full path in the repo to the object.
+- When you apply a policy from `docs`, include that policy document as a grounding reference in the final response.
+- When a request is ambiguous and you ask for clarification, reference all concrete candidate objects that make it ambiguous.
+- When answering yes/no questions - include <YES> or <NO> tokens in the response. This is how the agent will know how to style the response.
+- When answering availability questions - answer should reference products that are available, but should not reference unavailable products. Same with stores.
+- When starting work, make sure to run tree -L 2 on docs folder. It also makes sense to pull current date and id context
+
+[32mAUTO[0m: tree -L 2 /docs
+docs
+|-- checkout.md
+|-- discounts.md
+|-- merchant-continuity-and-critical-incidents.md
+|-- payments
+|   `-- 3ds.md
+|-- powertools-agentic-os-origin-story.md
+|-- README.md
+|-- returns.md
+|-- security.md
+|-- store-associate-exception-handbook.md
+`-- warehouse-systems-migration-runbook.md
+[32mAUTO[0m: /bin/date
+2024-07-17T20:49:48Z
+[32mAUTO[0m: /bin/id
+user: emp_006
+roles: employee, store_manager, discount_manager, refund_manager, inventory_viewer, fulfillment_viewer, customer_service
+[32mAUTO[0m: /bin/sql <<'SQL'
+SELECT name, sql FROM sqlite_schema WHERE type='table';
+SQL
+name,sql
+categories,"CREATE TABLE categories (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	department TEXT NOT NULL
+)"
+product_kinds,"CREATE TABLE product_kinds (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	name TEXT NOT NULL
+)"
+families,"CREATE TABLE families (
+	id TEXT PRIMARY KEY,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+products,"CREATE TABLE products (
+	sku TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	category_id TEXT NOT NULL,
+	kind_id TEXT NOT NULL,
+	family_id TEXT NOT NULL,
+	brand TEXT NOT NULL,
+	series TEXT NOT NULL,
+	model TEXT NOT NULL,
+	name TEXT NOT NULL,
+	price_cents INTEGER NOT NULL,
+	price_currency TEXT NOT NULL,
+	properties TEXT NOT NULL
+)"
+product_properties,"CREATE TABLE product_properties (
+	sku TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_text TEXT NOT NULL,
+	value_number REAL,
+	PRIMARY KEY (sku, key)
+)"
+stores,"CREATE TABLE stores (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	name TEXT NOT NULL,
+	city TEXT NOT NULL,
+	is_open INTEGER NOT NULL,
+	lat REAL NOT NULL,
+	lon REAL NOT NULL
+)"
+inventory,"CREATE TABLE inventory (
+	store_id TEXT NOT NULL,
+	sku TEXT NOT NULL,
+	on_hand INTEGER NOT NULL,
+	reserved INTEGER NOT NULL,
+	available_today INTEGER NOT NULL,
+	incoming_quantity INTEGER NOT NULL,
+	next_arrival_in_days INTEGER,
+	PRIMARY KEY (store_id, sku),
+	FOREIGN KEY (store_id) REFERENCES stores(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+customers,"CREATE TABLE customers (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	city TEXT NOT NULL,
+	home_lat REAL NOT NULL,
+	home_lon REAL NOT NULL
+)"
+employees,"CREATE TABLE employees (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	email TEXT NOT NULL,
+	title TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+employee_roles,"CREATE TABLE employee_roles (
+	employee_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	PRIMARY KEY (employee_id, role),
+	FOREIGN KEY (employee_id) REFERENCES employees(id)
+)"
+baskets,"CREATE TABLE baskets (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	discount_percent INTEGER,
+	discount_reason_code TEXT,
+	discount_issuer_id TEXT,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+basket_lines,"CREATE TABLE basket_lines (
+	basket_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	PRIMARY KEY (basket_id, line_no),
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+payments,"CREATE TABLE payments (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	basket_archived INTEGER NOT NULL,
+	customer_id TEXT NOT NULL,
+	store_id TEXT NOT NULL,
+	amount_cents INTEGER NOT NULL,
+	currency TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	payment_method_fingerprint TEXT NOT NULL,
+	device_fingerprint TEXT NOT NULL,
+	observed_lat REAL NOT NULL,
+	observed_lon REAL NOT NULL,
+	three_ds_status TEXT,
+	three_ds_failure_reason TEXT,
+	three_ds_attempts INTEGER,
+	three_ds_max_attempts INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (store_id) REFERENCES stores(id)
+)"
+payment_lines,"CREATE TABLE payment_lines (
+	payment_id TEXT NOT NULL,
+	line_no INTEGER NOT NULL,
+	sku TEXT NOT NULL,
+	quantity INTEGER NOT NULL,
+	unit_price_cents INTEGER NOT NULL,
+	PRIMARY KEY (payment_id, line_no),
+	FOREIGN KEY (payment_id) REFERENCES payments(id),
+	FOREIGN KEY (sku) REFERENCES products(sku)
+)"
+returns,"CREATE TABLE returns (
+	id TEXT PRIMARY KEY,
+	path TEXT NOT NULL,
+	basket_id TEXT NOT NULL,
+	customer_id TEXT NOT NULL,
+	payment_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	reason_code TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (basket_id) REFERENCES baskets(id),
+	FOREIGN KEY (customer_id) REFERENCES customers(id),
+	FOREIGN KEY (payment_id) REFERENCES payments(id)
+)"
+Next step_1... Query SQL for candidate products and required property key/value matches for all 6 row descriptions. (25944 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH wanted(row_id, brand, series, model, kind_name) AS (\n  VALUES\n    ('e2wxG','Wago','Wago Compact 222','3V7-GBQ','Extension Cable'),\n    ('JhzA9','Karcher','Karcher WD SC','1PM-1UM','Cleaning Liquid'),\n    ('hnS23','Stihl','Stihl AK System HSA','DUW-0VN','Chainsaw'),\n    ('XvNLM','Spax','Spax Outdoor T-Star','1GS-NEI','Wood and Drywall Screw'),\n    ('cKFaw','Castrol','Castrol All Season GTX','3PP-ZPA','Engine Oil'),\n    ('B4PgL','Hammerite','Hammerite Quick Dry HAM','22B-SYZ','Metal and Concrete Paint')\n)\nSELECT\n  w.row_id,\n  p.sku,\n  p.path,\n  p.brand,\n  p.series,\n  p.model,\n  pk.name AS kind,\n  pp.key,\n  pp.value_text,\n  pp.value_number\nFROM wanted w\nJOIN products p\n  ON p.brand = w.brand\n AND p.series = w.series\n AND p.model = w.model\nJOIN product_kinds pk\n  ON pk.id = p.kind_id\n AND pk.name = w.kind_name\nLEFT JOIN product_properties pp\n  ON pp.sku = p.sku\nORDER BY w.row_id, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH wanted(row_id, brand, series, model, kind_name) AS (
+  VALUES
+    ('e2wxG','Wago','Wago Compact 222','3V7-GBQ','Extension Cable'),
+    ('JhzA9','Karcher','Karcher WD SC','1PM-1UM','Cleaning Liquid'),
+    ('hnS23','Stihl','Stihl AK System HSA','DUW-0VN','Chainsaw'),
+    ('XvNLM','Spax','Spax Outdoor T-Star','1GS-NEI','Wood and Drywall Screw'),
+    ('cKFaw','Castrol','Castrol All Season GTX','3PP-ZPA','Engine Oil'),
+    ('B4PgL','Hammerite','Hammerite Quick Dry HAM','22B-SYZ','Metal and Concrete Paint')
+)
+SELECT
+  w.row_id,
+  p.sku,
+  p.path,
+  p.brand,
+  p.series,
+  p.model,
+  pk.name AS kind,
+  pp.key,
+  pp.value_text,
+  pp.value_number
+FROM wanted w
+JOIN products p
+  ON p.brand = w.brand
+ AND p.series = w.series
+ AND p.model = w.model
+JOIN product_kinds pk
+  ON pk.id = p.kind_id
+ AND pk.name = w.kind_name
+LEFT JOIN product_properties pp
+  ON pp.sku = p.sku
+ORDER BY w.row_id, p.sku, pp.key;
+SQL
+row_id,sku,path,brand,series,model,kind,key,value_text,value_number
+Next step_2... Run a broader SQL lookup by brand and kind keywords to find real series/model/name/SKU candidates and paths. (12990 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH rows(row_id, brand, kind_hint) AS (\n  VALUES\n    ('e2wxG','Wago','Extension Cable'),\n    ('JhzA9','Karcher','Cleaning Liquid'),\n    ('hnS23','Stihl','Chainsaw'),\n    ('XvNLM','Spax','Wood and Drywall Screw'),\n    ('cKFaw','Castrol','Engine Oil'),\n    ('B4PgL','Hammerite','Metal and Concrete Paint')\n)\nSELECT\n  r.row_id,\n  p.sku,\n  p.path,\n  p.brand,\n  p.series,\n  p.model,\n  p.name,\n  pk.name AS kind\nFROM rows r\nJOIN products p ON p.brand = r.brand\nJOIN product_kinds pk ON pk.id = p.kind_id\nWHERE pk.name = r.kind_hint\n   OR p.name LIKE '%' || r.kind_hint || '%'\nORDER BY r.row_id, p.series, p.model, p.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH rows(row_id, brand, kind_hint) AS (
+  VALUES
+    ('e2wxG','Wago','Extension Cable'),
+    ('JhzA9','Karcher','Cleaning Liquid'),
+    ('hnS23','Stihl','Chainsaw'),
+    ('XvNLM','Spax','Wood and Drywall Screw'),
+    ('cKFaw','Castrol','Engine Oil'),
+    ('B4PgL','Hammerite','Metal and Concrete Paint')
+)
+SELECT
+  r.row_id,
+  p.sku,
+  p.path,
+  p.brand,
+  p.series,
+  p.model,
+  p.name,
+  pk.name AS kind
+FROM rows r
+JOIN products p ON p.brand = r.brand
+JOIN product_kinds pk ON pk.id = p.kind_id
+WHERE pk.name = r.kind_hint
+   OR p.name LIKE '%' || r.kind_hint || '%'
+ORDER BY r.row_id, p.series, p.model, p.sku;
+SQL
+row_id,sku,path,brand,series,model,name,kind
+B4PgL,PNT-12949NIR,/proc/catalog/paints_finishes/metal_concrete_paint/PNT-12949NIR.json,Hammerite,Quick Dry,HAM 22B-SYZ,Hammerite Quick Dry HAM 22B-SYZ Metal and Concrete Paint facade paint Red transparent 5000ml,Metal and Concrete Paint
+B4PgL,PNT-1PYGUBFW,/proc/catalog/paints_finishes/metal_concrete_paint/PNT-1PYGUBFW.json,Hammerite,Quick Dry,HAM 22B-SYZ,Hammerite Quick Dry HAM 22B-SYZ Metal and Concrete Paint concrete sealer Blue matte 5000ml,Metal and Concrete Paint
+B4PgL,PNT-3FQTPBAH,/proc/catalog/paints_finishes/metal_concrete_paint/PNT-3FQTPBAH.json,Hammerite,Quick Dry,HAM 22B-SYZ,Hammerite Quick Dry HAM 22B-SYZ Metal and Concrete Paint concrete sealer Blue satin 250ml,Metal and Concrete Paint
+B4PgL,PNT-MF77JM4E,/proc/catalog/paints_finishes/metal_concrete_paint/PNT-MF77JM4E.json,Hammerite,Quick Dry,HAM 22B-SYZ,Hammerite Quick Dry HAM 22B-SYZ Metal and Concrete Paint radiator paint Green transparent 5000ml,Metal and Concrete Paint
+JhzA9,CLN-11V5E52Y,/proc/catalog/cleaning/cleaning_liquids/CLN-11V5E52Y.json,Karcher,WD,SC 1PM-1UM,Karcher WD SC 1PM-1UM Cleaning Liquid drain cleaner 1000ml citrus,Cleaning Liquid
+JhzA9,CLN-1W3OES0A,/proc/catalog/cleaning/cleaning_liquids/CLN-1W3OES0A.json,Karcher,WD,SC 1PM-1UM,Karcher WD SC 1PM-1UM Cleaning Liquid multi surface cleaner 250ml none,Cleaning Liquid
+JhzA9,CLN-2NCU94WB,/proc/catalog/cleaning/cleaning_liquids/CLN-2NCU94WB.json,Karcher,WD,SC 1PM-1UM,Karcher WD SC 1PM-1UM Cleaning Liquid multi surface cleaner 250ml pine,Cleaning Liquid
+JhzA9,CLN-39CL6N2X,/proc/catalog/cleaning/cleaning_liquids/CLN-39CL6N2X.json,Karcher,WD,SC 1PM-1UM,Karcher WD SC 1PM-1UM Cleaning Liquid interior cleaner 250ml lavender,Cleaning Liquid
+JhzA9,CLN-39JS1X65,/proc/catalog/cleaning/cleaning_liquids/CLN-39JS1X65.json,Karcher,WD,SC 1PM-1UM,Karcher WD SC 1PM-1UM Cleaning Liquid floor cleaner 500ml lavender,Cleaning Liquid
+JhzA9,CLN-3G4TUEVD,/proc/catalog/cleaning/cleaning_liquids/CLN-3G4TUEVD.json,Karcher,WD,SC 1PM-1UM,Karcher WD SC 1PM-1UM Cleaning Liquid floor cleaner 500ml citrus,Cleaning Liquid
+JhzA9,CLN-3J14ZNTV,/proc/catalog/cleaning/cleaning_liquids/CLN-3J14ZNTV.json,Karcher,WD,SC 1PM-1UM,Karcher WD SC 1PM-1UM Cleaning Liquid degreaser 250ml fresh,Cleaning Liquid
+JhzA9,CLN-3KKVTTPJ,/proc/catalog/cleaning/cleaning_liquids/CLN-3KKVTTPJ.json,Karcher,WD,SC 1PM-1UM,Karcher WD SC 1PM-1UM Cleaning Liquid drain cleaner 750ml none,Cleaning Liquid
+JhzA9,CLN-3T1FCIV9,/proc/catalog/cleaning/cleaning_liquids/CLN-3T1FCIV9.json,Karcher,WD,SC 1PM-1UM,Karcher WD SC 1PM-1UM Cleaning Liquid floor cleaner 2500ml pine,Cleaning Liquid
+JhzA9,CLN-3VXDQTS3,/proc/catalog/cleaning/cleaning_liquids/CLN-3VXDQTS3.json,Karcher,WD,SC 1PM-1UM,Karcher WD SC 1PM-1UM Cleaning Liquid floor cleaner 750ml fresh,Cleaning Liquid
+JhzA9,CLN-NN6AA4L2,/proc/catalog/cleaning/cleaning_liquids/CLN-NN6AA4L2.json,Karcher,WD,SC 1PM-1UM,Karcher WD SC 1PM-1UM Cleaning Liquid multi surface cleaner 1000ml citrus,Cleaning Liquid
+JhzA9,CLN-XBOS5NEG,/proc/catalog/cleaning/cleaning_liquids/CLN-XBOS5NEG.json,Karcher,WD,SC 1PM-1UM,Karcher WD SC 1PM-1UM Cleaning Liquid interior cleaner 2500ml lavender,Cleaning Liquid
+JhzA9,CLN-24UOMI8V,/proc/catalog/cleaning/cleaning_liquids/CLN-24UOMI8V.json,Karcher,Workshop,WD 2C4-U0U,Karcher Workshop WD 2C4-U0U Cleaning Liquid floor cleaner 5000ml fresh,Cleaning Liquid
+JhzA9,CLN-3DLRVO7F,/proc/catalog/cleaning/cleaning_liquids/CLN-3DLRVO7F.json,Karcher,Workshop,WD 2C4-U0U,Karcher Workshop WD 2C4-U0U Cleaning Liquid multi surface cleaner 250ml lavender,Cleaning Liquid
+JhzA9,CLN-RC77BLVU,/proc/catalog/cleaning/cleaning_liquids/CLN-RC77BLVU.json,Karcher,Workshop,WD 2C4-U0U,Karcher Workshop WD 2C4-U0U Cleaning Liquid floor cleaner 750ml citrus,Cleaning Liquid
+JhzA9,CLN-T540O18H,/proc/catalog/cleaning/cleaning_liquids/CLN-T540O18H.json,Karcher,Workshop,WD 2C4-U0U,Karcher Workshop WD 2C4-U0U Cleaning Liquid interior cleaner 250ml none,Cleaning Liquid
+XvNLM,FST-1GZ71C60,/proc/catalog/fasteners/wood_drywall_screws/FST-1GZ71C60.json,Spax,Outdoor,T-Star 1GS-NEI,Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw wood screw 3mm 30mm phillips 100pc,Wood and Drywall Screw
+XvNLM,FST-1PNHFPCW,/proc/catalog/fasteners/wood_drywall_screws/FST-1PNHFPCW.json,Spax,Outdoor,T-Star 1GS-NEI,Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw drywall screw 3mm 30mm hex 200pc,Wood and Drywall Screw
+XvNLM,FST-1Y3PHKCZ,/proc/catalog/fasteners/wood_drywall_screws/FST-1Y3PHKCZ.json,Spax,Outdoor,T-Star 1GS-NEI,Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw deck screw 4mm 40mm torx 500pc,Wood and Drywall Screw
+XvNLM,FST-28KOM6QI,/proc/catalog/fasteners/wood_drywall_screws/FST-28KOM6QI.json,Spax,Outdoor,T-Star 1GS-NEI,Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw wood screw 6mm 30mm hex 200pc,Wood and Drywall Screw
+XvNLM,FST-2D830WTU,/proc/catalog/fasteners/wood_drywall_screws/FST-2D830WTU.json,Spax,Outdoor,T-Star 1GS-NEI,Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw drywall screw 5mm 80mm phillips 25pc,Wood and Drywall Screw
+XvNLM,FST-2E0IALLS,/proc/catalog/fasteners/wood_drywall_screws/FST-2E0IALLS.json,Spax,Outdoor,T-Star 1GS-NEI,Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw wood screw 4mm 80mm torx 25pc,Wood and Drywall Screw
+XvNLM,FST-2LQUC8X6,/proc/catalog/fasteners/wood_drywall_screws/FST-2LQUC8X6.json,Spax,Outdoor,T-Star 1GS-NEI,Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw wood screw 4mm 40mm phillips 200pc,Wood and Drywall Screw
+XvNLM,FST-2LU4DANQ,/proc/catalog/fasteners/wood_drywall_screws/FST-2LU4DANQ.json,Spax,Outdoor,T-Star 1GS-NEI,Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw deck screw 4mm 80mm pozidriv 50pc,Wood and Drywall Screw
+XvNLM,FST-31MU8WU3,/proc/catalog/fasteners/wood_drywall_screws/FST-31MU8WU3.json,Spax,Outdoor,T-Star 1GS-NEI,Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw drywall screw 6mm 100mm torx 50pc,Wood and Drywall Screw
+XvNLM,FST-356L17A6,/proc/catalog/fasteners/wood_drywall_screws/FST-356L17A6.json,Spax,Outdoor,T-Star 1GS-NEI,Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw drywall screw 4mm 30mm pozidriv 25pc,Wood and Drywall Screw
+XvNLM,FST-3I8TMIKU,/proc/catalog/fasteners/wood_drywall_screws/FST-3I8TMIKU.json,Spax,Outdoor,T-Star 1GS-NEI,Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw drywall screw 5mm 20mm pozidriv 100pc,Wood and Drywall Screw
+XvNLM,FST-3NDQPQTY,/proc/catalog/fasteners/wood_drywall_screws/FST-3NDQPQTY.json,Spax,Outdoor,T-Star 1GS-NEI,Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw deck screw 8mm 30mm torx 50pc,Wood and Drywall Screw
+XvNLM,FST-3ORB5E30,/proc/catalog/fasteners/wood_drywall_screws/FST-3ORB5E30.json,Spax,Outdoor,T-Star 1GS-NEI,Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw machine screw 4mm 60mm torx 50pc,Wood and Drywall Screw
+XvNLM,FST-DX1N4MVR,/proc/catalog/fasteners/wood_drywall_screws/FST-DX1N4MVR.json,Spax,Outdoor,T-Star 1GS-NEI,Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw wood screw 8mm 20mm torx 25pc,Wood and Drywall Screw
+XvNLM,FST-NMC2RBQK,/proc/catalog/fasteners/wood_drywall_screws/FST-NMC2RBQK.json,Spax,Outdoor,T-Star 1GS-NEI,Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw machine screw 6mm 80mm phillips 50pc,Wood and Drywall Screw
+cKFaw,AUT-15442NA4,/proc/catalog/automotive/engine_oil/AUT-15442NA4.json,Castrol,All Season,GTX 3PP-ZPA,Castrol All Season GTX 3PP-ZPA Engine Oil 5W-30 4000ml universal,Engine Oil
+cKFaw,AUT-19DLM56C,/proc/catalog/automotive/engine_oil/AUT-19DLM56C.json,Castrol,All Season,GTX 3PP-ZPA,Castrol All Season GTX 3PP-ZPA Engine Oil 0W-20 5000ml motorcycle,Engine Oil
+cKFaw,AUT-1GE7EZ5G,/proc/catalog/automotive/engine_oil/AUT-1GE7EZ5G.json,Castrol,All Season,GTX 3PP-ZPA,Castrol All Season GTX 3PP-ZPA Engine Oil 5W-30 250ml car,Engine Oil
+cKFaw,AUT-1OEF1I0H,/proc/catalog/automotive/engine_oil/AUT-1OEF1I0H.json,Castrol,All Season,GTX 3PP-ZPA,Castrol All Season GTX 3PP-ZPA Engine Oil 5W-40 4000ml van,Engine Oil
+cKFaw,AUT-2G1NFP12,/proc/catalog/automotive/engine_oil/AUT-2G1NFP12.json,Castrol,All Season,GTX 3PP-ZPA,Castrol All Season GTX 3PP-ZPA Engine Oil 10W-40 250ml car,Engine Oil
+cKFaw,AUT-2HXHS0JY,/proc/catalog/automotive/engine_oil/AUT-2HXHS0JY.json,Castrol,All Season,GTX 3PP-ZPA,Castrol All Season GTX 3PP-ZPA Engine Oil 5W-30 5000ml van,Engine Oil
+cKFaw,AUT-2J06HF3R,/proc/catalog/automotive/engine_oil/AUT-2J06HF3R.json,Castrol,All Season,GTX 3PP-ZPA,Castrol All Season GTX 3PP-ZPA Engine Oil 5W-40 500ml car,Engine Oil
+cKFaw,AUT-3KC8NYSG,/proc/catalog/automotive/engine_oil/AUT-3KC8NYSG.json,Castrol,All Season,GTX 3PP-ZPA,Castrol All Season GTX 3PP-ZPA Engine Oil 5W-40 250ml motorcycle,Engine Oil
+cKFaw,AUT-3QAP1WR2,/proc/catalog/automotive/engine_oil/AUT-3QAP1WR2.json,Castrol,All Season,GTX 3PP-ZPA,Castrol All Season GTX 3PP-ZPA Engine Oil 10W-40 5000ml truck,Engine Oil
+cKFaw,AUT-3U3ACKO5,/proc/catalog/automotive/engine_oil/AUT-3U3ACKO5.json,Castrol,All Season,GTX 3PP-ZPA,Castrol All Season GTX 3PP-ZPA Engine Oil 15W-40 1000ml truck,Engine Oil
+cKFaw,AUT-IFR68VVA,/proc/catalog/automotive/engine_oil/AUT-IFR68VVA.json,Castrol,All Season,GTX 3PP-ZPA,Castrol All Season GTX 3PP-ZPA Engine Oil 5W-40 5000ml van,Engine Oil
+cKFaw,AUT-LELVO1W9,/proc/catalog/automotive/engine_oil/AUT-LELVO1W9.json,Castrol,All Season,GTX 3PP-ZPA,Castrol All Season GTX 3PP-ZPA Engine Oil 5W-40 5000ml truck,Engine Oil
+e2wxG,ELC-12BYNXQU,/proc/catalog/electrical/extension_cables/ELC-12BYNXQU.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 50m IP20 Black,Extension Cable
+e2wxG,ELC-1HCKP24Y,/proc/catalog/electrical/extension_cables/ELC-1HCKP24Y.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 1m IP20 Blue,Extension Cable
+e2wxG,ELC-1S73L10D,/proc/catalog/electrical/extension_cables/ELC-1S73L10D.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 2m IP54 Black,Extension Cable
+e2wxG,ELC-20TSK1ZW,/proc/catalog/electrical/extension_cables/ELC-20TSK1ZW.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 2m IP54 Gray,Extension Cable
+e2wxG,ELC-2QBDE3HQ,/proc/catalog/electrical/extension_cables/ELC-2QBDE3HQ.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 3m IP54 Yellow,Extension Cable
+e2wxG,ELC-2W7QNQD1,/proc/catalog/electrical/extension_cables/ELC-2W7QNQD1.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 15m IP44 Blue,Extension Cable
+e2wxG,ELC-3UD9R6ML,/proc/catalog/electrical/extension_cables/ELC-3UD9R6ML.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 10m IP44 Orange,Extension Cable
+e2wxG,ELC-CWJKBND7,/proc/catalog/electrical/extension_cables/ELC-CWJKBND7.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 1m IP20 Orange,Extension Cable
+e2wxG,ELC-KRF8PC93,/proc/catalog/electrical/extension_cables/ELC-KRF8PC93.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 1m IP44 Yellow,Extension Cable
+e2wxG,ELC-MC4A3LVJ,/proc/catalog/electrical/extension_cables/ELC-MC4A3LVJ.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 1m IP44 Gray,Extension Cable
+e2wxG,ELC-NQLPC6B8,/proc/catalog/electrical/extension_cables/ELC-NQLPC6B8.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 10m IP54 Orange,Extension Cable
+e2wxG,ELC-ZUMPO7OL,/proc/catalog/electrical/extension_cables/ELC-ZUMPO7OL.json,Wago,Compact,222 3V7-GBQ,Wago Compact 222 3V7-GBQ Extension Cable 15m IP20 Orange,Extension Cable
+hnS23,GRD-1E3XD487,/proc/catalog/garden_tools/chainsaws/GRD-1E3XD487.json,Stihl,AK System,HSA DUW-0VN,Stihl AK System HSA DUW-0VN Chainsaw petrol 30cm,Chainsaw
+hnS23,GRD-1IBYH68P,/proc/catalog/garden_tools/chainsaws/GRD-1IBYH68P.json,Stihl,AK System,HSA DUW-0VN,Stihl AK System HSA DUW-0VN Chainsaw battery 40cm,Chainsaw
+hnS23,GRD-1WJO6MO7,/proc/catalog/garden_tools/chainsaws/GRD-1WJO6MO7.json,Stihl,AK System,HSA DUW-0VN,Stihl AK System HSA DUW-0VN Chainsaw battery 35cm,Chainsaw
+hnS23,GRD-2NKJNTC3,/proc/catalog/garden_tools/chainsaws/GRD-2NKJNTC3.json,Stihl,AK System,HSA DUW-0VN,Stihl AK System HSA DUW-0VN Chainsaw battery 30cm,Chainsaw
+hnS23,GRD-2VWFHHE2,/proc/catalog/garden_tools/chainsaws/GRD-2VWFHHE2.json,Stihl,AK System,HSA DUW-0VN,Stihl AK System HSA DUW-0VN Chainsaw petrol 25cm,Chainsaw
+hnS23,GRD-2YZPF1WK,/proc/catalog/garden_tools/chainsaws/GRD-2YZPF1WK.json,Stihl,AK System,HSA DUW-0VN,Stihl AK System HSA DUW-0VN Chainsaw corded 35cm,Chainsaw
+hnS23,GRD-32A30E2Y,/proc/catalog/garden_tools/chainsaws/GRD-32A30E2Y.json,Stihl,AK System,HSA DUW-0VN,Stihl AK System HSA DUW-0VN Chainsaw battery 30cm,Chainsaw
+hnS23,GRD-39PQ0AS9,/proc/catalog/garden_tools/chainsaws/GRD-39PQ0AS9.json,Stihl,AK System,HSA DUW-0VN,Stihl AK System HSA DUW-0VN Chainsaw battery 20cm,Chainsaw
+hnS23,GRD-KBDWD8SC,/proc/catalog/garden_tools/chainsaws/GRD-KBDWD8SC.json,Stihl,AK System,HSA DUW-0VN,Stihl AK System HSA DUW-0VN Chainsaw battery 25cm,Chainsaw
+hnS23,GRD-YG5PY0RE,/proc/catalog/garden_tools/chainsaws/GRD-YG5PY0RE.json,Stihl,AK System,HSA DUW-0VN,Stihl AK System HSA DUW-0VN Chainsaw petrol 45cm,Chainsaw
+Next step_3... Query emp_006 store_id and compute per-row exact SKU matches using required property predicates (including contradictory constraints). (46314 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH actor_store AS (\n  SELECT store_id\n  FROM employees\n  WHERE id = 'emp_006'\n),\nreq(row_id, qty) AS (\n  VALUES\n    ('e2wxG',4),\n    ('JhzA9',9),\n    ('hnS23',4),\n    ('XvNLM',3),\n    ('cKFaw',2),\n    ('B4PgL',3)\n),\nmatched AS (\n  -- e2wxG: Wago Compact 222 3V7-GBQ Extension Cable, color family Gray, length 1 m\n  SELECT 'e2wxG' AS row_id, p.sku, p.path\n  FROM products p\n  JOIN product_kinds pk ON pk.id = p.kind_id\n  WHERE p.brand='Wago' AND p.series='Compact' AND p.model='222 3V7-GBQ' AND pk.name='Extension Cable'\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='color_family' AND lower(pp.value_text)='gray')\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('length_m','length') AND (pp.value_number=1 OR pp.value_text IN ('1','1 m','1m')))\n\n  UNION ALL\n  -- JhzA9: Karcher WD SC 1PM-1UM Cleaning Liquid, cleaner type drain cleaner, volume 750 ml\n  SELECT 'JhzA9', p.sku, p.path\n  FROM products p\n  JOIN product_kinds pk ON pk.id = p.kind_id\n  WHERE p.brand='Karcher' AND p.series='WD' AND p.model='SC 1PM-1UM' AND pk.name='Cleaning Liquid'\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('cleaner_type','product_type') AND lower(pp.value_text)='drain cleaner')\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('volume_ml','volume') AND (pp.value_number=750 OR pp.value_text IN ('750','750 ml','750ml')))\n\n  UNION ALL\n  -- hnS23: Stihl AK System HSA DUW-0VN Chainsaw, battery, 30 cm, 36v-system\n  SELECT 'hnS23', p.sku, p.path\n  FROM products p\n  JOIN product_kinds pk ON pk.id = p.kind_id\n  WHERE p.brand='Stihl' AND p.series='AK System' AND p.model='HSA DUW-0VN' AND pk.name='Chainsaw'\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('power_source','power') AND lower(pp.value_text)='battery')\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('bar_length_cm','bar_length') AND (pp.value_number=30 OR pp.value_text IN ('30','30 cm','30cm')))\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('battery_platform','platform') AND lower(pp.value_text)='36v-system')\n\n  UNION ALL\n  -- XvNLM: Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw, machine screw, 4 mm, 25 pcs\n  SELECT 'XvNLM', p.sku, p.path\n  FROM products p\n  JOIN product_kinds pk ON pk.id = p.kind_id\n  WHERE p.brand='Spax' AND p.series='Outdoor' AND p.model='T-Star 1GS-NEI' AND pk.name='Wood and Drywall Screw'\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('screw_type','fastener_type') AND lower(pp.value_text)='machine screw')\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('diameter_mm','diameter') AND (pp.value_number=4 OR pp.value_text IN ('4','4 mm','4mm')))\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('pack_count','pack_count_pcs') AND (pp.value_number=25 OR pp.value_text IN ('25','25 pcs','25pc')))\n\n  UNION ALL\n  -- cKFaw: Castrol All Season GTX 3PP-ZPA Engine Oil with conflicting volumes 5000 ml and 250 ml\n  SELECT 'cKFaw', p.sku, p.path\n  FROM products p\n  JOIN product_kinds pk ON pk.id = p.kind_id\n  WHERE p.brand='Castrol' AND p.series='All Season' AND p.model='GTX 3PP-ZPA' AND pk.name='Engine Oil'\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='viscosity' AND lower(pp.value_text)='5w-40')\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='vehicle_type' AND lower(pp.value_text)='van')\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('volume_ml','volume') AND (pp.value_number=5000 OR pp.value_text IN ('5000','5000 ml','5000ml')))\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('volume_ml','volume') AND (pp.value_number=250 OR pp.value_text IN ('250','250 ml','250ml')))\n\n  UNION ALL\n  -- B4PgL: Hammerite Quick Dry HAM 22B-SYZ Metal and Concrete Paint, product type facade paint\n  SELECT 'B4PgL', p.sku, p.path\n  FROM products p\n  JOIN product_kinds pk ON pk.id = p.kind_id\n  WHERE p.brand='Hammerite' AND p.series='Quick Dry' AND p.model='HAM 22B-SYZ' AND pk.name='Metal and Concrete Paint'\n    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('product_type','paint_type') AND lower(pp.value_text)='facade paint')\n)\nSELECT\n  r.row_id,\n  r.qty,\n  m.sku,\n  m.path,\n  i.available_today\nFROM req r\nLEFT JOIN matched m ON m.row_id = r.row_id\nLEFT JOIN actor_store s ON 1=1\nLEFT JOIN inventory i ON i.store_id = s.store_id AND i.sku = m.sku\nORDER BY r.row_id, m.sku;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH actor_store AS (
+  SELECT store_id
+  FROM employees
+  WHERE id = 'emp_006'
+),
+req(row_id, qty) AS (
+  VALUES
+    ('e2wxG',4),
+    ('JhzA9',9),
+    ('hnS23',4),
+    ('XvNLM',3),
+    ('cKFaw',2),
+    ('B4PgL',3)
+),
+matched AS (
+  -- e2wxG: Wago Compact 222 3V7-GBQ Extension Cable, color family Gray, length 1 m
+  SELECT 'e2wxG' AS row_id, p.sku, p.path
+  FROM products p
+  JOIN product_kinds pk ON pk.id = p.kind_id
+  WHERE p.brand='Wago' AND p.series='Compact' AND p.model='222 3V7-GBQ' AND pk.name='Extension Cable'
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='color_family' AND lower(pp.value_text)='gray')
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('length_m','length') AND (pp.value_number=1 OR pp.value_text IN ('1','1 m','1m')))
+
+  UNION ALL
+  -- JhzA9: Karcher WD SC 1PM-1UM Cleaning Liquid, cleaner type drain cleaner, volume 750 ml
+  SELECT 'JhzA9', p.sku, p.path
+  FROM products p
+  JOIN product_kinds pk ON pk.id = p.kind_id
+  WHERE p.brand='Karcher' AND p.series='WD' AND p.model='SC 1PM-1UM' AND pk.name='Cleaning Liquid'
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('cleaner_type','product_type') AND lower(pp.value_text)='drain cleaner')
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('volume_ml','volume') AND (pp.value_number=750 OR pp.value_text IN ('750','750 ml','750ml')))
+
+  UNION ALL
+  -- hnS23: Stihl AK System HSA DUW-0VN Chainsaw, battery, 30 cm, 36v-system
+  SELECT 'hnS23', p.sku, p.path
+  FROM products p
+  JOIN product_kinds pk ON pk.id = p.kind_id
+  WHERE p.brand='Stihl' AND p.series='AK System' AND p.model='HSA DUW-0VN' AND pk.name='Chainsaw'
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('power_source','power') AND lower(pp.value_text)='battery')
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('bar_length_cm','bar_length') AND (pp.value_number=30 OR pp.value_text IN ('30','30 cm','30cm')))
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('battery_platform','platform') AND lower(pp.value_text)='36v-system')
+
+  UNION ALL
+  -- XvNLM: Spax Outdoor T-Star 1GS-NEI Wood and Drywall Screw, machine screw, 4 mm, 25 pcs
+  SELECT 'XvNLM', p.sku, p.path
+  FROM products p
+  JOIN product_kinds pk ON pk.id = p.kind_id
+  WHERE p.brand='Spax' AND p.series='Outdoor' AND p.model='T-Star 1GS-NEI' AND pk.name='Wood and Drywall Screw'
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('screw_type','fastener_type') AND lower(pp.value_text)='machine screw')
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('diameter_mm','diameter') AND (pp.value_number=4 OR pp.value_text IN ('4','4 mm','4mm')))
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('pack_count','pack_count_pcs') AND (pp.value_number=25 OR pp.value_text IN ('25','25 pcs','25pc')))
+
+  UNION ALL
+  -- cKFaw: Castrol All Season GTX 3PP-ZPA Engine Oil with conflicting volumes 5000 ml and 250 ml
+  SELECT 'cKFaw', p.sku, p.path
+  FROM products p
+  JOIN product_kinds pk ON pk.id = p.kind_id
+  WHERE p.brand='Castrol' AND p.series='All Season' AND p.model='GTX 3PP-ZPA' AND pk.name='Engine Oil'
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='viscosity' AND lower(pp.value_text)='5w-40')
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key='vehicle_type' AND lower(pp.value_text)='van')
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('volume_ml','volume') AND (pp.value_number=5000 OR pp.value_text IN ('5000','5000 ml','5000ml')))
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('volume_ml','volume') AND (pp.value_number=250 OR pp.value_text IN ('250','250 ml','250ml')))
+
+  UNION ALL
+  -- B4PgL: Hammerite Quick Dry HAM 22B-SYZ Metal and Concrete Paint, product type facade paint
+  SELECT 'B4PgL', p.sku, p.path
+  FROM products p
+  JOIN product_kinds pk ON pk.id = p.kind_id
+  WHERE p.brand='Hammerite' AND p.series='Quick Dry' AND p.model='HAM 22B-SYZ' AND pk.name='Metal and Concrete Paint'
+    AND EXISTS (SELECT 1 FROM product_properties pp WHERE pp.sku=p.sku AND pp.key IN ('product_type','paint_type') AND lower(pp.value_text)='facade paint')
+)
+SELECT
+  r.row_id,
+  r.qty,
+  m.sku,
+  m.path,
+  i.available_today
+FROM req r
+LEFT JOIN matched m ON m.row_id = r.row_id
+LEFT JOIN actor_store s ON 1=1
+LEFT JOIN inventory i ON i.store_id = s.store_id AND i.sku = m.sku
+ORDER BY r.row_id, m.sku;
+SQL
+row_id,qty,sku,path,available_today
+B4PgL,3,PNT-12949NIR,/proc/catalog/paints_finishes/metal_concrete_paint/PNT-12949NIR.json,
+JhzA9,9,CLN-3KKVTTPJ,/proc/catalog/cleaning/cleaning_liquids/CLN-3KKVTTPJ.json,8
+XvNLM,3,,,
+cKFaw,2,,,
+e2wxG,4,ELC-MC4A3LVJ,/proc/catalog/electrical/extension_cables/ELC-MC4A3LVJ.json,4
+hnS23,4,GRD-32A30E2Y,/proc/catalog/garden_tools/chainsaws/GRD-32A30E2Y.json,5
+Next step_4... Run one SQL query that maps each RowID to its uniquely matched SKU (or none), joins emp_006 store inventory, and COALESCEs missing inventory to 0 for matched SKUs. (23810 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH actor_store AS (\n  SELECT store_id\n  FROM employees\n  WHERE id = 'emp_006'\n),\nreq(ord, row_id, qty) AS (\n  VALUES\n    (1,'e2wxG',4),\n    (2,'JhzA9',9),\n    (3,'hnS23',4),\n    (4,'XvNLM',3),\n    (5,'cKFaw',2),\n    (6,'B4PgL',3)\n),\nmatched AS (\n  SELECT 'e2wxG' AS row_id, 'ELC-MC4A3LVJ' AS sku\n  UNION ALL SELECT 'JhzA9', 'CLN-3KKVTTPJ'\n  UNION ALL SELECT 'hnS23', 'GRD-32A30E2Y'\n  UNION ALL SELECT 'B4PgL', 'PNT-12949NIR'\n)\nSELECT\n  r.ord,\n  r.row_id,\n  m.sku,\n  CASE WHEN m.sku IS NULL THEN NULL ELSE COALESCE(i.available_today,0) END AS in_stock,\n  CASE\n    WHEN m.sku IS NOT NULL AND COALESCE(i.available_today,0) >= r.qty THEN 'true'\n    ELSE 'false'\n  END AS match\nFROM req r\nLEFT JOIN matched m ON m.row_id = r.row_id\nLEFT JOIN actor_store s ON 1=1\nLEFT JOIN inventory i ON i.store_id = s.store_id AND i.sku = m.sku\nORDER BY r.ord;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH actor_store AS (
+  SELECT store_id
+  FROM employees
+  WHERE id = 'emp_006'
+),
+req(ord, row_id, qty) AS (
+  VALUES
+    (1,'e2wxG',4),
+    (2,'JhzA9',9),
+    (3,'hnS23',4),
+    (4,'XvNLM',3),
+    (5,'cKFaw',2),
+    (6,'B4PgL',3)
+),
+matched AS (
+  SELECT 'e2wxG' AS row_id, 'ELC-MC4A3LVJ' AS sku
+  UNION ALL SELECT 'JhzA9', 'CLN-3KKVTTPJ'
+  UNION ALL SELECT 'hnS23', 'GRD-32A30E2Y'
+  UNION ALL SELECT 'B4PgL', 'PNT-12949NIR'
+)
+SELECT
+  r.ord,
+  r.row_id,
+  m.sku,
+  CASE WHEN m.sku IS NULL THEN NULL ELSE COALESCE(i.available_today,0) END AS in_stock,
+  CASE
+    WHEN m.sku IS NOT NULL AND COALESCE(i.available_today,0) >= r.qty THEN 'true'
+    ELSE 'false'
+  END AS match
+FROM req r
+LEFT JOIN matched m ON m.row_id = r.row_id
+LEFT JOIN actor_store s ON 1=1
+LEFT JOIN inventory i ON i.store_id = s.store_id AND i.sku = m.sku
+ORDER BY r.ord;
+SQL
+ord,row_id,sku,in_stock,match
+1,e2wxG,ELC-MC4A3LVJ,4,true
+2,JhzA9,CLN-3KKVTTPJ,8,false
+3,hnS23,GRD-32A30E2Y,5,true
+4,XvNLM,,,false
+5,cKFaw,,,false
+6,B4PgL,PNT-12949NIR,0,false
+Next step_5... Report completion with exact tab-separated output table in original row order. (19250 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Resolved exact SKU matches from catalog candidates', 'Joined matched SKUs to emp_006 store available_today inventory', 'Evaluated match=true only when exact product exists and stock meets requested quantity'] message='RowID\tSKU\tin_stock\tmatch\ne2wxG\tELC-MC4A3LVJ\t4\ttrue\nJhzA9\tCLN-3KKVTTPJ\t8\tfalse\nhnS23\tGRD-32A30E2Y\t5\ttrue\nXvNLM\t\t\tfalse\ncKFaw\t\t\tfalse\nB4PgL\tPNT-12949NIR\t0\tfalse' grounding_refs=['/proc/catalog/electrical/extension_cables/ELC-MC4A3LVJ.json', '/proc/catalog/cleaning/cleaning_liquids/CLN-3KKVTTPJ.json', '/proc/catalog/garden_tools/chainsaws/GRD-32A30E2Y.json', '/proc/catalog/paints_finishes/metal_concrete_paint/PNT-12949NIR.json'] outcome='OUTCOME_OK' verified=True
+[33mcorrection 1/2: re-prompting[0m
+Next step_6... Query employee->store to get confirmed /proc/stores/... path. (28329 ms)
+  [[32msafe[0m] tool='exec' path='/bin/sql' args=[] stdin="WITH actor AS (\n  SELECT e.id AS employee_id, e.store_id, s.path AS store_path\n  FROM employees e\n  JOIN stores s ON s.id = e.store_id\n  WHERE e.id = 'emp_006'\n),\nreq(ord,row_id,qty,brand,series,model,kind_name) AS (\n  VALUES\n    (1,'e2wxG',4,'Wago','Compact','222 3V7-GBQ','Extension Cable'),\n    (2,'JhzA9',9,'Karcher','WD','SC 1PM-1UM','Cleaning Liquid'),\n    (3,'hnS23',4,'Stihl','AK System','HSA DUW-0VN','Chainsaw'),\n    (4,'XvNLM',3,'Spax','Outdoor','T-Star 1GS-NEI','Wood and Drywall Screw'),\n    (5,'cKFaw',2,'Castrol','All Season','GTX 3PP-ZPA','Engine Oil'),\n    (6,'B4PgL',3,'Hammerite','Quick Dry','HAM 22B-SYZ','Metal and Concrete Paint')\n),\nmatched AS (\n  SELECT 'e2wxG' AS row_id, 'ELC-MC4A3LVJ' AS sku UNION ALL\n  SELECT 'JhzA9','CLN-3KKVTTPJ' UNION ALL\n  SELECT 'hnS23','GRD-32A30E2Y' UNION ALL\n  SELECT 'B4PgL','PNT-12949NIR'\n),\nrelevant_props AS (\n  SELECT 'e2wxG' AS row_id, 'color_family' AS k UNION ALL\n  SELECT 'e2wxG','length_m' UNION ALL\n  SELECT 'JhzA9','cleaner_type' UNION ALL\n  SELECT 'JhzA9','volume_ml' UNION ALL\n  SELECT 'hnS23','power_source' UNION ALL\n  SELECT 'hnS23','bar_length_cm' UNION ALL\n  SELECT 'hnS23','battery_platform' UNION ALL\n  SELECT 'B4PgL','product_type'\n)\nSELECT\n  r.ord,\n  r.row_id,\n  p.sku,\n  p.path AS product_path,\n  p.brand,\n  p.series,\n  p.model,\n  pk.name AS kind,\n  pp.key,\n  pp.value_text,\n  pp.value_number,\n  a.store_path,\n  i.available_today\nFROM req r\nLEFT JOIN matched m ON m.row_id = r.row_id\nLEFT JOIN products p ON p.sku = m.sku\nLEFT JOIN product_kinds pk ON pk.id = p.kind_id\nLEFT JOIN relevant_props rp ON rp.row_id = r.row_id\nLEFT JOIN product_properties pp ON pp.sku = p.sku AND pp.key = rp.k\nCROSS JOIN actor a\nLEFT JOIN inventory i ON i.store_id = a.store_id AND i.sku = p.sku\nORDER BY r.ord, p.sku, pp.key;"
+[32mOUT[0m: /bin/sql <<'SQL'
+WITH actor AS (
+  SELECT e.id AS employee_id, e.store_id, s.path AS store_path
+  FROM employees e
+  JOIN stores s ON s.id = e.store_id
+  WHERE e.id = 'emp_006'
+),
+req(ord,row_id,qty,brand,series,model,kind_name) AS (
+  VALUES
+    (1,'e2wxG',4,'Wago','Compact','222 3V7-GBQ','Extension Cable'),
+    (2,'JhzA9',9,'Karcher','WD','SC 1PM-1UM','Cleaning Liquid'),
+    (3,'hnS23',4,'Stihl','AK System','HSA DUW-0VN','Chainsaw'),
+    (4,'XvNLM',3,'Spax','Outdoor','T-Star 1GS-NEI','Wood and Drywall Screw'),
+    (5,'cKFaw',2,'Castrol','All Season','GTX 3PP-ZPA','Engine Oil'),
+    (6,'B4PgL',3,'Hammerite','Quick Dry','HAM 22B-SYZ','Metal and Concrete Paint')
+),
+matched AS (
+  SELECT 'e2wxG' AS row_id, 'ELC-MC4A3LVJ' AS sku UNION ALL
+  SELECT 'JhzA9','CLN-3KKVTTPJ' UNION ALL
+  SELECT 'hnS23','GRD-32A30E2Y' UNION ALL
+  SELECT 'B4PgL','PNT-12949NIR'
+),
+relevant_props AS (
+  SELECT 'e2wxG' AS row_id, 'color_family' AS k UNION ALL
+  SELECT 'e2wxG','length_m' UNION ALL
+  SELECT 'JhzA9','cleaner_type' UNION ALL
+  SELECT 'JhzA9','volume_ml' UNION ALL
+  SELECT 'hnS23','power_source' UNION ALL
+  SELECT 'hnS23','bar_length_cm' UNION ALL
+  SELECT 'hnS23','battery_platform' UNION ALL
+  SELECT 'B4PgL','product_type'
+)
+SELECT
+  r.ord,
+  r.row_id,
+  p.sku,
+  p.path AS product_path,
+  p.brand,
+  p.series,
+  p.model,
+  pk.name AS kind,
+  pp.key,
+  pp.value_text,
+  pp.value_number,
+  a.store_path,
+  i.available_today
+FROM req r
+LEFT JOIN matched m ON m.row_id = r.row_id
+LEFT JOIN products p ON p.sku = m.sku
+LEFT JOIN product_kinds pk ON pk.id = p.kind_id
+LEFT JOIN relevant_props rp ON rp.row_id = r.row_id
+LEFT JOIN product_properties pp ON pp.sku = p.sku AND pp.key = rp.k
+CROSS JOIN actor a
+LEFT JOIN inventory i ON i.store_id = a.store_id AND i.sku = p.sku
+ORDER BY r.ord, p.sku, pp.key;
+SQL
+ord,row_id,sku,product_path,brand,series,model,kind,key,value_text,value_number,store_path,available_today
+1,e2wxG,ELC-MC4A3LVJ,/proc/catalog/electrical/extension_cables/ELC-MC4A3LVJ.json,Wago,Compact,222 3V7-GBQ,Extension Cable,color_family,gray,,/proc/stores/store_vienna_meidling.json,4
+1,e2wxG,ELC-MC4A3LVJ,/proc/catalog/electrical/extension_cables/ELC-MC4A3LVJ.json,Wago,Compact,222 3V7-GBQ,Extension Cable,length_m,1,1,/proc/stores/store_vienna_meidling.json,4
+2,JhzA9,CLN-3KKVTTPJ,/proc/catalog/cleaning/cleaning_liquids/CLN-3KKVTTPJ.json,Karcher,WD,SC 1PM-1UM,Cleaning Liquid,cleaner_type,drain cleaner,,/proc/stores/store_vienna_meidling.json,8
+2,JhzA9,CLN-3KKVTTPJ,/proc/catalog/cleaning/cleaning_liquids/CLN-3KKVTTPJ.json,Karcher,WD,SC 1PM-1UM,Cleaning Liquid,volume_ml,750,750,/proc/stores/store_vienna_meidling.json,8
+3,hnS23,GRD-32A30E2Y,/proc/catalog/garden_tools/chainsaws/GRD-32A30E2Y.json,Stihl,AK System,HSA DUW-0VN,Chainsaw,bar_length_cm,30,30,/proc/stores/store_vienna_meidling.json,5
+3,hnS23,GRD-32A30E2Y,/proc/catalog/garden_tools/chainsaws/GRD-32A30E2Y.json,Stihl,AK System,HSA DUW-0VN,Chainsaw,battery_platform,36v-system,,/proc/stores/store_vienna_meidling.json,5
+3,hnS23,GRD-32A30E2Y,/proc/catalog/garden_tools/chainsaws/GRD-32A30E2Y.json,Stihl,AK System,HSA DUW-0VN,Chainsaw,power_source,battery,,/proc/stores/store_vienna_meidling.json,5
+4,XvNLM,,,,,,,,,,/proc/stores/store_vienna_meidling.json,
+5,cKFaw,,,,,,,,,,/proc/stores/store_vienna_meidling.json,
+6,B4PgL,PNT-12949NIR,/proc/catalog/paints_finishes/metal_concrete_paint/PNT-12949NIR.json,Hammerite,Quick Dry,HAM 22B-SYZ,Metal and Concrete Paint,product_type,facade paint,,/proc/stores/store_vienna_meidling.json,
+Next step_7... Return report_completion with the exact TSV answer and complete grounding refs including the store path. (17010 ms)
+  [[32msafe[0m] tool='report_completion' completed_steps_laconic=['Confirmed target store path for emp_006', 'Confirmed exact matched SKUs and required properties', 'Confirmed available_today for matched SKU/store rows', 'Prepared final TSV in original row order'] message='RowID\tSKU\tin_stock\tmatch\ne2wxG\tELC-MC4A3LVJ\t4\ttrue\nJhzA9\tCLN-3KKVTTPJ\t8\tfalse\nhnS23\tGRD-32A30E2Y\t5\ttrue\nXvNLM\t\t\tfalse\ncKFaw\t\t\tfalse\nB4PgL\tPNT-12949NIR\t0\tfalse' grounding_refs=['/proc/stores/store_vienna_meidling.json', '/proc/catalog/electrical/extension_cables/ELC-MC4A3LVJ.json', '/proc/catalog/cleaning/cleaning_liquids/CLN-3KKVTTPJ.json', '/proc/catalog/garden_tools/chainsaws/GRD-32A30E2Y.json', '/proc/catalog/paints_finishes/metal_concrete_paint/PNT-12949NIR.json'] outcome='OUTCOME_OK' verified=True
+[32magent OUTCOME_OK[0m. Summary:
+- Confirmed target store path for emp_006
+- Confirmed exact matched SKUs and required properties
+- Confirmed available_today for matched SKU/store rows
+- Prepared final TSV in original row order
+
+[34mAGENT SUMMARY: RowID	SKU	in_stock	match
+e2wxG	ELC-MC4A3LVJ	4	true
+JhzA9	CLN-3KKVTTPJ	8	false
+hnS23	GRD-32A30E2Y	5	true
+XvNLM			false
+cKFaw			false
+B4PgL	PNT-12949NIR	0	false[0m
+- [34m/proc/stores/store_vienna_meidling.json[0m
+- [34m/proc/catalog/electrical/extension_cables/ELC-MC4A3LVJ.json[0m
+- [34m/proc/catalog/cleaning/cleaning_liquids/CLN-3KKVTTPJ.json[0m
+- [34m/proc/catalog/garden_tools/chainsaws/GRD-32A30E2Y.json[0m
+- [34m/proc/catalog/paints_finishes/metal_concrete_paint/PNT-12949NIR.json[0m

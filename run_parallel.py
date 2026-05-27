@@ -173,7 +173,7 @@ def main() -> None:
             f"parallel {PARALLEL}"
         )
         # Record score-vs-speed per model for full sweeps (skip partial reruns).
-        if not task_filter:
+        if not task_filter and os.getenv("NO_RESULTS_APPEND") != "1":
             _append_result(MODEL_ID, pct, passed, len(scored), wall, avg, PARALLEL)
     print(f"per-task logs: {LOG_DIR}/<task>.log")
 
