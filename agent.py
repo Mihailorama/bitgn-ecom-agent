@@ -1550,6 +1550,82 @@ def _canonical_product_path(vm: EcomRuntimeClientSync, product: dict) -> dict:
     return product
 
 
+def _product_from_catalog_json(path: str, body: str, base: dict) -> "dict | None":
+    try:
+        data = json.loads(body)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    sku = str(data.get("sku") or path.rsplit("/", 1)[-1].removesuffix(".json"))
+    props = {}
+    raw_props = data.get("properties") or data.get("props") or {}
+    if isinstance(raw_props, dict):
+        for key, value in raw_props.items():
+            if isinstance(value, dict):
+                text = value.get("value_text", value.get("text", value.get("value", "")))
+                num = value.get("value_number", value.get("number", ""))
+            else:
+                text = value
+                num = value if isinstance(value, (int, float)) else ""
+            props[str(key)] = ("" if text is None else str(text), "" if num is None else str(num))
+    elif isinstance(raw_props, list):
+        for item in raw_props:
+            if not isinstance(item, dict) or not item.get("key"):
+                continue
+            text = item.get("value_text", item.get("text", item.get("value", "")))
+            num = item.get("value_number", item.get("number", ""))
+            props[str(item["key"])] = ("" if text is None else str(text), "" if num is None else str(num))
+    return {
+        "sku": sku,
+        "path": str(data.get("path") or path),
+        "family_id": str(data.get("family_id") or base.get("family_id", "")),
+        "brand": str(data.get("brand") or base.get("brand", "")),
+        "series": str(data.get("series") or base.get("series", "")),
+        "model": str(data.get("model") or base.get("model", "")),
+        "name": str(data.get("name") or base.get("name", "")),
+        "kind": str(data.get("kind") or data.get("kind_name") or base.get("kind", "")),
+        "props": props,
+    }
+
+
+def _family_json_exact_candidates(vm: EcomRuntimeClientSync, product: dict, spec: dict) -> "list[dict]":
+    path = product.get("path", "")
+    if "/fam_" not in path or "/" not in path:
+        return []
+    root = path.rsplit("/", 1)[0]
+    try:
+        listing = dispatch(vm, Req_List(tool="list", path=root))
+    except Exception:
+        return []
+    out = []
+    seen = set()
+    hints = _line_model_hints(spec)
+    for entry in getattr(listing, "entries", []) or []:
+        name = getattr(entry, "name", "")
+        if not name.endswith(".json"):
+            continue
+        candidate_path = root + "/" + name
+        try:
+            body = getattr(dispatch(vm, Req_Read(tool="read", path=candidate_path)), "content", "")
+        except Exception:
+            continue
+        candidate = _product_from_catalog_json(candidate_path, body, product)
+        if not candidate or not candidate.get("sku") or candidate["sku"] in seen:
+            continue
+        if hints:
+            hay = " ".join([candidate.get("series", ""), candidate.get("model", ""), candidate.get("name", "")]).lower()
+            if not all(h in hay for h in hints):
+                continue
+        if _line_score(candidate, spec) < max(1, len(_norm_word(spec.get("line", "")).split()) - 2):
+            continue
+        if not all(_prop_matches(candidate, keys, value) for keys, value in spec.get("props", [])):
+            continue
+        seen.add(candidate["sku"])
+        out.append(candidate)
+    return sorted(out, key=lambda p: (-_line_score(p, spec), p["sku"]))
+
+
 def _select_product(vm: EcomRuntimeClientSync, spec: dict, strict_props: bool = False) -> "dict | None":
     candidates = _load_product_candidates(vm, spec)
     if not candidates:
@@ -1610,7 +1686,7 @@ def _exact_product_candidates(vm: EcomRuntimeClientSync, spec: dict) -> "list[di
     ]
 
 
-def _resolve_product_variant(vm: EcomRuntimeClientSync, spec: dict) -> dict:
+def _resolve_product_variant(vm: EcomRuntimeClientSync, spec: dict, allow_family_json: bool = False) -> dict:
     exact = _exact_product_candidates(vm, spec)
     diagnostics = {
         "brand": spec.get("brand", ""),
@@ -1636,6 +1712,17 @@ def _resolve_product_variant(vm: EcomRuntimeClientSync, spec: dict) -> dict:
             "candidates": [],
             "diagnostics": diagnostics,
         }
+    if allow_family_json:
+        family_exact = _family_json_exact_candidates(vm, product, spec)
+        if family_exact:
+            diagnostics["family_json_candidate_count"] = len(family_exact)
+            diagnostics["fallback_sku"] = product.get("sku", "")
+            return {
+                "status": "exact",
+                "reason": "fallback_family_json",
+                "candidates": family_exact,
+                "diagnostics": diagnostics,
+            }
     diagnostics["fallback_sku"] = product.get("sku", "")
     return {
         "status": "fallback",
@@ -1657,6 +1744,8 @@ def _build_inventory_refs(
     for group in candidate_groups:
         candidates = group.get("candidates", [])
         if op == "ge":
+            if group.get("status") == "fallback":
+                continue
             available = [
                 p for p in candidates
                 if p.get("sku") and avail_by_sku.get(p["sku"], 0) >= threshold
@@ -2000,7 +2089,7 @@ def _try_inventory_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTa
     if op == "ge":
         candidate_groups = []
         for spec in specs:
-            group = _resolve_product_variant(vm, spec)
+            group = _resolve_product_variant(vm, spec, allow_family_json=True)
             if group["status"] == "unresolved":
                 return None
             candidate_groups.append(group)

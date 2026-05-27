@@ -801,13 +801,12 @@ def test_inventory_solver_uses_exact_candidates_when_other_ge_specs_need_fallbac
     fn = agent._try_inventory_count(vm, task)
 
     assert fn is not None
-    assert fn.message == "2"
+    assert fn.message == "1"
     assert fn.grounding_refs == [
         "/proc/stores/store_brno_veveri.json",
         "/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0019_qj6u2soy/ELC-3O0L7AGC.json",
-        "/proc/catalog/workwear/work_jackets/WRK-HIGH.json",
     ]
-    print("ok: inventory solver keeps exact ge groups when another spec needs fallback")
+    print("ok: inventory solver keeps exact ge groups and skips unresolved fallback")
 
 
 def test_red_t16_missing_required_ref_should_use_available_family_sibling():
@@ -821,10 +820,25 @@ def test_red_t16_missing_required_ref_should_use_available_family_sibling():
         "PLB-1JZJSYLJ,/proc/catalog/plumbing/drain_traps_siphons/PLB-1JZJSYLJ.json,"
         "fam_plumbing_drain_traps_siphons_0017_1e8dyy1h,Geberit,Compact,Mapress 3M1-GB1,"
         "Geberit Compact Mapress 3M1-GB1 Drain Trap and Siphon,Drain Trap and Siphon,trap_type,bottle trap,\n"
-        "PLB-89OIMQ7V,/proc/catalog/plumbing/drain_traps_siphons/PLB-89OIMQ7V.json,"
-        "fam_plumbing_drain_traps_siphons_0017_1e8dyy1h,Geberit,Compact,Mapress 3M1-GB1,"
-        "Geberit Compact Mapress 3M1-GB1 Drain Trap and Siphon,Drain Trap and Siphon,trap_type,floor trap,\n"
     )
+    family_dir = "/proc/catalog/plumbing/drain_traps_siphons/fam_plumbing_drain_traps_siphons_0017_1e8dyy1h"
+    vm.list_outputs[family_dir] = [
+        SimpleNamespace(name="PLB-1JZJSYLJ.json", kind=_Enum.NODE_KIND_FILE),
+        SimpleNamespace(name="PLB-89OIMQ7V.json", kind=_Enum.NODE_KIND_FILE),
+    ]
+    vm.read_outputs[f"{family_dir}/PLB-89OIMQ7V.json"] = json.dumps({
+        "sku": "PLB-89OIMQ7V",
+        "path": f"{family_dir}/PLB-89OIMQ7V.json",
+        "brand": "Geberit",
+        "series": "Compact",
+        "model": "Mapress 3M1-GB1",
+        "name": "Geberit Compact Mapress 3M1-GB1 Drain Trap and Siphon drain trap 25 mm",
+        "kind": "Drain Trap and Siphon",
+        "properties": {
+            "trap_type": "drain trap",
+            "diameter_mm": 25,
+        },
+    })
     vm.sql_outputs["lower(p.brand) = lower('WD-40')"] = (
         "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
         "AUT-1BSYPDAG,/proc/catalog/automotive/automotive_cleaners/AUT-1BSYPDAG.json,,WD-40,"
@@ -917,6 +931,56 @@ def test_red_t16_count_mismatch_should_not_overcount_fallback_candidate():
     print("red: t16 count-mismatch case expects no fallback overcount")
 
 
+def test_red_t16_fallback_should_use_exact_family_json_sibling():
+    vm = _inventory_solver_vm()
+    vm.sql_outputs["lower(p.brand) = lower('Really Useful Box')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        "STO-179G8ATD,/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0015_2iak0wj0/STO-179G8ATD.json,"
+        "fam_storage_bins_organizers_0015_2iak0wj0,Really Useful Box,Stackable,RUB S2P-7Y6,"
+        "Really Useful Box Stackable RUB S2P-7Y6 Storage Bin and Organizer black stacking box,"
+        "Storage Bin and Organizer,storage_type,stacking box,\n"
+    )
+    family_dir = "/proc/catalog/storage/bins_organizers/fam_storage_bins_organizers_0015_2iak0wj0"
+    vm.list_outputs[family_dir] = [
+        SimpleNamespace(name="STO-179G8ATD.json", kind=_Enum.NODE_KIND_FILE),
+        SimpleNamespace(name="STO-Q2ZU5324.json", kind=_Enum.NODE_KIND_FILE),
+    ]
+    vm.read_outputs[f"{family_dir}/STO-Q2ZU5324.json"] = json.dumps({
+        "sku": "STO-Q2ZU5324",
+        "path": f"{family_dir}/STO-Q2ZU5324.json",
+        "brand": "Really Useful Box",
+        "series": "Stackable",
+        "model": "RUB S2P-7Y6",
+        "name": "Really Useful Box Stackable RUB S2P-7Y6 Storage Bin and Organizer blue stacking box",
+        "kind": "Storage Bin and Organizer",
+        "properties": {
+            "storage_type": "stacking box",
+            "color_family": "Blue",
+        },
+    })
+    vm.sql_outputs["FROM inventory"] = (
+        "sku,available_today\n"
+        "STO-179G8ATD,0\n"
+        "STO-Q2ZU5324,7\n"
+    )
+    task = (
+        "How many of these products have at least 4 items available in the central Brno PowerTool branch today: "
+        "the Storage Bin and Organizer from Really Useful Box in the Really Useful Box Stackable RUB S2P-7Y6 Storage Bin and Organizer line "
+        "that has storage type stacking box and color family Blue? "
+        'Answer in exactly format "count : %d" (no quotes)'
+    )
+
+    fn = agent._try_inventory_count(vm, task)
+
+    assert fn is not None
+    assert fn.message == "count : 1"
+    assert fn.grounding_refs == [
+        "/proc/stores/store_brno_veveri.json",
+        f"{family_dir}/STO-Q2ZU5324.json",
+    ]
+    print("red: t16 fallback should use exact family JSON sibling")
+
+
 def test_property_parser_handles_comma_and_fit_property():
     props = agent._parse_properties("color family Yellow, size L, and fit relaxed")
 
@@ -970,7 +1034,7 @@ def test_inventory_resolver_reports_exact_and_fallback_statuses():
     print("ok: inventory resolver reports exact and fallback statuses")
 
 
-def test_inventory_ref_policy_counts_one_available_sku_per_requested_product():
+def test_inventory_ref_policy_skips_unresolved_fallback_for_ge():
     store = {"path": "/proc/stores/store_brno_veveri.json"}
     groups = [
         {
@@ -997,13 +1061,12 @@ def test_inventory_ref_policy_counts_one_available_sku_per_requested_product():
 
     result = agent._build_inventory_refs(store, groups, avail_by_sku, threshold=3, op="ge")
 
-    assert result["count"] == 2
+    assert result["count"] == 1
     assert result["refs"] == [
         "/proc/stores/store_brno_veveri.json",
         "/proc/catalog/electrical/wiring_devices/fam_electrical_wiring_devices_0019_qj6u2soy/ELC-3O0L7AGC.json",
-        "/proc/catalog/workwear/work_jackets/WRK-HIGH.json",
     ]
-    print("ok: inventory ref policy counts one available sku per requested product")
+    print("ok: inventory ref policy skips unresolved fallback for ge")
 
 
 def test_inventory_solver_emits_structured_diagnostics_for_ge_groups():
@@ -1156,9 +1219,12 @@ def main():
     test_inventory_solver_handles_have_n_or_more_ready_shape()
     test_inventory_solver_counts_available_exact_candidate_sibling_for_ge()
     test_inventory_solver_uses_exact_candidates_when_other_ge_specs_need_fallback()
+    test_red_t16_missing_required_ref_should_use_available_family_sibling()
+    test_red_t16_count_mismatch_should_not_overcount_fallback_candidate()
+    test_red_t16_fallback_should_use_exact_family_json_sibling()
     test_property_parser_handles_comma_and_fit_property()
     test_inventory_resolver_reports_exact_and_fallback_statuses()
-    test_inventory_ref_policy_counts_one_available_sku_per_requested_product()
+    test_inventory_ref_policy_skips_unresolved_fallback_for_ge()
     test_inventory_solver_emits_structured_diagnostics_for_ge_groups()
     test_inventory_solver_does_not_cite_zero_stock_products_for_below_threshold()
     test_inventory_solver_handles_below_available_today_shape()
