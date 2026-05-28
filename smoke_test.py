@@ -1183,6 +1183,54 @@ def test_red_t48_archive_tsv_fraud_total_uses_archive_rows():
     print("ok: archive TSV fraud total uses archive row refs")
 
 
+def test_archive_fraud_diag_payload_summarizes_selected_rows():
+    rows = [
+        {
+            "row_id": "R001",
+            "created_at": "2022-04-13T10:00:00Z",
+            "customer_ref": "cust_old_1",
+            "store_ref": "store_a",
+            "amount_cents": "90000",
+            "currency": "EUR",
+            "payment_method_fingerprint": "pm_a",
+            "device_fingerprint": "dev_a",
+            "archive_channel": "batch",
+        },
+        {
+            "row_id": "R002",
+            "created_at": "2022-04-13T10:04:00Z",
+            "customer_ref": "cust_old_1",
+            "store_ref": "store_b",
+            "amount_cents": "90000",
+            "currency": "EUR",
+            "payment_method_fingerprint": "pm_a",
+            "device_fingerprint": "dev_b",
+            "archive_channel": "batch",
+        },
+        {
+            "row_id": "R003",
+            "created_at": "2022-04-13T10:08:00Z",
+            "customer_ref": "cust_old_2",
+            "store_ref": "store_c",
+            "amount_cents": "9000",
+            "currency": "EUR",
+            "payment_method_fingerprint": "pm_c",
+            "device_fingerprint": "dev_c",
+            "archive_channel": "batch",
+        },
+    ]
+
+    payload = agent._archive_fraud_diag_payload(rows, rows[:2])
+
+    assert payload["row_count"] == 3
+    assert payload["selected_count"] == 2
+    assert payload["selected_amount_cents"] == 180000
+    assert [row["row_id"] for row in payload["selected_rows"]] == ["R001", "R002"]
+    assert any(group["kind"] == "customer_day" and group["key"] == "cust_old_1|2022-04-13"
+               for group in payload["candidate_groups"])
+    print("ok: archive fraud diagnostic payload summarizes selected rows")
+
+
 def _fraud_payment_row(
     path,
     customer,
@@ -2341,6 +2389,7 @@ def main():
     test_discount_desk_coverage_denial_names_required_token()
     test_payment_verification_recovery_cites_current_update_doc()
     test_red_t48_archive_tsv_fraud_total_uses_archive_rows()
+    test_archive_fraud_diag_payload_summarizes_selected_rows()
     test_red_fraud_cluster_adds_secondary_high_value_customer_day_burst()
     test_red_fraud_all_archived_pool_does_not_inner_join_archived_metadata()
     test_red_fraud_secondary_pool_groups_candidates_before_fetching_rows()

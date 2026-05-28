@@ -2685,12 +2685,105 @@ def _detect_archive_fraud_rows(rows: "list[dict[str, str]]") -> "list[dict[str, 
     return sorted(selected.values(), key=lambda row: row.get("created_at", ""))
 
 
+def _archive_diag_row(row: "dict[str, str]") -> "dict[str, str | int]":
+    return {
+        "row_id": row.get("row_id", ""),
+        "created_at": row.get("created_at", ""),
+        "customer": row.get("customer_ref", ""),
+        "store": row.get("store_ref", ""),
+        "amount_cents": _int_field(row, "amount_cents"),
+        "currency": row.get("currency", ""),
+        "pm": row.get("payment_method_fingerprint", ""),
+        "dev": row.get("device_fingerprint", ""),
+        "channel": row.get("archive_channel", ""),
+    }
+
+
+def _archive_diag_group(
+    kind: str,
+    key: str,
+    rows: "list[dict[str, str]]",
+) -> "dict[str, object]":
+    return {
+        "kind": kind,
+        "key": key,
+        "n": len(rows),
+        "amount_cents": sum(_int_field(row, "amount_cents") for row in rows),
+        "span_minutes": round(_archive_span_minutes(rows), 3),
+        "stores": len({row.get("store_ref", "") for row in rows if row.get("store_ref")}),
+        "customers": len({row.get("customer_ref", "") for row in rows if row.get("customer_ref")}),
+        "pms": len({
+            row.get("payment_method_fingerprint", "")
+            for row in rows
+            if row.get("payment_method_fingerprint")
+        }),
+        "devs": len({
+            row.get("device_fingerprint", "")
+            for row in rows
+            if row.get("device_fingerprint")
+        }),
+        "row_ids": [row.get("row_id", "") for row in rows if row.get("row_id")],
+    }
+
+
+def _archive_fraud_diag_payload(
+    rows: "list[dict[str, str]]",
+    fraud_rows: "list[dict[str, str]]",
+) -> "dict[str, object]":
+    by_customer_day: "dict[tuple[str, str], list[dict[str, str]]]" = {}
+    by_device_day: "dict[tuple[str, str], list[dict[str, str]]]" = {}
+    by_customer: "dict[str, list[dict[str, str]]]" = {}
+    for row in rows:
+        day = row.get("created_at", "")[:10]
+        by_customer_day.setdefault((row.get("customer_ref", ""), day), []).append(row)
+        by_device_day.setdefault((row.get("device_fingerprint", ""), day), []).append(row)
+        by_customer.setdefault(row.get("customer_ref", ""), []).append(row)
+
+    groups: "list[dict[str, object]]" = []
+    for (customer, day), items in by_customer_day.items():
+        amount = sum(_int_field(row, "amount_cents") for row in items)
+        if len(items) >= 3 or amount >= 150000:
+            groups.append(_archive_diag_group("customer_day", f"{customer}|{day}", items))
+    for (device, day), items in by_device_day.items():
+        amount = sum(_int_field(row, "amount_cents") for row in items)
+        if len(items) >= 3 or amount >= 150000:
+            groups.append(_archive_diag_group("device_day", f"{device}|{day}", items))
+    for customer, items in by_customer.items():
+        burst = _best_archive_burst(items)
+        if _archive_burst_score(burst) > (0, 0, 0):
+            groups.append(_archive_diag_group("best_customer_burst", customer, burst))
+    pair_cohort = _best_archive_pair_cohort(by_customer)
+    if pair_cohort:
+        groups.append(_archive_diag_group("best_pair_cohort", "global", pair_cohort))
+
+    groups.sort(
+        key=lambda group: (
+            -int(group.get("amount_cents") or 0),
+            -int(group.get("n") or 0),
+            str(group.get("kind") or ""),
+            str(group.get("key") or ""),
+        )
+    )
+
+    return {
+        "row_count": len(rows),
+        "selected_count": len(fraud_rows),
+        "selected_amount_cents": sum(_int_field(row, "amount_cents") for row in fraud_rows),
+        "selected_rows": [_archive_diag_row(row) for row in fraud_rows],
+        "candidate_groups": groups[:40],
+        "all_rows": [_archive_diag_row(row) for row in rows],
+    }
+
+
 def _try_archive_fraud_total(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
     archive_path = _archive_export_path(task_text)
     if not archive_path or "fraud" not in (task_text or "").lower():
         return None
     rows = _archive_rows(vm, archive_path)
     fraud_rows = _detect_archive_fraud_rows(rows)
+    if os.getenv("ARCHIVE_FRAUD_DIAG") == "1":
+        payload = _archive_fraud_diag_payload(rows, fraud_rows)
+        print("ARCHIVE_FRAUD_DIAG " + json.dumps(payload, sort_keys=True))
     total = sum(_int_field(row, "amount_cents") for row in fraud_rows)
     refs = [f"{archive_path}#row={row.get('row_id', '')}" for row in fraud_rows if row.get("row_id")]
     if not refs:
