@@ -41,7 +41,12 @@ from bitgn.harness_pb2 import (
 from connectrpc.errors import ConnectError
 
 from agent import run_agent
-from degradation_gate import build_sweep_report, format_gate_summary, write_sweep_report
+from degradation_gate import (
+    build_sweep_report,
+    format_gate_summary,
+    points_for_gate,
+    write_sweep_report,
+)
 
 
 BITGN_URL = os.getenv("BITGN_HOST") or os.getenv("BENCHMARK_HOST") or "https://api.bitgn.com"
@@ -175,7 +180,8 @@ def should_submit_leaderboard(
         reasons = "; ".join(str(reason) for reason in report.get("reasons") or [])
         return False, reasons or "gate rejected"
 
-    points = float(report.get("points") or 0.0)
+    points = points_for_gate(float(report.get("points") or 0.0))
+    best_points = points_for_gate(best_points)
     epsilon = 1e-6
     if points > best_points + epsilon:
         return True, f"points improved {points:.2f} > {best_points:.2f}"

@@ -327,6 +327,25 @@ def test_degradation_gate_counts_partial_points_for_acceptance():
     print("ok: degradation gate counts partial points for acceptance")
 
 
+def test_degradation_gate_uses_two_decimal_points_for_acceptance():
+    results = [(f"t{i:02d}", 1.0, [], None, 1.0) for i in range(1, 50)]
+    results.append(("t50", 0.9979, ["near-perfect partial"], None, 1.0))
+    with tempfile.TemporaryDirectory() as tmp:
+        report = degradation_gate.build_sweep_report(
+            results,
+            tmp,
+            min_points=50.0,
+            min_pct=98.0,
+        )
+
+    assert report["accepted"] is True
+    assert report["decision"] == "ACCEPT"
+    assert report["points"] == 49.9979
+    assert report["points_gate"] == 50.0
+    assert report["non_perfect"][0]["task_id"] == "t50"
+    print("ok: degradation gate accepts two-decimal leaderboard-equivalent points")
+
+
 def test_mixed_runner_routes_default_complex_tasks_to_codex():
     assert run_mixed_parallel.parse_task_set("t01,t02 t03") == {"t01", "t02", "t03"}
     assert run_mixed_parallel.choose_model_for_task(
@@ -507,6 +526,45 @@ def test_mixed_runner_submits_only_accepted_full_sweeps():
     assert "denominator changed" in reason
 
     print("ok: mixed runner submits only leaderboard-improving full sweeps")
+
+
+def test_mixed_runner_submit_gate_uses_two_decimal_points():
+    near_equal_faster = {
+        "accepted": True,
+        "reasons": [],
+        "points": 49.9979,
+        "max_points": 50,
+        "timing": {"platform_open_seconds_sum": 1800.0},
+    }
+
+    ok, reason = run_mixed_parallel.should_submit_leaderboard(
+        near_equal_faster,
+        [],
+        best_points=50.0,
+        best_max_points=50,
+        best_time_seconds=3603.0,
+    )
+    assert ok is True
+    assert "same points and faster" in reason
+
+    near_equal_slower = {
+        "accepted": True,
+        "reasons": [],
+        "points": 49.9979,
+        "max_points": 50,
+        "timing": {"platform_open_seconds_sum": 3700.0},
+    }
+    ok, reason = run_mixed_parallel.should_submit_leaderboard(
+        near_equal_slower,
+        [],
+        best_points=50.0,
+        best_max_points=50,
+        best_time_seconds=3603.0,
+    )
+    assert ok is False
+    assert "not faster" in reason
+
+    print("ok: mixed runner submit gate compares two-decimal points")
 
 
 def test_connect_error_recovery():
@@ -2256,11 +2314,13 @@ def main():
     test_degradation_gate_rejects_security_miss_even_when_score_is_high()
     test_degradation_gate_accepts_only_points_and_percent_pass()
     test_degradation_gate_counts_partial_points_for_acceptance()
+    test_degradation_gate_uses_two_decimal_points_for_acceptance()
     test_mixed_runner_routes_default_complex_tasks_to_codex()
     test_mixed_runner_model_slots()
     test_mixed_runner_task_model_overrides_take_priority()
     test_mixed_runner_reserves_known_trial_slot_before_start()
     test_mixed_runner_submits_only_accepted_full_sweeps()
+    test_mixed_runner_submit_gate_uses_two_decimal_points()
     test_connect_error_recovery()
     test_sql_path_extraction()
     test_format_enforcement()

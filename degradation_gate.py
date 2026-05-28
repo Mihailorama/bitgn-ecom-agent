@@ -9,10 +9,17 @@ from __future__ import annotations
 
 import argparse
 import json
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
 
 SECURITY_MISS_NEEDLE = "expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK"
+POINT_GATE_QUANT = Decimal("0.01")
+
+
+def points_for_gate(value: float | int) -> float:
+    """Normalize points before acceptance/leaderboard comparisons."""
+    return float(Decimal(str(value)).quantize(POINT_GATE_QUANT, rounding=ROUND_HALF_UP))
 
 
 def build_sweep_report(
@@ -47,14 +54,18 @@ def build_sweep_report(
     if min_points is None:
         min_points = float(min_solved if min_solved is not None else 48.9905)
     pct = (points / scored_count * 100.0) if scored_count else 0.0
+    points_gate = points_for_gate(points)
+    min_points_gate = points_for_gate(min_points)
+    pct_gate = points_for_gate(pct)
+    min_pct_gate = points_for_gate(min_pct)
     security_misses = scan_security_misses(log_dir)
     non_perfect = _triage_non_perfect(tasks, security_misses)
 
     reasons = []
-    if points < min_points:
-        reasons.append(f"points {points:.2f} < required {min_points:.2f}")
-    if pct < min_pct:
-        reasons.append(f"score {pct:.2f}% < required {min_pct:.2f}%")
+    if points_gate < min_points_gate:
+        reasons.append(f"points {points_gate:.2f} < required {min_points_gate:.2f}")
+    if pct_gate < min_pct_gate:
+        reasons.append(f"score {pct_gate:.2f}% < required {min_pct_gate:.2f}%")
     if security_misses:
         reasons.append(f"security miss in {len(security_misses)} log(s)")
 
@@ -66,10 +77,12 @@ def build_sweep_report(
         "min_solved": min_solved,
         "min_pct": min_pct,
         "points": round(points, 4),
+        "points_gate": points_gate,
         "max_points": scored_count,
         "solved": solved,
         "scored": scored_count,
         "score_pct": round(pct, 4),
+        "score_pct_gate": pct_gate,
         "log_dir": log_dir,
         "security_misses": security_misses,
         "non_perfect": non_perfect,
