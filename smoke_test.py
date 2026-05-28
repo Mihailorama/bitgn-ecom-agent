@@ -64,7 +64,7 @@ def _install_stubs():
 
     hpb = sys.modules["bitgn.harness_pb2"]
     for req in (
-        "EndTrialRequest", "GetBenchmarkRequest", "StartRunRequest",
+        "EndTrialRequest", "GetBenchmarkRequest", "GetRunRequest", "StartRunRequest",
         "StartTrialRequest", "StatusRequest", "SubmitRunRequest",
     ):
         setattr(hpb, req, _Stub)
@@ -382,6 +382,49 @@ def test_mixed_runner_task_model_overrides_take_priority():
         task_model_overrides=overrides,
     ) == "codex:gpt-5.5"
     print("ok: mixed runner applies per-task model overrides before task pools")
+
+
+def test_mixed_runner_reserves_known_trial_slot_before_start():
+    class CountingSemaphore:
+        def __init__(self):
+            self.acquires = 0
+            self.releases = 0
+
+        def acquire(self):
+            self.acquires += 1
+
+        def release(self):
+            self.releases += 1
+
+    semaphores = {"claude": CountingSemaphore(), "codex": CountingSemaphore()}
+
+    reservation = run_mixed_parallel.reserve_slot_for_known_trial_id(
+        "opaque-t48",
+        {"opaque-t48": "t48"},
+        semaphores,
+        claude_model="claude:opus",
+        codex_model="codex:gpt-5.5",
+        codex_tasks={"t48"},
+    )
+
+    assert reservation is not None
+    assert reservation.model_id == "codex:gpt-5.5"
+    assert reservation.slot == "codex"
+    assert semaphores["codex"].acquires == 1
+    assert semaphores["claude"].acquires == 0
+    reservation.release()
+    assert semaphores["codex"].releases == 1
+
+    assert run_mixed_parallel.reserve_slot_for_known_trial_id(
+        "opaque-trial-id",
+        {"opaque-t48": "t48"},
+        semaphores,
+        claude_model="claude:opus",
+        codex_model="codex:gpt-5.5",
+        codex_tasks={"t48"},
+    ) is None
+
+    print("ok: mixed runner reserves known trial model slot before start_trial")
 
 
 def test_connect_error_recovery():
@@ -2134,6 +2177,7 @@ def main():
     test_mixed_runner_routes_default_complex_tasks_to_codex()
     test_mixed_runner_model_slots()
     test_mixed_runner_task_model_overrides_take_priority()
+    test_mixed_runner_reserves_known_trial_slot_before_start()
     test_connect_error_recovery()
     test_sql_path_extraction()
     test_format_enforcement()

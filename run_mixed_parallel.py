@@ -19,6 +19,7 @@ import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from contextlib import redirect_stdout
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,7 @@ from bitgn.harness_pb2 import (
     EndTrialRequest,
     EvalPolicy,
     GetBenchmarkRequest,
+    GetRunRequest,
     StartRunRequest,
     StartTrialRequest,
     StatusRequest,
@@ -147,20 +149,86 @@ def _acquire_for_model(model_id: str, semaphores: dict[str, Any]):
     return slot, sem
 
 
-def run_one(trial_id: str, task_filter: list[str], semaphores: dict[str, Any]):
+def planned_task_id_for_trial(
+    trial_id: str,
+    trial_task_ids: dict[str, str] | set[str],
+) -> str | None:
+    if isinstance(trial_task_ids, dict):
+        return trial_task_ids.get(trial_id)
+    if trial_id in trial_task_ids:
+        return trial_id
+    return None
+
+
+@dataclass
+class SlotReservation:
+    model_id: str
+    slot: str
+    sem: Any
+    slot_wait: float
+
+    def release(self) -> None:
+        self.sem.release()
+
+
+def reserve_slot_for_known_trial_id(
+    trial_id: str,
+    trial_task_ids: dict[str, str] | set[str],
+    semaphores: dict[str, Any],
+    *,
+    claude_model: str = CLAUDE_MODEL_ID,
+    codex_model: str = CODEX_MODEL_ID,
+    claude_tasks: set[str] | None = None,
+    codex_tasks: set[str] | None = None,
+    task_model_overrides: dict[str, str] | None = None,
+) -> SlotReservation | None:
+    task_id = planned_task_id_for_trial(trial_id, trial_task_ids)
+    if task_id is None:
+        return None
+    model_id = choose_model_for_task(
+        task_id,
+        claude_model=claude_model,
+        codex_model=codex_model,
+        claude_tasks=claude_tasks,
+        codex_tasks=codex_tasks,
+        task_model_overrides=task_model_overrides,
+    )
+    wait0 = time.time()
+    slot, sem = _acquire_for_model(model_id, semaphores)
+    return SlotReservation(model_id, slot, sem, time.time() - wait0)
+
+
+def run_one(
+    trial_id: str,
+    task_filter: list[str],
+    semaphores: dict[str, Any],
+    trial_task_ids: dict[str, str],
+):
     try:
-        return _run_one(trial_id, task_filter, semaphores)
+        return _run_one(trial_id, task_filter, semaphores, trial_task_ids)
     except Exception as exc:
         return (trial_id, None, None, f"worker error: {exc!r}"[:200], 0.0, "", 0.0, 0.0)
 
 
-def _run_one(trial_id: str, task_filter: list[str], semaphores: dict[str, Any]):
+def _run_one(
+    trial_id: str,
+    task_filter: list[str],
+    semaphores: dict[str, Any],
+    trial_task_ids: dict[str, str],
+):
     client = HarnessServiceClientSync(BITGN_URL)
+    planned_task_id = planned_task_id_for_trial(trial_id, trial_task_ids)
+    if task_filter and planned_task_id and planned_task_id not in task_filter:
+        return (planned_task_id, "skip", None, None, 0.0, "", 0.0, 0.0)
+
+    reservation = reserve_slot_for_known_trial_id(trial_id, trial_task_ids, semaphores)
     try:
         start0 = time.time()
         trial = _retry(lambda: client.start_trial(StartTrialRequest(trial_id=trial_id)))
         trial_open0 = time.time()
     except ConnectError as exc:
+        if reservation:
+            reservation.release()
         start_secs = time.time() - start0
         return (trial_id, None, None, f"start_trial: {exc.code} {exc.message}", start_secs, "", 0.0, 0.0)
 
@@ -169,13 +237,21 @@ def _run_one(trial_id: str, task_filter: list[str], semaphores: dict[str, Any]):
             _retry(lambda: client.end_trial(EndTrialRequest(trial_id=trial.trial_id)))
         except ConnectError:
             pass
+        if reservation:
+            reservation.release()
         platform_open = time.time() - trial_open0
         return (trial.task_id, "skip", None, None, 0.0, "", platform_open, 0.0)
 
     model_id = choose_model_for_task(trial.task_id)
-    wait0 = time.time()
-    slot, sem = _acquire_for_model(model_id, semaphores)
-    slot_wait = time.time() - wait0
+    if reservation and reservation.model_id == model_id:
+        slot, sem = reservation.slot, reservation.sem
+        slot_wait = reservation.slot_wait
+    else:
+        if reservation:
+            reservation.release()
+        wait0 = time.time()
+        slot, sem = _acquire_for_model(model_id, semaphores)
+        slot_wait = time.time() - wait0
     log_path = os.path.join(LOG_DIR, f"{trial.task_id}.log")
     t0 = time.time()
     agent_error = None
@@ -254,6 +330,15 @@ def main() -> None:
         "claude": manager.BoundedSemaphore(MIXED_CLAUDE_LIMIT),
         "codex": manager.BoundedSemaphore(MIXED_CODEX_LIMIT),
     }
+    benchmark_task_ids = {task.task_id for task in bench.tasks}
+    run_head = _retry(lambda: client.get_run(GetRunRequest(run_id=run.run_id)))
+    trial_task_ids = {
+        trial.trial_id: trial.task_id
+        for trial in run_head.trials
+        if trial.trial_id and trial.task_id
+    }
+    if not trial_task_ids:
+        trial_task_ids = {trial_id: trial_id for trial_id in run.trial_ids if trial_id in benchmark_task_ids}
 
     results = []
     ctx = mp.get_context("spawn")
@@ -261,7 +346,7 @@ def main() -> None:
     try:
         with ProcessPoolExecutor(max_workers=MIXED_PARALLEL, mp_context=ctx) as pool:
             futures = {
-                pool.submit(run_one, tid, task_filter, semaphores): tid
+                pool.submit(run_one, tid, task_filter, semaphores, trial_task_ids): tid
                 for tid in run.trial_ids
             }
             for fut in as_completed(futures):

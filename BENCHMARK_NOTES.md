@@ -686,6 +686,14 @@ Current state in `agent.py` includes:
   customer-day burst in addition to the main composite incident. The candidate
   pool must be grouped and ranked in SQL before fetching rows so `/bin/sql`
   output limits do not clip later bursts.
+- Timing root cause: leaderboard time matched `platform_open_seconds_sum`
+  (`3603s`, displayed as `1:00:03`), not local wall (`350s`). Pre-fix
+  `run_mixed_parallel.py` opened trials before waiting for the per-model
+  semaphore, so `slot_wait_seconds_sum=1206s` was charged as platform-open
+  trial time. The runner now reads `GetRun` trial metadata and reserves the
+  planned task's model slot before `start_trial()` when a `trial_id -> task_id`
+  mapping is available; if metadata is absent, `trial_id == task_id` still works
+  as a fallback.
 
 **2026-05-27 autoresearch sidecar.**
 - Created a separate private sibling repository:

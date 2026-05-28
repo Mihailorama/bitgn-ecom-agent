@@ -100,7 +100,11 @@ accepted gates.
 Required shape:
 
 - One `StartRun` and one platform-provided list of trial ids.
-- Each worker calls `start_trial()` first, then routes by `trial.task_id`.
+- After `StartRun`, the runner reads `GetRun` trial metadata and reserves the
+  planned task's model semaphore before `start_trial()`. This keeps model-slot
+  wait out of BitGN's platform-open trial duration, which is what the
+  leaderboard reports as run time. If metadata is absent, `trial_id == task_id`
+  remains a fallback.
 - Simple/deterministic tasks may run on `CLAUDE_MODEL_ID=claude:sonnet`.
 - Fragile resolver, fraud, archive, quote, ambiguous, and security-sensitive
   tasks stay on `CODEX_MODEL_ID=codex:gpt-5.3-codex` unless evidence says
