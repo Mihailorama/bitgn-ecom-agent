@@ -74,7 +74,7 @@ upgrade if validation shows family-specific weaknesses.
 Sources: https://bitgn.com/insights/ (operation-pangolin, codex-on-rails,
 skifmax rules-evolution, plan-repl-agent, azamat1c filesystem-agent).
 
-## Current accepted milestone (updated 2026-05-27)
+## Current accepted milestone (updated 2026-05-28)
 
 - Current accepted leaderboard score: `50.00/50` points (`100.00%`),
   `50/50` perfect tasks.
@@ -86,6 +86,23 @@ skifmax rules-evolution, plan-repl-agent, azamat1c filesystem-agent).
   security grep clean.
 - The previous `48.9905/50` mixed run is now historical evidence, not the active
   target.
+- Current runner/control version: commit `e306b6f` adds the leaderboard submit
+  guard. A run submits only if it is a full accepted sweep with no security miss
+  and either improves points over the personal best or ties points with the same
+  denominator and a faster `platform_open_seconds_sum`.
+- Current leaderboard best used by the submit guard:
+  `LEADERBOARD_BEST_POINTS=50`, `LEADERBOARD_BEST_MAX_POINTS=50`,
+  `LEADERBOARD_BEST_SECONDS=3603`.
+- 2026-05-28 diagnostic submit-gate checks:
+  - `artifacts/sweeps/2026-05-28-submitgate-mixed-opus-codex55-r1/` scored
+    `33.00/50`, was rejected, and did not submit. The current `claude:opus`
+    CLI path returned `OUTCOME_ERR_INTERNAL` on many non-deterministic tasks.
+  - `artifacts/sweeps/2026-05-28-submitgate-all-codex55-r1/` scored
+    `49.5429/50` (`99.0858%`), `49/50` perfect, with only `t48=0.5429`.
+    It was faster than the best leaderboard time
+    (`platform_open_seconds_sum=1885.628s`) but correctly did not submit
+    because points were below `50.00/50`.
+- Active next isolated cycle: `t48` archive fraud amount mismatch.
 
 ## Status & next steps (historical notes, updated 2026-05-26 morning state)
 

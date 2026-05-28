@@ -117,3 +117,5 @@ lookups, strong model for security/fraud/mutation.
 | 2026-05-26 21:16 | codex:gpt-5.3-codex | 89.6% | 43/48 | 320s | 29s | 6 |
 | 2026-05-27 21:30 | mixed claude:opus + codex:gpt-5.5 | 97.981% (48.9905/50 points) | 47/50 | 461s local / 1:12:27 leaderboard | 58s | 12 (6+6) |
 | 2026-05-27 23:25 | mixed claude:opus + codex:gpt-5.5 | 100.0% (50.00/50 points) | 50/50 | 350s local | 48s agent avg | 12 (6+6) |
+| 2026-05-28 | mixed claude:opus + codex:gpt-5.5 submit-gate diagnostic | 66.0% (33.00/50 points, not submitted) | 33/50 | 234s local / 1081s platform-open | 22s agent avg | 12 (6+6) |
+| 2026-05-28 | all-codex:gpt-5.5 via mixed runner submit-gate diagnostic | 99.0858% (49.5429/50 points, not submitted) | 49/50 | 415s local / 1886s platform-open | 38s agent avg | 6 codex |
