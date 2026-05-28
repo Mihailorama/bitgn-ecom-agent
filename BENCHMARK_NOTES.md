@@ -79,13 +79,15 @@ skifmax rules-evolution, plan-repl-agent, azamat1c filesystem-agent).
 - Current accepted leaderboard score: `50.00/50` points (`100.00%`),
   `50/50` perfect tasks.
 - Accepted logs:
-  `artifacts/sweeps/2026-05-27-goal495-mixed-opus-codex55-r1/`.
-- Profile: mixed `claude:opus` + `codex:gpt-5.5`, `MIXED_PARALLEL=12`,
-  `MIXED_CLAUDE_LIMIT=6`, `MIXED_CODEX_LIMIT=6`.
-- Gate: accepted against `MIN_ACCEPTED_POINTS=49.5` and `MIN_ACCEPTED_PCT=99`;
+  `artifacts/sweeps/2026-05-28-t48-rowlevel-fix6-full-codex55-r1/`.
+- Profile: `run_mixed_parallel.py` with all tasks routed to
+  `codex:gpt-5.5`, `MIXED_PARALLEL=6`, `MIXED_CODEX_LIMIT=6`.
+- Gate: accepted against `MIN_ACCEPTED_POINTS=50` and `MIN_ACCEPTED_PCT=98`;
   security grep clean.
-- The previous `48.9905/50` mixed run is now historical evidence, not the active
-  target.
+- Leaderboard submit:
+  `run-22ReRoZEhobjc7YsSjEW9N9kM`.
+- The previous `48.9905/50` and 2026-05-27 `50.00/50` mixed runs are now
+  historical evidence, not the active target.
 - Current runner/control version: commit `ef61e7f` keeps the leaderboard submit
   guard and compares gate points after two-decimal normalization. A run submits
   only if it is a full accepted sweep with no security miss and either improves
@@ -95,7 +97,7 @@ skifmax rules-evolution, plan-repl-agent, azamat1c filesystem-agent).
   display rounds to `50.0/50`.
 - Current leaderboard best used by the submit guard:
   `LEADERBOARD_BEST_POINTS=50`, `LEADERBOARD_BEST_MAX_POINTS=50`,
-  `LEADERBOARD_BEST_SECONDS=3603`.
+  `LEADERBOARD_BEST_SECONDS=1741`.
 - 2026-05-28 diagnostic submit-gate checks:
   - `artifacts/sweeps/2026-05-28-submitgate-mixed-opus-codex55-r1/` scored
     `33.00/50`, was rejected, and did not submit. The current `claude:opus`
@@ -146,9 +148,17 @@ skifmax rules-evolution, plan-repl-agent, azamat1c filesystem-agent).
     perfect with many scores in the `0.34-0.63` range. Logs:
     `artifacts/sweeps/2026-05-28-t48-store4-postfix-r01..r15/`. The code change
     and RED tests were reverted; do not retry this predicate as-is.
-  - Current `t48` status: unresolved. The next RED test must distinguish the
-    real archive fraud rows from same-customer false positives rather than
-    broadening customer cohorts.
+  - Accepted row-level fix logs:
+    `artifacts/sweeps/2026-05-28-t48-rowlevel-fix6-r01..r10/`,
+    `artifacts/sweeps/2026-05-28-t48-rowlevel-fix6-related-r1/`, and
+    `artifacts/sweeps/2026-05-28-t48-rowlevel-fix6-full-codex55-r1/`.
+    Result: isolated `10/10` perfect, related fraud/archive subset `4/4`
+    perfect, full sweep `50.00/50`.
+  - Current `t48` status: closed for the saved row-level archive-fraud patterns.
+    The productive pattern was not broad cohort expansion; it was row-level
+    distinction of true archive fraud rows from same-customer/device false
+    positives, with RED tests from concrete logs and a full-sweep acceptance
+    gate.
 
 ## Status & next steps (historical notes, updated 2026-05-26 morning state)
 
@@ -723,7 +733,7 @@ Current state in `agent.py` includes:
   `t38=0.7119325995`, `t39=0.6346275806`, `t40=0.6439393163`.
 - Security grep was clean: no
   `expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK`.
-- This replaces perfect solved-count as the active acceptance target:
+- This replaced perfect solved-count as the active acceptance target at the time:
   leaderboard points are `sum(task.score)`, so fractional task scores count
   toward the goal. Perfect count remains diagnostic only.
 - Timing note: local wall was `461s`, while leaderboard showed `1:12:27`.
@@ -732,7 +742,7 @@ Current state in `agent.py` includes:
   distinguished from actual agent runtime.
 
 **2026-05-27 goal 49.5 accepted milestone.**
-- Current accepted leaderboard milestone:
+- Previous accepted leaderboard milestone:
   `artifacts/sweeps/2026-05-27-goal495-mixed-opus-codex55-r1/`.
 - Command profile:
   `MIXED_PARALLEL=12`, `MIXED_CLAUDE_LIMIT=6`,
@@ -797,13 +807,13 @@ codex-only baseline and `claude:sonnet` as the cheap regression canary.
    architecture cycle. A targeted/subset pass is only diagnostic; acceptance
    still requires the full sweep not to reduce leaderboard points.
 1. Preserve the accepted leaderboard baseline: `50.00/50` points from
-   `artifacts/sweeps/2026-05-27-goal495-mixed-opus-codex55-r1/`. The previous
-   codex-only `46/47` milestone at commit `e4a2d41`, tag
+   `artifacts/sweeps/2026-05-28-t48-rowlevel-fix6-full-codex55-r1/`. The
+   previous codex-only `46/47` milestone at commit `e4a2d41`, tag
    `bench-ecom1-dev-v47-46of47-20260526`, remains historical evidence but is no
    longer the active leaderboard target. Any later run with fewer points is
    diagnostic evidence only, even if its perfect-task count looks different.
-2. Do not keep tuning `t16` or `t38-t40` unless a new full sweep regresses them.
-   Current accepted full sweep closes them at `1.00`.
+2. Do not keep tuning `t16`, `t38-t40`, or `t48` unless a new full sweep
+   regresses them. Current accepted full sweep closes them at `1.00`.
 3. Degraded 48-task portfolio misses (`t05`, `t26`, `t48`) are not accepted
    baseline misses. Treat them as evidence for future benchmark-drift triage
    only after first re-establishing or exceeding the `46` solved-task baseline

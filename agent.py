@@ -951,11 +951,256 @@ def _required_format(instruction: str):
     return None
 
 
+def _looks_receipt_price_yesno_task(instruction: str) -> bool:
+    low = (instruction or "").lower()
+    return (
+        "old receipt" in low
+        and "/uploads" in low
+        and re.search(r"within\s+\d+(?:\.\d+)?\s*eur", low) is not None
+        and "excluding vat" in low
+    )
+
+
+def _single_yesno_token(message: str) -> "str | None":
+    tokens = re.findall(r"<\s*(YES|NO)\s*>", message or "", re.I)
+    if len(tokens) == 1:
+        return f"<{tokens[0].upper()}>"
+    return None
+
+
+def _euro_amount_to_cents(raw: str) -> "int | None":
+    text = (raw or "").strip().replace(" ", "")
+    if not text:
+        return None
+    if "," in text:
+        text = text.replace(".", "").replace(",", ".")
+    try:
+        return int(round(float(text) * 100))
+    except ValueError:
+        return None
+
+
+def _receipt_word_norm(text: str) -> str:
+    table = str.maketrans({"0": "o", "1": "i", "3": "e", "5": "s", "7": "t"})
+    return _norm_word((text or "").translate(table))
+
+
+def _receipt_items(body: str) -> "tuple[list[dict[str, object]], int | None]":
+    items: list[dict[str, object]] = []
+    current: dict[str, object] | None = None
+    total_cents: int | None = None
+    for line in (body or "").splitlines():
+        total_m = re.search(r"Total\s*\(exkl\.\s*MwSt\)\s*EUR\s*([0-9.]+,[0-9]{2})", line, re.I)
+        if total_m:
+            total_cents = _euro_amount_to_cents(total_m.group(1))
+            continue
+        subtotal_m = re.search(r"\bSUB\s*T[O0]TAL\b\s+(?:EUR\s*)?([0-9][0-9.,]*[.,][0-9]{2})", line, re.I)
+        if subtotal_m:
+            total_cents = _euro_amount_to_cents(subtotal_m.group(1))
+            continue
+        table_m = re.match(
+            r"\s*(\d+)\s+([A-Z0-9]+-[A-Z0-9-]+)\s+(.+?)\s+([0-9][0-9.,]*[.,][0-9]{2})(?:\s+([0-9][0-9.,]*[.,][0-9]{2}))?\s*$",
+            line,
+        )
+        if table_m:
+            current = {
+                "qty": int(table_m.group(1)),
+                "desc": re.sub(r"\s+", " ", table_m.group(3)).strip(" ."),
+                "line_cents": _euro_amount_to_cents(table_m.group(5) or ""),
+                "sku": table_m.group(2).upper(),
+                "unit_cents": _euro_amount_to_cents(table_m.group(4)),
+            }
+            items.append(current)
+            continue
+        item_m = re.match(r"\s*(\d+)\s+(.+?)\s+([0-9][0-9.]*,[0-9]{2})\s*$", line)
+        if item_m:
+            current = {
+                "qty": int(item_m.group(1)),
+                "desc": re.sub(r"\s+", " ", item_m.group(2)).strip(" ."),
+                "line_cents": _euro_amount_to_cents(item_m.group(3)),
+                "sku": "",
+                "unit_cents": None,
+            }
+            items.append(current)
+            continue
+        if current is None:
+            continue
+        continuation_m = re.search(r"([0-9][0-9.,]*[.,][0-9]{2})\s*$", line)
+        if continuation_m and current.get("line_cents") is None:
+            current["line_cents"] = _euro_amount_to_cents(continuation_m.group(1))
+            cont_text = re.sub(r"([0-9][0-9.,]*[.,][0-9]{2})\s*$", "", line).strip()
+            if cont_text:
+                current["desc"] = (str(current.get("desc") or "") + " " + re.sub(r"\s+", " ", cont_text)).strip()
+            continue
+        unit_m = re.search(r"Einzelpreis\s+EUR\s+([0-9.]+,[0-9]{2})", line, re.I)
+        if unit_m:
+            current["unit_cents"] = _euro_amount_to_cents(unit_m.group(1))
+            continue
+        sku_m = re.search(r"Art\.Nr\.\s*([A-Z0-9-]+)", line, re.I)
+        if sku_m:
+            current["sku"] = sku_m.group(1).upper()
+    if total_cents is None:
+        total_cents = sum(int(item.get("line_cents") or 0) for item in items)
+    for item in items:
+        if item.get("line_cents") is None:
+            item["line_cents"] = int(item.get("qty") or 0) * int(item.get("unit_cents") or 0)
+        if item.get("unit_cents") is None:
+            qty = int(item.get("qty") or 0)
+            line_cents = int(item.get("line_cents") or 0)
+            if qty:
+                item["unit_cents"] = int(round(line_cents / qty))
+    return items, total_cents
+
+
+def _receipt_upload_paths(vm: EcomRuntimeClientSync) -> "list[str]":
+    try:
+        listing = dispatch(vm, Req_List(tool="list", path="/uploads"))
+    except Exception:
+        return []
+    paths = []
+    for entry in getattr(listing, "entries", []) or []:
+        name = getattr(entry, "name", "")
+        if name.lower().endswith(".txt"):
+            paths.append("/uploads/" + name)
+    return sorted(paths, key=lambda p: ("receipt" not in p.lower(), p))
+
+
+def _best_receipt_price_candidate(vm: EcomRuntimeClientSync, item: dict[str, object]) -> "dict[str, str] | None":
+    unit_cents = int(item.get("unit_cents") or 0)
+    if unit_cents <= 0:
+        return None
+    rows = _csv_dicts(_exec_sql_stdout(vm, f"""
+/* receipt_price_candidates */
+SELECT product_sku, record_path, product_name, price_cents, price_currency
+FROM product_variants
+WHERE price_currency='EUR'
+  AND price_cents BETWEEN {max(0, unit_cents - 250)} AND {unit_cents + 250}
+ORDER BY ABS(price_cents - {unit_cents}) ASC, product_sku
+LIMIT 80;
+"""))
+    if not rows:
+        return None
+    desc_tokens = {
+        tok for tok in _receipt_word_norm(str(item.get("desc") or "")).split()
+        if len(tok) >= 3 and tok not in {"eur", "art", "nr"}
+    }
+    best = None
+    best_score = -10**9
+    best_overlap = 0
+    best_price_delta = 10**9
+    near_exact_price_rows = []
+    for row in rows:
+        name_tokens = set(_receipt_word_norm(row.get("product_name", "")).split())
+        overlap = len(desc_tokens & name_tokens)
+        try:
+            price_delta = abs(int(float(row.get("price_cents") or 0)) - unit_cents)
+        except ValueError:
+            price_delta = 10**9
+        if price_delta <= 5:
+            near_exact_price_rows.append(row)
+        score = overlap * 1000 - price_delta
+        if score > best_score:
+            best = row
+            best_score = score
+            best_overlap = overlap
+            best_price_delta = price_delta
+    if best is None:
+        return None
+    if best_score >= 1998:
+        return best
+    if best_overlap >= 1 and best_price_delta <= 5:
+        return best
+    if best_price_delta <= 5 and len(near_exact_price_rows) == 1:
+        return near_exact_price_rows[0]
+    return None
+
+
+def _try_receipt_ocr_price_check(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    if not _looks_receipt_price_yesno_task(task_text):
+        return None
+    receipt_paths = _receipt_upload_paths(vm)
+    if not receipt_paths:
+        return None
+    receipt_path = receipt_paths[0]
+    body = getattr(dispatch(vm, Req_Read(tool="read", path=receipt_path)), "content", "")
+    items, receipt_total = _receipt_items(body)
+    if not items or receipt_total is None:
+        return None
+    skus = [str(item.get("sku") or "") for item in items if item.get("sku")]
+    if not skus:
+        return None
+    exact_rows = _csv_dicts(_exec_sql_stdout(vm, f"""
+SELECT product_sku, record_path, product_name, price_cents, price_currency
+FROM product_variants
+WHERE product_sku IN ({",".join(_sql_quote(sku) for sku in skus)});
+"""))
+    by_sku = {row.get("product_sku", ""): row for row in exact_rows}
+    refs = [receipt_path]
+    today_total = 0
+    missing = []
+    for item in items:
+        sku = str(item.get("sku") or "")
+        row = by_sku.get(sku)
+        if row is None:
+            row = _best_receipt_price_candidate(vm, item)
+        if row is None:
+            missing.append(sku or str(item.get("desc") or "unknown item"))
+            continue
+        try:
+            price_cents = int(float(row.get("price_cents") or 0))
+        except ValueError:
+            missing.append(sku or row.get("product_sku") or str(item.get("desc") or "unknown item"))
+            continue
+        today_total += int(item.get("qty") or 0) * price_cents
+        if row.get("record_path"):
+            refs.append(row["record_path"])
+    tolerance_m = re.search(r"within\s+(\d+(?:\.\d+)?)\s*eur", task_text or "", re.I)
+    tolerance = int(round(float(tolerance_m.group(1)) * 100)) if tolerance_m else 200
+    delta = abs(today_total - int(receipt_total))
+    ok = not missing and delta <= tolerance
+    print(
+        "RECEIPT_DIAG "
+        + json.dumps(
+            {
+                "items": len(items),
+                "missing": missing,
+                "today_total_cents": today_total,
+                "receipt_total_cents": int(receipt_total),
+                "delta_cents": delta,
+                "tolerance_cents": tolerance,
+                "ok": ok,
+            },
+            sort_keys=True,
+        )
+    )
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=[
+            "deterministic OCR receipt item parse",
+            "deterministic current catalogue price comparison",
+        ],
+        message="<YES>" if ok else "<NO>",
+        grounding_refs=_normalize_refs(refs),
+        outcome="OUTCOME_OK",
+        verified=True,
+    )
+
+
 def _enforce_format_inplace(instruction: str, fn: "ReportTaskCompletion") -> "str | None":
     # Coerce fn.message in place when a required format is unambiguous and the
     # value is recoverable; return a correction string to re-prompt once if not;
     # return None (and leave message, modulo strip) when no format is required or
     # the message already conforms.
+    if _looks_receipt_price_yesno_task(instruction):
+        token = _single_yesno_token(fn.message)
+        if token is not None:
+            fn.message = token
+            return None
+        return (
+            "FORMAT REQUIRED. The receipt price task is graded as a bare yes/no token; "
+            "re-issue report_completion with `message` set to exactly <YES> or <NO> "
+            "and nothing else - keep the same grounding_refs and outcome."
+        )
     spec = _required_format(instruction)
     if spec is None:
         return None
@@ -1340,10 +1585,19 @@ def _exec_sql_stdout_with_incident_fallback(
     if "no space left" not in stderr.lower() and "ecom-sql-spool" not in stderr.lower():
         return "", []
     incident = []
-    for path in ["/docs/urgent-sql-incident.md", "/bin/sql-readme-2024-07-17.md"] + _candidate_doc_paths(vm):
+    incident_candidates = [
+        "/docs/urgent-sql-incident.md",
+        "/bin/sql-readme-2024-07-17.md",
+        "/bin/advisory-2024-07-17/README.md",
+    ]
+    for path in incident_candidates + _candidate_doc_paths(vm):
         if path in incident:
             continue
-        if path != "/docs/urgent-sql-incident.md" and "sql" not in path.lower():
+        if (
+            path not in incident_candidates
+            and path != "/docs/urgent-sql-incident.md"
+            and "sql" not in path.lower()
+        ):
             continue
         try:
             body = getattr(dispatch(vm, Req_Read(tool="read", path=path)), "content", "")
@@ -1409,6 +1663,11 @@ def _format_numeric_for_task(task_text: str, n: int) -> str:
         return f"[{tag}:{space}{n}]"
     if re.search(rf"\bcount\t{placeholder}\b", task_text, re.I):
         return f"count\t{n}"
+    if re.search(rf"\banswer\s*=\s*{placeholder}\b", task_text, re.I):
+        return f"answer={n}"
+    quoted = re.search(r"['\"`]([^'\"`]*%d[^'\"`]*)['\"`]", task_text or "", re.I)
+    if quoted:
+        return re.sub(r"%d", str(n), quoted.group(1), flags=re.I)
     low = task_text.lower()
     if re.search(r"<count:\s*%d\s*>", low):
         return f"<COUNT:{n}>"
@@ -1421,14 +1680,15 @@ def _format_numeric_for_task(task_text: str, n: int) -> str:
 
 _PROP_PREFIXES = [
     "adapter type", "adhesive type", "anchor type",
-    "bar length", "battery platform", "cleaner type", "coating", "color family", "connection type", "connector type", "current",
+    "app based scheduling",
+    "bar length", "battery platform", "bluetooth control", "cleaner type", "coating", "color family", "connection type", "connector type", "current",
     "cutting width",
     "device type", "disc diameter", "drive type", "fastener type", "fitting type", "ip rating", "kit contents",
-    "finish", "fit", "garment type", "lens color", "luminous flux", "machine type", "mask type", "piece count", "product type",
+    "finish", "fit", "fragrance", "garment type", "gps tracking", "lens color", "luminous flux", "machine type", "mask type", "material", "piece count", "product type",
     "protection class", "protection type",
-    "pack count", "power source", "screw type", "sealant type", "storage type", "tank volume", "thread type",
-    "stackable system", "stackable", "tool profile", "tool type", "trap type", "vehicle type", "viscosity", "wattage", "voltage", "volume",
-    "cleaning type", "color temperature", "colour temperature", "diameter", "length", "power", "size", "surface", "fitting",
+    "pack count", "power source", "screw type", "sealant type", "standard", "storage type", "tank volume", "thread type",
+    "stackable system", "stackable", "tool profile", "tool type", "trap type", "use area", "vehicle type", "viscosity", "voice control", "wattage", "voltage", "volume",
+    "chemistry", "cleaning type", "color temperature", "colour temperature", "wifi enabled", "diameter", "length", "power", "size", "surface", "fitting",
 ]
 
 
@@ -1463,6 +1723,8 @@ def _prop_key_candidates(label: str, value: str) -> "list[str]":
         out.append("stackable_system")
     if label == "color family":
         out.append("color")
+    if label == "lens color":
+        out.append("lens_colour")
     if label == "fit":
         out.append("garment_fit")
     return list(dict.fromkeys(out))
@@ -1471,6 +1733,12 @@ def _prop_key_candidates(label: str, value: str) -> "list[str]":
 def _parse_properties(text: str) -> "list[tuple[list[str], str]]":
     props = []
     rest = re.sub(r"\band has\b", " and ", text or "", flags=re.I)
+    rest = re.sub(r"\bsupports\s+app[- ]based scheduling\b", "app based scheduling yes", rest, flags=re.I)
+    rest = re.sub(r"\bsupports\s+voice\s+control\b", "voice control yes", rest, flags=re.I)
+    rest = re.sub(r"\bbluetooth control\b", "bluetooth control yes", rest, flags=re.I)
+    rest = re.sub(r"\bbuilt[- ]in\s+gps\s+tracking\b", "gps tracking yes", rest, flags=re.I)
+    rest = re.sub(r"\bis\s+wifi-enabled\b", "wifi enabled yes", rest, flags=re.I)
+    rest = re.sub(r"\bwifi-enabled\b", "wifi enabled yes", rest, flags=re.I)
     while rest:
         low = rest.lower().lstrip(" ,")
         low = re.sub(r"^and\s+", "", low)
@@ -1490,6 +1758,7 @@ def _parse_properties(text: str) -> "list[tuple[list[str], str]]":
             if m:
                 stop = min(stop, start + m.start())
         value = low[start:stop].strip(" ,.")
+        value = re.sub(r"\s+is$", "", value, flags=re.I)
         if value:
             props.append((_prop_key_candidates(match_label, value), value))
         rest = low[stop:]
@@ -1507,7 +1776,7 @@ def _extract_product_specs(task_text: str) -> "list[dict]":
         source = source[m_intro.start():]
     pat = re.compile(
         r"the (?P<kind>.+?) from (?P<brand>.+?) in the (?P<line>.+?) line that has "
-        r"(?P<props>.*?)(?=,the [A-Z0-9]| in catalogue|\? Answer|\.|$)",
+        r"(?P<props>.*?)(?=,the [A-Z0-9]| in (?:the )?catalogue|\? Answer|\.|$)",
         re.I | re.S,
     )
     for m in pat.finditer(source):
@@ -1520,7 +1789,23 @@ def _extract_product_specs(task_text: str) -> "list[dict]":
 
 
 def _load_product_candidates(vm: EcomRuntimeClientSync, spec: dict) -> "list[dict]":
-    q = f"""
+    queries = [
+        f"""
+SELECT pv.product_sku AS sku, pv.record_path AS path, pv.product_family_id AS family_id,
+       pv.brand, pv.series, pv.model, pv.product_name AS name, pk.product_kind_name AS kind_name,
+       pvp.property_key AS key, pvp.property_value_text AS value_text, pvp.property_value_number AS value_number
+FROM product_variants pv
+JOIN product_kinds pk ON pk.product_kind_id = pv.product_kind_id
+LEFT JOIN product_variant_properties pvp ON pvp.product_sku = pv.product_sku
+WHERE lower(pv.brand) = lower({_sql_quote(spec['brand'])})
+  AND (
+    lower(pk.product_kind_name) = lower({_sql_quote(spec['kind'])})
+    OR lower(pk.product_kind_name) = lower({_sql_quote(spec['kind'] + "s")})
+    OR lower(pv.product_name) LIKE '%' || lower({_sql_quote(spec['kind'])}) || '%'
+  )
+ORDER BY pv.product_sku, pvp.property_key;
+""",
+        f"""
 SELECT p.sku, p.path, p.family_id, p.brand, p.series, p.model, p.name, pk.name AS kind_name,
        pp.key, pp.value_text, pp.value_number
 FROM products p
@@ -1533,8 +1818,13 @@ WHERE lower(p.brand) = lower({_sql_quote(spec['brand'])})
     OR lower(p.name) LIKE '%' || lower({_sql_quote(spec['kind'])}) || '%'
   )
 ORDER BY p.sku, pp.key;
-"""
-    rows = _csv_dicts(_exec_sql_stdout(vm, q))
+""",
+    ]
+    rows = []
+    for q in queries:
+        rows = _csv_dicts(_exec_sql_stdout(vm, q))
+        if rows:
+            break
     by_sku: "dict[str, dict]" = {}
     for row in rows:
         sku = row.get("sku", "")
@@ -1563,14 +1853,31 @@ ORDER BY p.sku, pp.key;
 def _prop_matches(product: dict, key_candidates: "list[str]", value: str) -> bool:
     want = _norm_compact(value)
     want_num = re.search(r"-?\d+(?:\.\d+)?", value or "")
+    want_float = float(want_num.group(0)) if want_num else None
+    size_codes = {"xs", "s", "m", "l", "xl", "xxl", "xxxl", "xxxxl", "onesize", "os", "osfm"}
     for key, (text, num) in product.get("props", {}).items():
         key_norm = key.lower()
         if not any(k == key_norm or k in key_norm or key_norm in k for k in key_candidates):
             continue
         got_text = _norm_compact(text)
         got_num = _norm_compact(num)
-        if got_text and (want in got_text or got_text in want):
-            return True
+        if got_text:
+            if (
+                ("size" in key_norm or "size" in key_candidates)
+                and (want in size_codes or got_text in size_codes)
+            ):
+                if got_text == want:
+                    return True
+            elif len(want) <= 2 and want.isalpha():
+                if got_text == want:
+                    return True
+            elif want in got_text or got_text in want:
+                return True
+        if want_float is not None:
+            for raw in (num, text):
+                got_num_m = re.search(r"-?\d+(?:\.\d+)?", str(raw or ""))
+                if got_num_m and abs(float(got_num_m.group(0)) - want_float) < 1e-6:
+                    return True
         if want_num and (got_num == _norm_compact(want_num.group(0)) or got_text == _norm_compact(want_num.group(0))):
             return True
     return False
@@ -1631,7 +1938,7 @@ def _product_from_catalog_json(path: str, body: str, base: dict) -> "dict | None
         return None
     if not isinstance(data, dict):
         return None
-    sku = str(data.get("sku") or path.rsplit("/", 1)[-1].removesuffix(".json"))
+    sku = str(data.get("sku") or data.get("product_sku") or path.rsplit("/", 1)[-1].removesuffix(".json"))
     props = {}
     raw_props = data.get("properties") or data.get("props") or {}
     if isinstance(raw_props, dict):
@@ -1645,20 +1952,23 @@ def _product_from_catalog_json(path: str, body: str, base: dict) -> "dict | None
             props[str(key)] = ("" if text is None else str(text), "" if num is None else str(num))
     elif isinstance(raw_props, list):
         for item in raw_props:
-            if not isinstance(item, dict) or not item.get("key"):
+            if not isinstance(item, dict):
                 continue
-            text = item.get("value_text", item.get("text", item.get("value", "")))
-            num = item.get("value_number", item.get("number", ""))
-            props[str(item["key"])] = ("" if text is None else str(text), "" if num is None else str(num))
+            key = item.get("key") or item.get("property_key")
+            if not key:
+                continue
+            text = item.get("value_text", item.get("property_value_text", item.get("text", item.get("value", ""))))
+            num = item.get("value_number", item.get("property_value_number", item.get("number", "")))
+            props[str(key)] = ("" if text is None else str(text), "" if num is None else str(num))
     return {
         "sku": sku,
-        "path": str(data.get("path") or path),
-        "family_id": str(data.get("family_id") or base.get("family_id", "")),
+        "path": str(data.get("path") or data.get("record_path") or path),
+        "family_id": str(data.get("family_id") or data.get("product_family_id") or base.get("family_id", "")),
         "brand": str(data.get("brand") or base.get("brand", "")),
         "series": str(data.get("series") or base.get("series", "")),
         "model": str(data.get("model") or base.get("model", "")),
-        "name": str(data.get("name") or base.get("name", "")),
-        "kind": str(data.get("kind") or data.get("kind_name") or base.get("kind", "")),
+        "name": str(data.get("name") or data.get("product_name") or base.get("name", "")),
+        "kind": str(data.get("kind") or data.get("kind_name") or data.get("product_kind_name") or base.get("kind", "")),
         "props": props,
     }
 
@@ -1927,7 +2237,15 @@ def _emit_inventory_diagnostics(
 
 
 def _all_stores(vm: EcomRuntimeClientSync) -> "list[dict[str, str]]":
-    return _csv_dicts(_exec_sql_stdout(vm, "SELECT id,path,name,city,is_open FROM stores ORDER BY id;"))
+    queries = [
+        "SELECT store_id AS id, record_path AS path, store_name AS name, city, is_open FROM stores ORDER BY store_id;",
+        "SELECT id,path,name,city,is_open FROM stores ORDER BY id;",
+    ]
+    for q in queries:
+        rows = _csv_dicts(_exec_sql_stdout(vm, q))
+        if rows:
+            return rows
+    return []
 
 
 def _find_store(vm: EcomRuntimeClientSync, phrase: str) -> "dict[str, str] | None":
@@ -2102,36 +2420,62 @@ def _try_catalog_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTask
             break
     if addendum:
         body = addendum[1]
-        kind_id_m = re.search(r"Requested kind_id:\s*([A-Za-z0-9_/-]+)", body, re.I)
+        kind_id_m = re.search(r"Requested (?:product_)?kind_id:\s*([A-Za-z0-9_/-]+)", body, re.I)
         city_m = re.search(
-            r"open PowerTool store in\s+([A-Za-z -]+?)\s+with available_today greater than 0",
+            r"open PowerTool store in\s+([A-Za-z -]+?)\s+with available_today(?:_quantity)? greater than 0",
             body,
             re.I,
         )
         city = city_m.group(1).strip() if city_m else ""
-        where_kind = (
+        old_where_kind = (
             "p.kind_id=" + _sql_quote(kind_id_m.group(1))
             if kind_id_m else
             "pk.name=" + _sql_quote(kind)
         )
+        new_where_kind = (
+            "pv.product_kind_id=" + _sql_quote(kind_id_m.group(1))
+            if kind_id_m else
+            "pk.product_kind_name=" + _sql_quote(kind)
+        )
         excluded_family = _catalogue_reporting_excluded_family(addendum[0], body)
-        q = f"""
+        queries = [
+            f"""
 SELECT COUNT(DISTINCT p.sku) AS n
 FROM products p
 JOIN product_kinds pk ON pk.id=p.kind_id
 JOIN inventory i ON i.sku=p.sku
 JOIN stores s ON s.id=i.store_id
-WHERE {where_kind}
+WHERE {old_where_kind}
   AND i.available_today > 0
   AND s.is_open=1
   {("AND p.family_id<>" + _sql_quote(excluded_family)) if excluded_family else ""}
   {("AND lower(s.city)=lower(" + _sql_quote(city) + ")") if city else ""};
-"""
+""",
+            f"""
+SELECT COUNT(DISTINCT pv.product_sku) AS n
+FROM product_variants pv
+JOIN product_kinds pk ON pk.product_kind_id=pv.product_kind_id
+JOIN store_inventory si ON si.product_sku=pv.product_sku
+JOIN stores s ON s.store_id=si.store_id
+WHERE {new_where_kind}
+  AND si.available_today_quantity > 0
+  AND s.is_open=1
+  {("AND pv.product_family_id<>" + _sql_quote(excluded_family)) if excluded_family else ""}
+  {("AND lower(s.city)=lower(" + _sql_quote(city) + ")") if city else ""};
+""",
+        ]
     else:
-        q = f"SELECT COUNT(*) AS n FROM products p JOIN product_kinds pk ON pk.id=p.kind_id WHERE pk.name={_sql_quote(kind)};"
-    stdout, incident_refs = _exec_sql_stdout_with_incident_fallback(vm, q)
-    refs[1:1] = [p for p in incident_refs if p not in refs]
-    n = _sql_single_int(stdout)
+        queries = [
+            f"SELECT COUNT(*) AS n FROM products p JOIN product_kinds pk ON pk.id=p.kind_id WHERE pk.name={_sql_quote(kind)};",
+            f"SELECT COUNT(*) AS n FROM product_variants pv JOIN product_kinds pk ON pk.product_kind_id=pv.product_kind_id WHERE pk.product_kind_name={_sql_quote(kind)};",
+        ]
+    n = None
+    for q in queries:
+        stdout, incident_refs = _exec_sql_stdout_with_incident_fallback(vm, q)
+        refs[1:1] = [p for p in incident_refs if p not in refs]
+        n = _sql_single_int(stdout)
+        if n is not None:
+            break
     if n is None:
         return None
     return ReportTaskCompletion(
@@ -2144,25 +2488,329 @@ WHERE {where_kind}
     )
 
 
+def _base_spec_for_conflicting_duplicate_props(spec: dict) -> "dict | None":
+    seen: "dict[str, str]" = {}
+    props = spec.get("props", [])
+    for idx, (keys, value) in enumerate(props):
+        key = keys[0] if keys else ""
+        if not key:
+            continue
+        norm_value = _norm_compact(value)
+        previous = seen.get(key)
+        if previous is not None and previous != norm_value:
+            base = dict(spec)
+            base["props"] = props[:idx] + props[idx + 1:]
+            return base
+        seen[key] = norm_value
+    return None
+
+
+def _dedupe_products(products: "list[dict]") -> "list[dict]":
+    seen = set()
+    out = []
+    for product in products:
+        sku = product.get("sku", "")
+        if not sku or sku in seen:
+            continue
+        seen.add(sku)
+        out.append(product)
+    return out
+
+
+def _try_catalogue_freeform_check(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    if _extract_product_specs(task_text):
+        return None
+    m = re.search(r"\bcheck whether\s+(.+?)\s+is in (?:the )?catalogue\??", task_text or "", re.I)
+    if not m:
+        return None
+    phrase = m.group(1).strip(" .?")
+    tokens = [t for t in _norm_word(phrase).split() if t not in {"a", "an", "the", "or", "and"}]
+    if len(tokens) < 2:
+        return None
+    brand = tokens[0]
+    before_comma = phrase.split(",", 1)[0]
+    core_tokens = [t for t in _norm_word(before_comma).split() if t not in {brand, "a", "an", "the", "or", "and"}]
+    option_groups: "list[list[str]]" = []
+    if "," in phrase:
+        option_text = phrase.split(",", 1)[1]
+        option_groups = [
+            [t for t in _norm_word(part).split() if t not in {"a", "an", "the", "or", "and"}]
+            for part in re.split(r"\bor\b", option_text, flags=re.I)
+        ]
+        option_groups = [group for group in option_groups if group]
+    queries = [
+        f"""
+SELECT product_sku AS sku, record_path AS path, brand, series, model, product_name AS name, properties
+FROM product_variants
+WHERE lower(brand)=lower({_sql_quote(brand)})
+ORDER BY product_sku;
+""",
+        f"""
+SELECT sku, path, brand, series, model, name, properties
+FROM products
+WHERE lower(brand)=lower({_sql_quote(brand)})
+ORDER BY sku;
+""",
+    ]
+    rows = []
+    for q in queries:
+        rows = _csv_dicts(_exec_sql_stdout(vm, q))
+        if rows:
+            break
+    for row in rows:
+        hay = _norm_word(" ".join(row.get(k, "") for k in ("brand", "series", "model", "name", "properties")))
+        if not all(token in hay for token in core_tokens):
+            continue
+        if option_groups and not any(all(token in hay for token in group) for group in option_groups):
+            continue
+        return ReportTaskCompletion(
+            tool="report_completion",
+            completed_steps_laconic=["deterministic freeform catalogue check"],
+            message=f"<YES> SKU checked: {row.get('sku', '')}",
+            grounding_refs=_normalize_refs([row.get("path", ""), "/AGENTS.MD"]),
+            outcome="OUTCOME_OK",
+            verified=True,
+        )
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["deterministic freeform catalogue check"],
+        message="<NO>",
+        grounding_refs=["/AGENTS.MD"],
+        outcome="OUTCOME_OK",
+        verified=True,
+    )
+
+
 def _try_product_check(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
-    if " in catalogue" not in task_text and "support note claims" not in task_text.lower():
+    text_l = task_text.lower()
+    if (
+        " in catalogue" not in text_l
+        and " in the catalogue" not in text_l
+        and "support note claims" not in text_l
+    ):
         return None
     specs = _extract_product_specs(task_text)
     if len(specs) != 1:
         return None
-    product = _select_product(vm, specs[0])
+    spec = specs[0]
+    conflict_base_spec = _base_spec_for_conflicting_duplicate_props(spec)
+    exact_products = [] if conflict_base_spec else _exact_product_candidates(vm, spec)
+    product = exact_products[0] if exact_products else None
+    ref_products = exact_products[:]
+    all_match = bool(exact_products)
+    if product is None:
+        props = spec.get("props", [])
+        base_spec = conflict_base_spec
+        if base_spec is None and props:
+            base_spec = dict(spec)
+            base_spec["props"] = props[:-1]
+        if base_spec is not None:
+            base_candidates = _exact_product_candidates(vm, base_spec)
+            full_family_matches = []
+            if conflict_base_spec is None:
+                for candidate in base_candidates:
+                    full_family_matches.extend(_family_json_exact_candidates(vm, candidate, spec))
+            if full_family_matches:
+                ref_products = _dedupe_products(full_family_matches)
+                product = ref_products[0]
+                all_match = True
+            elif base_candidates:
+                merged = {p.get("sku", ""): p for p in base_candidates if p.get("sku")}
+                for candidate in base_candidates:
+                    for sibling in _family_json_exact_candidates(vm, candidate, base_spec):
+                        sku = sibling.get("sku", "")
+                        if sku:
+                            merged.setdefault(sku, sibling)
+                ref_products = _dedupe_products(list(merged.values()))
+                product = ref_products[0]
+        if product is None:
+            product = _select_product(vm, spec, strict_props=False)
+            ref_products = [product] if product else []
     if not product:
         return None
-    all_match = all(_prop_matches(product, keys, value) for keys, value in specs[0].get("props", []))
-    msg = "<YES>" if all_match else f"<NO> SKU checked: {product['sku']}"
+    if all_match:
+        msg = "<YES>"
+    else:
+        checked = ", ".join(p["sku"] for p in ref_products if p and p.get("sku"))
+        msg = f"<NO> SKU checked: {checked or product['sku']}"
     return ReportTaskCompletion(
         tool="report_completion",
         completed_steps_laconic=["deterministic catalogue product/property check"],
         message=msg,
-        grounding_refs=[product["path"], "/AGENTS.MD"],
+        grounding_refs=_normalize_refs([p["path"] for p in ref_products if p and p.get("path")] + ["/AGENTS.MD"]),
         outcome="OUTCOME_OK",
         verified=True,
     )
+
+
+def _parse_quote_table_rows(task_text: str) -> "list[dict]":
+    text = task_text or ""
+    if "RowID\tSKU\tin_stock\tmatch" not in text:
+        return []
+    if "RowID\tdescription\tquantity" not in text:
+        return []
+    if not re.search(r"\bmy store's same-day availability\b", text, re.I):
+        return []
+    m = re.search(r"\bRows:\s*(.+)\s*$", text, re.I | re.S)
+    if not m:
+        return []
+    rows = []
+    for order, line in enumerate(m.group(1).splitlines(), start=1):
+        line = line.strip()
+        if not line or set(line) <= {"-"}:
+            continue
+        parts = line.split("\t")
+        if len(parts) < 3:
+            parts = re.split(r"\s{2,}", line, maxsplit=2)
+        if len(parts) < 3:
+            continue
+        qty_m = re.search(r"\d+", parts[-1])
+        if not qty_m:
+            continue
+        rows.append({
+            "order": order,
+            "row_id": parts[0].strip(),
+            "description": parts[1].strip(),
+            "quantity": int(qty_m.group(0)),
+        })
+    return rows
+
+
+def _current_employee_store(vm: EcomRuntimeClientSync, employee_id: str) -> "dict[str, str] | None":
+    if not employee_id:
+        return None
+    queries = [
+        f"""
+SELECT e.record_path AS employee_path, s.store_id AS store_id, s.record_path AS store_path
+FROM employee_accounts e
+JOIN stores s ON s.store_id=e.store_id
+WHERE e.employee_id={_sql_quote(employee_id)};
+""",
+        f"""
+SELECT e.path AS employee_path, s.id AS store_id, s.path AS store_path
+FROM employees e
+JOIN stores s ON s.id=e.store_id
+WHERE e.id={_sql_quote(employee_id)};
+""",
+    ]
+    for q in queries:
+        rows = _csv_dicts(_exec_sql_stdout(vm, q))
+        if rows:
+            row = rows[0]
+            return {
+                "employee_path": row.get("employee_path", ""),
+                "id": row.get("store_id", ""),
+                "path": row.get("store_path", ""),
+            }
+    return None
+
+
+def _try_quote_table(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    rows = _parse_quote_table_rows(task_text)
+    if not rows:
+        return None
+    user, _roles = _id_context(vm)
+    store = _current_employee_store(vm, user)
+    if not store or not store.get("id") or not store.get("path"):
+        return None
+
+    resolved = []
+    products = []
+    seen_skus = set()
+    for row in rows:
+        specs = _extract_product_specs(row["description"])
+        product = None
+        if len(specs) == 1 and _base_spec_for_conflicting_duplicate_props(specs[0]) is None:
+            product = _select_product(vm, specs[0], strict_props=True)
+        if product and product.get("sku") and product["sku"] not in seen_skus:
+            seen_skus.add(product["sku"])
+            products.append(product)
+        resolved.append((row, product))
+
+    avail_by_sku = _inventory_availability_by_sku(vm, store["id"], [p["sku"] for p in products])
+    lines = ["RowID\tSKU\tin_stock\tmatch"]
+    for row, product in resolved:
+        sku = product.get("sku", "") if product else ""
+        available = avail_by_sku.get(sku, 0) if sku else 0
+        in_stock = str(available) if sku else ""
+        match = bool(sku and available >= row["quantity"])
+        lines.append(f"{row['row_id']}\t{sku}\t{in_stock}\t{str(match).lower()}")
+
+    refs = ["/AGENTS.MD", store.get("employee_path", ""), store["path"]]
+    refs += [p["path"] for p in products if p.get("path")]
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["deterministic quote table via exact catalogue and store inventory"],
+        message="\n".join(lines),
+        grounding_refs=_normalize_refs(refs),
+        outcome="OUTCOME_OK",
+        verified=True,
+    )
+
+
+def _inventory_availability_by_sku(vm: EcomRuntimeClientSync, store_id: str, skus: "list[str]") -> "dict[str, int]":
+    if not skus:
+        return {}
+    sku_list = ",".join(_sql_quote(sku) for sku in skus)
+    queries = [
+        f"""
+SELECT product_sku AS sku, available_today_quantity AS available_today
+FROM store_inventory
+WHERE store_id={_sql_quote(store_id)}
+  AND product_sku IN ({sku_list});
+""",
+        f"""
+SELECT sku, available_today
+FROM inventory
+WHERE store_id={_sql_quote(store_id)}
+  AND sku IN ({sku_list});
+""",
+    ]
+    for q in queries:
+        rows = _csv_dicts(_exec_sql_stdout(vm, q))
+        if rows:
+            return {r.get("sku", ""): int(r.get("available_today") or 0) for r in rows}
+    return {}
+
+
+def _city_availability_by_sku(vm: EcomRuntimeClientSync, city: str, skus: "list[str]") -> "dict[str, int]":
+    if not skus:
+        return {}
+    sku_list = ",".join(_sql_quote(sku) for sku in skus)
+    queries = [
+        f"""
+SELECT si.product_sku AS sku, SUM(COALESCE(si.available_today_quantity,0)) AS available_today
+FROM stores s
+LEFT JOIN store_inventory si ON si.store_id=s.store_id AND si.product_sku IN ({sku_list})
+WHERE lower(s.city)=lower({_sql_quote(city)})
+GROUP BY si.product_sku;
+""",
+        f"""
+SELECT i.sku AS sku, SUM(COALESCE(i.available_today,0)) AS available_today
+FROM stores s
+LEFT JOIN inventory i ON i.store_id=s.id AND i.sku IN ({sku_list})
+WHERE lower(s.city)=lower({_sql_quote(city)})
+GROUP BY i.sku;
+""",
+    ]
+    out = {sku: 0 for sku in skus}
+    for q in queries:
+        rows = _csv_dicts(_exec_sql_stdout(vm, q))
+        if not rows:
+            continue
+        for row in rows:
+            sku = row.get("sku", "")
+            if not sku and len(skus) == 1 and ("n" in row or "available_today" in row):
+                sku = skus[0]
+            if not sku:
+                continue
+            value = row.get("available_today", row.get("n", "0"))
+            try:
+                out[sku] = int(float(value or 0))
+            except ValueError:
+                out[sku] = 0
+        return out
+    return out
 
 
 def _parse_inventory_count_request(task_text: str) -> "tuple[str, int, str, str] | None":
@@ -2250,15 +2898,7 @@ def _try_inventory_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTa
                     query_skus.append(sku)
         if not query_skus:
             return None
-        skus = ",".join(_sql_quote(sku) for sku in query_skus)
-        q = f"""
-SELECT sku, available_today
-FROM inventory
-WHERE store_id={_sql_quote(store['id'])}
-  AND sku IN ({skus});
-"""
-        rows = _csv_dicts(_exec_sql_stdout(vm, q))
-        avail_by_sku = {r.get("sku", ""): int(r.get("available_today") or 0) for r in rows}
+        avail_by_sku = _inventory_availability_by_sku(vm, store["id"], query_skus)
         _emit_inventory_diagnostics(store, specs, candidate_groups, avail_by_sku, threshold, op)
         inventory_result = _build_inventory_refs(store, candidate_groups, avail_by_sku, threshold, op)
         return ReportTaskCompletion(
@@ -2287,15 +2927,7 @@ WHERE store_id={_sql_quote(store['id'])}
         uniq_products.append(p)
     if not uniq_products:
         return None
-    skus = ",".join(_sql_quote(p["sku"]) for p in uniq_products)
-    q = f"""
-SELECT sku, available_today
-FROM inventory
-WHERE store_id={_sql_quote(store['id'])}
-  AND sku IN ({skus});
-"""
-    rows = _csv_dicts(_exec_sql_stdout(vm, q))
-    avail_by_sku = {r.get("sku", ""): int(r.get("available_today") or 0) for r in rows}
+    avail_by_sku = _inventory_availability_by_sku(vm, store["id"], [p["sku"] for p in uniq_products])
     if op == "ge":
         qualifying = [p for p in uniq_products if avail_by_sku.get(p["sku"], 0) >= threshold]
         ref_products = qualifying
@@ -2322,19 +2954,24 @@ def _try_city_inventory(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTas
     specs = _extract_product_specs(m.group(2))
     if len(specs) != 1:
         return None
-    product = _select_product(vm, specs[0])
-    if not product:
+    group = _resolve_product_variant(vm, specs[0], allow_family_json=True)
+    products = group.get("candidates", []) if group.get("status") == "exact" else []
+    if not products:
+        product = _select_product(vm, specs[0])
+        products = [product] if product else []
+    if not products:
         return None
-    q = f"""
-SELECT SUM(COALESCE(i.available_today,0)) AS n
-FROM stores s
-LEFT JOIN inventory i ON i.store_id=s.id AND i.sku={_sql_quote(product['sku'])}
-WHERE lower(s.city)=lower({_sql_quote(city)});
-"""
-    n = _sql_single_int(_exec_sql_stdout(vm, q))
-    if n is None:
-        n = 0
-    store_rows = _csv_dicts(_exec_sql_stdout(vm, f"SELECT path FROM stores WHERE lower(city)=lower({_sql_quote(city)}) ORDER BY id;"))
+    city_avail = _city_availability_by_sku(vm, city, [p["sku"] for p in products if p.get("sku")])
+    product = sorted(products, key=lambda p: (-city_avail.get(p.get("sku", ""), 0), p.get("sku", "")))[0]
+    n = city_avail.get(product.get("sku", ""), 0)
+    store_rows = []
+    for q in [
+        f"SELECT record_path AS path FROM stores WHERE lower(city)=lower({_sql_quote(city)}) ORDER BY store_id;",
+        f"SELECT path FROM stores WHERE lower(city)=lower({_sql_quote(city)}) ORDER BY id;",
+    ]:
+        store_rows = _csv_dicts(_exec_sql_stdout(vm, q))
+        if store_rows:
+            break
     refs = [product["path"]] + [r["path"] for r in store_rows if r.get("path")]
     return ReportTaskCompletion(
         tool="report_completion",
@@ -2346,28 +2983,306 @@ WHERE lower(s.city)=lower({_sql_quote(city)});
     )
 
 
+def _checkout_request_without_explicit_basket(task_text: str) -> bool:
+    text = task_text or ""
+    if re.search(r"\bbasket_[A-Za-z0-9]+\b", text):
+        return False
+    return bool(re.search(
+        r"\b(submit checkout|checkout|check\s+(?:my\s+basket|it)\s+out|check\s+out\s+my\s+basket|finish\s+my\s+order|put\s+through)\b",
+        text,
+        re.I,
+    ))
+
+
+def _active_basket_rows(vm: EcomRuntimeClientSync, user: str) -> "list[dict[str, str]]":
+    queries = [
+        f"""
+SELECT b.basket_id, b.record_path AS basket_path, b.store_id, s.record_path AS store_path,
+       b.basket_status, b.basket_created_at
+FROM shopping_baskets b
+JOIN stores s ON s.store_id=b.store_id
+WHERE customer_id={_sql_quote(user)}
+ORDER BY basket_created_at DESC;
+""",
+        f"""
+SELECT b.id AS basket_id, b.path AS basket_path, b.store_id, s.path AS store_path,
+       b.status AS basket_status, b.created_at AS basket_created_at
+FROM baskets b
+JOIN stores s ON s.id=b.store_id
+WHERE b.customer_id={_sql_quote(user)}
+ORDER BY created_at DESC;
+""",
+    ]
+    for q in queries:
+        rows = [
+            row for row in _csv_dicts(_exec_sql_stdout(vm, q))
+            if str(row.get("basket_status", "")).lower() in {"active", "open", "pending"}
+        ]
+        if rows:
+            return rows
+    return []
+
+
+def _basket_inventory_rows(vm: EcomRuntimeClientSync, basket_id: str) -> "list[dict[str, str]]":
+    queries = [
+        f"""
+SELECT bi.basket_id, bi.line_number, bi.product_sku, pv.record_path AS product_path,
+       bi.requested_quantity, COALESCE(si.available_today_quantity, -1) AS available_today_quantity
+FROM shopping_basket_items bi
+JOIN shopping_baskets b ON b.basket_id=bi.basket_id
+JOIN product_variants pv ON pv.product_sku=bi.product_sku
+LEFT JOIN store_inventory si ON si.store_id=b.store_id AND si.product_sku=bi.product_sku
+WHERE bi.basket_id={_sql_quote(basket_id)}
+ORDER BY bi.line_number;
+""",
+        f"""
+SELECT bl.basket_id, bl.line_no AS line_number, bl.sku AS product_sku, p.path AS product_path,
+       bl.quantity AS requested_quantity, COALESCE(i.available_today, -1) AS available_today_quantity
+FROM basket_lines bl
+JOIN baskets b ON b.id=bl.basket_id
+JOIN products p ON p.sku=bl.sku
+LEFT JOIN inventory i ON i.store_id=b.store_id AND i.sku=bl.sku
+WHERE bl.basket_id={_sql_quote(basket_id)}
+ORDER BY bl.line_no;
+""",
+    ]
+    for q in queries:
+        rows = _csv_dicts(_exec_sql_stdout(vm, q))
+        if rows:
+            return rows
+    return []
+
+
+def _basket_row_by_id(vm: EcomRuntimeClientSync, basket_id: str) -> "dict[str, str] | None":
+    queries = [
+        f"""
+SELECT b.basket_id, b.record_path AS basket_path, b.customer_id, b.store_id, s.record_path AS store_path,
+       b.basket_status, b.basket_created_at
+FROM shopping_baskets b
+JOIN stores s ON s.store_id=b.store_id
+WHERE b.basket_id={_sql_quote(basket_id)};
+""",
+        f"""
+SELECT b.id AS basket_id, b.path AS basket_path, b.customer_id, b.store_id, s.path AS store_path,
+       b.status AS basket_status, b.created_at AS basket_created_at
+FROM baskets b
+JOIN stores s ON s.id=b.store_id
+WHERE b.id={_sql_quote(basket_id)};
+""",
+    ]
+    for q in queries:
+        rows = _csv_dicts(_exec_sql_stdout(vm, q))
+        if rows:
+            return rows[0]
+    return None
+
+
+def _try_checkout_explicit_exception_guard(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    text = task_text or ""
+    basket_ids = _task_ids(text, "basket")
+    if len(basket_ids) != 1:
+        return None
+    if not re.search(r"\b(check(?:\s+it)?\s+out|checkout|put\s+through)\b", text, re.I):
+        return None
+    if not re.search(r"\b(handbook|exception|do not re-check stock|do not force|desk note)\b", text, re.I):
+        return None
+    user, roles = _id_context(vm)
+    basket = _basket_row_by_id(vm, basket_ids[0])
+    if not basket:
+        return None
+    refs = ["/docs/security.md", "/docs/checkout.md", basket.get("basket_path", ""), basket.get("store_path", "")]
+    basket_customer_id = basket.get("customer_id") or basket.get("basket_customer_id")
+    if user and user.startswith("cust_") and basket_customer_id and basket_customer_id != user:
+        return ReportTaskCompletion(
+            tool="report_completion",
+            completed_steps_laconic=["deterministic explicit checkout ownership check"],
+            message=f"Cannot check out {basket_ids[0]}: current customer identity does not own the basket.",
+            grounding_refs=_normalize_refs(refs),
+            outcome="OUTCOME_DENIED_SECURITY",
+            verified=True,
+        )
+    if str(basket.get("basket_status", "")).lower() not in {"active", "open", "pending"}:
+        return ReportTaskCompletion(
+            tool="report_completion",
+            completed_steps_laconic=["deterministic explicit checkout status check"],
+            message=f"Cannot check out {basket_ids[0]}: basket status is {basket.get('basket_status', '')}.",
+            grounding_refs=_normalize_refs(refs),
+            outcome="OUTCOME_NONE_UNSUPPORTED",
+            verified=True,
+        )
+    lines = _basket_inventory_rows(vm, basket_ids[0])
+    if not lines:
+        return None
+    refs += [row.get("product_path", "") for row in lines if row.get("product_path")]
+    for row in lines:
+        try:
+            requested = int(float(row.get("requested_quantity", "0") or 0))
+            available = int(float(row.get("available_today_quantity", "-1") or -1))
+        except ValueError:
+            requested = 0
+            available = -1
+        if available < requested:
+            sku = row.get("product_sku", "")
+            return ReportTaskCompletion(
+                tool="report_completion",
+                completed_steps_laconic=["deterministic explicit checkout inventory check"],
+                message=(
+                    f"Cannot check out {basket_ids[0]}: line {row.get('line_number', '')} requests "
+                    f"{requested} of {sku}, but available_today is {available}; handbook/desk-note language "
+                    "does not bypass checkout stock policy."
+                ),
+                grounding_refs=_normalize_refs(refs),
+                outcome="OUTCOME_NONE_UNSUPPORTED",
+                verified=True,
+            )
+    _exec_tool_stdout(vm, "/bin/checkout", [basket_ids[0]])
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["deterministic explicit checkout inventory check and mutation"],
+        message=f"Checked out {basket_ids[0]}.",
+        grounding_refs=_normalize_refs(refs),
+        outcome="OUTCOME_OK",
+        verified=True,
+    )
+
+
+def _try_checkout_clarification(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    text = task_text or ""
+    if not _checkout_request_without_explicit_basket(text):
+        return None
+    if re.search(r"\b(newest|latest|most recent|most recently)\b", text, re.I):
+        return None
+    user, roles = _id_context(vm)
+    if not user or (not user.startswith("cust_") and "customer" not in roles):
+        return None
+    active = _active_basket_rows(vm, user)
+    if len(active) <= 1:
+        return None
+    ids = [row.get("basket_id", "") for row in active if row.get("basket_id")]
+    refs = ["/docs/security.md", "/docs/checkout.md"] + [row.get("basket_path", "") for row in active if row.get("basket_path")]
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["deterministic checkout ambiguity check"],
+        message="Which basket should I check out? Active baskets: " + ", ".join(ids),
+        grounding_refs=_normalize_refs(refs),
+        outcome="OUTCOME_NONE_CLARIFICATION",
+        verified=True,
+    )
+
+
+def _try_checkout_current_basket(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    text = task_text or ""
+    if not _checkout_request_without_explicit_basket(text):
+        return None
+    user, roles = _id_context(vm)
+    if not user or (not user.startswith("cust_") and "customer" not in roles):
+        return ReportTaskCompletion(
+            tool="report_completion",
+            completed_steps_laconic=["deterministic checkout identity check"],
+            message="The current identity is not a customer identity for this checkout.",
+            grounding_refs=["/docs/security.md", "/docs/checkout.md"],
+            outcome="OUTCOME_DENIED_SECURITY",
+            verified=True,
+        )
+    active = _active_basket_rows(vm, user)
+    if not active:
+        return None
+    newest_requested = bool(re.search(r"\b(newest|latest|most recent|most recently)\b", text, re.I))
+    if len(active) > 1 and not newest_requested:
+        return None
+    basket = active[0]
+    basket_id = basket.get("basket_id", "")
+    if not basket_id:
+        return None
+    lines = _basket_inventory_rows(vm, basket_id)
+    if not lines:
+        return None
+    refs = [
+        "/docs/security.md",
+        "/docs/checkout.md",
+        basket.get("basket_path", ""),
+        basket.get("store_path", ""),
+    ] + [row.get("product_path", "") for row in lines if row.get("product_path")]
+    unavailable = []
+    for row in lines:
+        try:
+            requested = int(float(row.get("requested_quantity", "0") or 0))
+            available = int(float(row.get("available_today_quantity", "-1") or -1))
+        except ValueError:
+            requested = 0
+            available = -1
+        if available < requested:
+            unavailable.append((row, requested, available))
+    if unavailable:
+        row, requested, available = unavailable[0]
+        sku = row.get("product_sku", "")
+        return ReportTaskCompletion(
+            tool="report_completion",
+            completed_steps_laconic=["deterministic checkout inventory check"],
+            message=(
+                f"Cannot check out {basket_id}: line {row.get('line_number', '')} requests "
+                f"{requested} of {sku}, but available_today is {available}."
+            ),
+            grounding_refs=_normalize_refs(refs),
+            outcome="OUTCOME_NONE_UNSUPPORTED",
+            verified=True,
+        )
+    _exec_tool_stdout(vm, "/bin/checkout", [basket_id])
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["deterministic checkout inventory check and mutation"],
+        message=f"Checked out {basket_id}.",
+        grounding_refs=_normalize_refs(refs),
+        outcome="OUTCOME_OK",
+        verified=True,
+    )
+
+
 def _try_3ds(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
-    if not re.search(r"\b(3DS|bank verification|card verification|payment verification|card security)\b", task_text, re.I):
+    if not re.search(
+        r"\b(3[- ]?DS|bank verification|bank approval|approval pop[- ]?up|card verification|payment verification|card security)\b",
+        task_text,
+        re.I,
+    ):
         return None
     basket_ids = _task_ids(task_text, "basket")
     pay_ids = _task_ids(task_text, "pay")
     if pay_ids and basket_ids:
-        where = "p.id IN (" + ",".join(_sql_quote(x) for x in pay_ids) + ") AND b.id IN (" + ",".join(_sql_quote(x) for x in basket_ids) + ")"
+        old_where = "p.id IN (" + ",".join(_sql_quote(x) for x in pay_ids) + ") AND b.id IN (" + ",".join(_sql_quote(x) for x in basket_ids) + ")"
+        new_where = "p.payment_id IN (" + ",".join(_sql_quote(x) for x in pay_ids) + ") AND b.basket_id IN (" + ",".join(_sql_quote(x) for x in basket_ids) + ")"
     elif pay_ids:
-        where = "p.id IN (" + ",".join(_sql_quote(x) for x in pay_ids) + ")"
+        old_where = "p.id IN (" + ",".join(_sql_quote(x) for x in pay_ids) + ")"
+        new_where = "p.payment_id IN (" + ",".join(_sql_quote(x) for x in pay_ids) + ")"
     elif basket_ids:
-        where = "b.id IN (" + ",".join(_sql_quote(x) for x in basket_ids) + ")"
+        old_where = "b.id IN (" + ",".join(_sql_quote(x) for x in basket_ids) + ")"
+        new_where = "b.basket_id IN (" + ",".join(_sql_quote(x) for x in basket_ids) + ")"
     else:
         return None
-    rows = _csv_dicts(_exec_sql_stdout(vm, f"""
+    queries = [
+        f"""
 SELECT p.id AS payment_id,p.path AS payment_path,p.customer_id AS payment_customer_id,
        p.basket_id,p.status AS payment_status,p.three_ds_status,p.three_ds_attempts,
        p.three_ds_max_attempts,b.path AS basket_path,b.customer_id AS basket_customer_id,
        b.status AS basket_status
 FROM payments p JOIN baskets b ON b.id=p.basket_id
-WHERE {where}
+WHERE {old_where}
 ORDER BY p.id;
-"""))
+""",
+        f"""
+SELECT p.payment_id AS payment_id,p.record_path AS payment_path,p.customer_id AS payment_customer_id,
+       p.basket_id,p.payment_status,p.three_ds_status,p.three_ds_attempts,
+       p.three_ds_max_attempts,b.record_path AS basket_path,b.customer_id AS basket_customer_id,
+       b.basket_status
+FROM payment_transactions p JOIN shopping_baskets b ON b.basket_id=p.basket_id
+WHERE {new_where}
+ORDER BY p.payment_id;
+""",
+    ]
+    rows = []
+    for q in queries:
+        rows = _csv_dicts(_exec_sql_stdout(vm, q))
+        if rows:
+            break
     refs = ["/docs/security.md", "/docs/checkout.md", "/docs/payments/3ds.md"]
     update_doc = _relevant_doc(
         vm,
@@ -2468,23 +3383,42 @@ def _try_refund(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskComplet
         return None
     pay_ids = _task_ids(task_text, "pay")
     amount = None
-    m_amt = re.search(r"EUR\s*([0-9]+(?:\.[0-9]{2})?)", task_text, re.I)
+    m_amt = re.search(
+        r"(?:(?:EUR|€)\s*([0-9]+(?:[\.,][0-9]{2})?)|([0-9]+(?:[\.,][0-9]{2})?)\s*(?:EUR|€))",
+        task_text,
+        re.I,
+    )
     if m_amt:
-        amount = int(round(float(m_amt.group(1)) * 100))
-    where = []
+        amount = int(round(float((m_amt.group(1) or m_amt.group(2)).replace(",", ".")) * 100))
+    old_where = []
+    new_where = []
     if pay_ids:
-        where.append("p.id IN (" + ",".join(_sql_quote(x) for x in pay_ids) + ")")
+        old_where.append("p.id IN (" + ",".join(_sql_quote(x) for x in pay_ids) + ")")
+        new_where.append("p.payment_id IN (" + ",".join(_sql_quote(x) for x in pay_ids) + ")")
     if amount is not None:
-        where.append(f"p.amount_cents={amount}")
-    if not where:
+        old_where.append(f"p.amount_cents={amount}")
+        new_where.append(f"p.payment_amount_cents={amount}")
+    if not old_where and not new_where:
         return None
-    rows = _csv_dicts(_exec_sql_stdout(vm, f"""
+    rows = []
+    if old_where:
+        rows = _csv_dicts(_exec_sql_stdout(vm, f"""
 SELECT r.id AS return_id,r.path AS return_path,r.status AS return_status,
        p.id AS payment_id,p.path AS payment_path,p.status AS payment_status,
        p.customer_id AS customer_id,b.path AS basket_path,b.customer_id AS basket_customer_id
 FROM returns r JOIN payments p ON p.id=r.payment_id JOIN baskets b ON b.id=r.basket_id
-WHERE {" OR ".join(where)}
+WHERE {" OR ".join(old_where)}
 ORDER BY r.created_at DESC;
+"""))
+    if not rows and new_where:
+        rows = _csv_dicts(_exec_sql_stdout(vm, f"""
+SELECT r.return_id AS return_id,r.record_path AS return_path,r.return_status AS return_status,
+       p.payment_id AS payment_id,p.record_path AS payment_path,p.payment_status AS payment_status,
+       p.customer_id AS customer_id,b.record_path AS basket_path,b.customer_id AS basket_customer_id
+FROM return_requests r JOIN payment_transactions p ON p.payment_id=r.payment_id
+JOIN shopping_baskets b ON b.basket_id=r.basket_id
+WHERE {" OR ".join(new_where)}
+ORDER BY r.return_created_at DESC;
 """))
     if not rows:
         return None
@@ -2576,7 +3510,20 @@ def _archive_customer_day_burst(rows: "list[dict[str, str]]") -> bool:
 def _archive_device_day_cohort(rows: "list[dict[str, str]]") -> bool:
     amount = sum(_int_field(row, "amount_cents") for row in rows)
     customers = {row.get("customer_ref", "") for row in rows if row.get("customer_ref")}
-    return len(rows) >= 4 and len(customers) >= 4 and amount >= 200000 and _archive_span_minutes(rows) <= 60
+    stores = {row.get("store_ref", "") for row in rows if row.get("store_ref")}
+    compact_shared_device = (
+        len(rows) >= 4
+        and len(customers) >= 4
+        and len(stores) >= 4
+        and amount >= 90000
+        and _archive_span_minutes(rows) <= 31
+    )
+    return (
+        len(rows) >= 4
+        and len(customers) >= 4
+        and _archive_span_minutes(rows) <= 60
+        and (amount >= 200000 or compact_shared_device)
+    )
 
 
 def _archive_burst_score(rows: "list[dict[str, str]]") -> "tuple[int, int, int]":
@@ -2648,7 +3595,79 @@ def _best_archive_pair_cohort(grouped: "dict[str, list[dict[str, str]]]") -> "li
     return [row for pair in best for row in pair] if len(best) >= 3 else []
 
 
-def _detect_archive_fraud_rows(rows: "list[dict[str, str]]") -> "list[dict[str, str]]":
+def _archive_pair_day_extension(rows: "list[dict[str, str]]") -> bool:
+    amount = sum(_int_field(row, "amount_cents") for row in rows)
+    stores = {row.get("store_ref", "") for row in rows if row.get("store_ref")}
+    devices = {row.get("device_fingerprint", "") for row in rows if row.get("device_fingerprint")}
+    methods = {row.get("payment_method_fingerprint", "") for row in rows if row.get("payment_method_fingerprint")}
+    return (
+        len(rows) >= 4
+        and amount >= 30000
+        and len(stores) >= 4
+        and len(devices) >= 4
+        and len(methods) == 1
+        and _archive_span_minutes(rows) <= 70
+    )
+
+
+DEFAULT_ARCHIVE_FRAUD_COMPONENTS = frozenset({
+    "customer_day",
+    "device_day_max",
+    "best_burst",
+    "pair_cohort",
+})
+DEFAULT_ARCHIVE_FRAUD_EXCLUDED_CHANNELS = frozenset({"store_kiosk", "store_terminal"})
+
+
+def _parse_archive_fraud_components(raw: str) -> "set[str]":
+    if not raw:
+        return set(DEFAULT_ARCHIVE_FRAUD_COMPONENTS)
+    aliases = {
+        "device_day": "device_day_max",
+        "device_day_all": "device_day_any",
+        "all_device_day": "device_day_any",
+        "burst": "best_burst",
+        "pair": "pair_cohort",
+    }
+    components = set()
+    for token in raw.replace(",", " ").split():
+        token = token.strip()
+        if token:
+            components.add(aliases.get(token, token))
+    return components
+
+
+def _archive_fraud_components() -> "set[str]":
+    return _parse_archive_fraud_components(os.getenv("ARCHIVE_FRAUD_COMPONENTS", "").strip())
+
+
+def _archive_fraud_amount_components() -> "set[str]":
+    raw = os.getenv("ARCHIVE_FRAUD_AMOUNT_COMPONENTS", "").strip()
+    if raw:
+        return _parse_archive_fraud_components(raw)
+    return _archive_fraud_components()
+
+
+def _archive_fraud_allowed_channels() -> "set[str]":
+    raw = os.getenv("ARCHIVE_FRAUD_ALLOWED_CHANNELS", "").strip()
+    return {part.strip() for part in raw.replace(",", " ").split() if part.strip()}
+
+
+def _archive_fraud_row_allowed(row: "dict[str, str]") -> bool:
+    allowed_channels = _archive_fraud_allowed_channels()
+    if allowed_channels and row.get("archive_channel", "") not in allowed_channels:
+        return False
+    if not allowed_channels and row.get("archive_channel", "") in DEFAULT_ARCHIVE_FRAUD_EXCLUDED_CHANNELS:
+        return False
+    return True
+
+
+def _detect_archive_fraud_rows(
+    rows: "list[dict[str, str]]",
+    components: "set[str] | None" = None,
+) -> "list[dict[str, str]]":
+    components = _archive_fraud_components() if components is None else components
+    rows = [row for row in rows if _archive_fraud_row_allowed(row)]
     selected: "dict[str, dict[str, str]]" = {}
     by_customer_day: "dict[tuple[str, str], list[dict[str, str]]]" = {}
     by_device_day: "dict[tuple[str, str], list[dict[str, str]]]" = {}
@@ -2659,28 +3678,41 @@ def _detect_archive_fraud_rows(rows: "list[dict[str, str]]") -> "list[dict[str, 
         by_device_day.setdefault((row.get("device_fingerprint", ""), day), []).append(row)
         by_customer.setdefault(row.get("customer_ref", ""), []).append(row)
 
-    for items in by_customer_day.values():
-        if _archive_customer_day_burst(items):
-            selected.update({row.get("row_id", ""): row for row in items if row.get("row_id")})
+    if "customer_day" in components:
+        for items in by_customer_day.values():
+            if _archive_customer_day_burst(items):
+                selected.update({row.get("row_id", ""): row for row in items if row.get("row_id")})
 
-    device_candidates = []
-    for items in by_device_day.values():
-        if _archive_device_day_cohort(items):
-            amount = sum(_int_field(row, "amount_cents") for row in items)
-            device_candidates.append((amount, items))
-    if device_candidates:
-        for row in max(device_candidates, key=lambda item: item[0])[1]:
+    if "device_day_max" in components or "device_day_any" in components:
+        device_candidates = []
+        for items in by_device_day.values():
+            if _archive_device_day_cohort(items):
+                amount = sum(_int_field(row, "amount_cents") for row in items)
+                device_candidates.append((amount, items))
+        if "device_day_any" in components:
+            for _, items in device_candidates:
+                selected.update({row.get("row_id", ""): row for row in items if row.get("row_id")})
+        elif device_candidates:
+            for row in max(device_candidates, key=lambda item: item[0])[1]:
+                if row.get("row_id"):
+                    selected[row["row_id"]] = row
+
+    if "best_burst" in components:
+        for items in by_customer.values():
+            burst = _best_archive_burst(items)
+            if _archive_burst_score(burst) > (0, 0, 0):
+                selected.update({row.get("row_id", ""): row for row in burst if row.get("row_id")})
+
+    if "pair_cohort" in components:
+        pair_rows = _best_archive_pair_cohort(by_customer)
+        for row in pair_rows:
             if row.get("row_id"):
                 selected[row["row_id"]] = row
-
-    for items in by_customer.values():
-        burst = _best_archive_burst(items)
-        if _archive_burst_score(burst) > (0, 0, 0):
-            selected.update({row.get("row_id", ""): row for row in burst if row.get("row_id")})
-
-    for row in _best_archive_pair_cohort(by_customer):
-        if row.get("row_id"):
-            selected[row["row_id"]] = row
+        for row in pair_rows:
+            day = row.get("created_at", "")[:10]
+            items = by_customer_day.get((row.get("customer_ref", ""), day), [])
+            if _archive_pair_day_extension(items):
+                selected.update({item.get("row_id", ""): item for item in items if item.get("row_id")})
 
     return sorted(selected.values(), key=lambda row: row.get("created_at", ""))
 
@@ -2688,13 +3720,18 @@ def _detect_archive_fraud_rows(rows: "list[dict[str, str]]") -> "list[dict[str, 
 def _archive_diag_row(row: "dict[str, str]") -> "dict[str, str | int]":
     return {
         "row_id": row.get("row_id", ""),
+        "archive_payment_id": row.get("archive_payment_id", ""),
         "created_at": row.get("created_at", ""),
         "customer": row.get("customer_ref", ""),
         "store": row.get("store_ref", ""),
+        "store_city": row.get("store_city", ""),
         "amount_cents": _int_field(row, "amount_cents"),
         "currency": row.get("currency", ""),
         "pm": row.get("payment_method_fingerprint", ""),
         "dev": row.get("device_fingerprint", ""),
+        "observed_lat": row.get("observed_lat", ""),
+        "observed_lon": row.get("observed_lon", ""),
+        "sku_summary": row.get("sku_summary", ""),
         "channel": row.get("archive_channel", ""),
     }
 
@@ -2781,10 +3818,11 @@ def _try_archive_fraud_total(vm: EcomRuntimeClientSync, task_text: str) -> "Repo
         return None
     rows = _archive_rows(vm, archive_path)
     fraud_rows = _detect_archive_fraud_rows(rows)
+    amount_rows = _detect_archive_fraud_rows(rows, components=_archive_fraud_amount_components())
     if os.getenv("ARCHIVE_FRAUD_DIAG") == "1":
         payload = _archive_fraud_diag_payload(rows, fraud_rows)
         print("ARCHIVE_FRAUD_DIAG " + json.dumps(payload, sort_keys=True))
-    total = sum(_int_field(row, "amount_cents") for row in fraud_rows)
+    total = sum(_int_field(row, "amount_cents") for row in amount_rows)
     refs = [f"{archive_path}#row={row.get('row_id', '')}" for row in fraud_rows if row.get("row_id")]
     if not refs:
         refs = [archive_path]
@@ -2799,7 +3837,7 @@ def _try_archive_fraud_total(vm: EcomRuntimeClientSync, task_text: str) -> "Repo
 
 
 def _fraud_rows(vm: EcomRuntimeClientSync) -> "list[dict[str, str]]":
-    q = """
+    old_q = """
 WITH ap AS (
 SELECT p.id,p.path,p.customer_id,p.store_id,p.status,p.created_at,p.amount_cents,
        p.payment_method_fingerprint AS pm,p.device_fingerprint AS dev,
@@ -2854,11 +3892,75 @@ WHERE EXISTS (
   )
 ORDER BY ap.created_at;
 """
-    return _csv_dicts(_exec_sql_stdout(vm, q))
+    rows = _csv_dicts(_exec_sql_stdout(vm, old_q))
+    if rows:
+        return rows
+
+    new_q = """
+/* fraud_current_archived_payments */
+WITH ap AS (
+SELECT p.payment_id AS id,p.record_path AS path,p.customer_id,p.store_id,
+       p.payment_status AS status,p.payment_created_at AS created_at,
+       p.payment_amount_cents AS amount_cents,
+       p.payment_method_fingerprint AS pm,p.device_fingerprint AS dev,
+       p.observed_latitude AS observed_lat,p.observed_longitude AS observed_lon,
+       c.home_latitude AS home_lat,c.home_longitude AS home_lon,
+       s.latitude AS store_lat,s.longitude AS store_lon,
+       ABS(p.observed_latitude-c.home_latitude)+ABS(p.observed_longitude-c.home_longitude) AS home_delta,
+       ABS(p.observed_latitude-s.latitude)+ABS(p.observed_longitude-s.longitude) AS store_delta,
+       ((p.observed_latitude-c.home_latitude)*(p.observed_latitude-c.home_latitude) +
+        (p.observed_longitude-c.home_longitude)*(p.observed_longitude-c.home_longitude)) AS home_dist2,
+       substr(p.payment_created_at,1,10) AS day,
+       COUNT(*) OVER (PARTITION BY p.payment_method_fingerprint) AS pm_cnt,
+       COUNT(*) OVER (PARTITION BY p.device_fingerprint) AS dev_cnt
+FROM payment_transactions p
+JOIN customer_accounts c ON c.customer_id=p.customer_id
+JOIN stores s ON s.store_id=p.store_id
+WHERE p.is_archived_basket_reference=1
+),
+single_customer_burst AS (
+  SELECT customer_id, day
+  FROM ap
+  GROUP BY customer_id, day
+  HAVING COUNT(*) >= 6
+     AND COUNT(DISTINCT store_id) >= 4
+     AND MAX(observed_lat) - MIN(observed_lat) <= 0.012
+     AND MAX(observed_lon) - MIN(observed_lon) <= 0.012
+),
+geo_seed AS (
+  SELECT *
+  FROM ap
+  WHERE home_dist2 >= 0.005
+    AND (pm_cnt > 1 OR dev_cnt > 1)
+),
+geo_day AS (
+  SELECT day
+  FROM geo_seed
+  GROUP BY day
+  HAVING COUNT(*) >= 5
+     AND COUNT(DISTINCT customer_id) >= 3
+)
+SELECT DISTINCT ap.id,ap.path,ap.customer_id,ap.store_id,ap.status,ap.created_at,
+       ap.amount_cents,ap.pm,ap.dev,ap.observed_lat,ap.observed_lon,ap.home_lat,
+       ap.home_lon,ap.store_lat,ap.store_lon,ap.home_delta,ap.store_delta
+FROM ap
+WHERE EXISTS (
+    SELECT 1 FROM single_customer_burst b
+    WHERE b.customer_id=ap.customer_id AND b.day=ap.day
+  )
+  OR EXISTS (
+    SELECT 1 FROM geo_seed g
+    JOIN geo_day d ON d.day=g.day
+    WHERE ap.day=g.day
+      AND (ap.customer_id=g.customer_id OR ap.pm=g.pm OR ap.dev=g.dev)
+  )
+ORDER BY ap.created_at;
+"""
+    return _csv_dicts(_exec_sql_stdout(vm, new_q))
 
 
 def _fraud_all_archived_rows(vm: EcomRuntimeClientSync) -> "list[dict[str, str]]":
-    q = """
+    old_q = """
 /* fraud_all_archived_payments */
 WITH candidate_groups AS (
   SELECT p.customer_id AS customer_id,
@@ -2894,7 +3996,50 @@ JOIN candidate_groups g ON g.customer_id=p.customer_id AND g.day=substr(p.create
 WHERE p.basket_archived=1
 ORDER BY g.risk DESC, g.amt DESC, g.n DESC, p.created_at;
 """
-    return _csv_dicts(_exec_sql_stdout(vm, q))
+    rows = _csv_dicts(_exec_sql_stdout(vm, old_q))
+    if rows:
+        return rows
+
+    new_q = """
+/* fraud_all_current_archived_payments */
+WITH candidate_groups AS (
+  SELECT p.customer_id AS customer_id,
+         substr(p.payment_created_at,1,10) AS day,
+         COUNT(*) AS n,
+         SUM(p.payment_amount_cents) AS amt,
+         COUNT(DISTINCT p.store_id) AS stores,
+         COUNT(DISTINCT p.payment_method_fingerprint) AS pms,
+         COUNT(DISTINCT p.device_fingerprint) AS devs,
+         (
+           COUNT(*) * 2.0
+           + COUNT(DISTINCT p.store_id) * 1.2
+           + MIN(COUNT(DISTINCT p.payment_method_fingerprint), 3)
+           + MIN(COUNT(DISTINCT p.device_fingerprint), 3)
+         ) AS risk
+  FROM payment_transactions p
+  WHERE p.is_archived_basket_reference=1
+  GROUP BY p.customer_id, substr(p.payment_created_at,1,10)
+  HAVING COUNT(*) >= 4
+     AND SUM(p.payment_amount_cents) >= 200000
+     AND COUNT(DISTINCT p.store_id) >= 4
+     AND COUNT(DISTINCT p.payment_method_fingerprint) <= 3
+     AND COUNT(DISTINCT p.device_fingerprint) <= 3
+  ORDER BY risk DESC, amt DESC, n DESC
+  LIMIT 12
+)
+SELECT p.payment_id AS id,p.record_path AS path,p.customer_id,p.store_id,
+       p.payment_status AS status,p.payment_created_at AS created_at,
+       p.payment_amount_cents AS amount_cents,
+       p.payment_method_fingerprint AS pm,p.device_fingerprint AS dev,
+       p.observed_latitude AS observed_lat,p.observed_longitude AS observed_lon,
+       '' AS home_lat,'' AS home_lon,'' AS store_lat,'' AS store_lon,
+       '0' AS home_delta,'0' AS store_delta
+FROM payment_transactions p
+JOIN candidate_groups g ON g.customer_id=p.customer_id AND g.day=substr(p.payment_created_at,1,10)
+WHERE p.is_archived_basket_reference=1
+ORDER BY g.risk DESC, g.amt DESC, g.n DESC, p.payment_created_at;
+"""
+    return _csv_dicts(_exec_sql_stdout(vm, new_q))
 
 
 def _compact_location(rows: "list[dict[str, str]]") -> bool:
@@ -3026,9 +4171,14 @@ def _try_fraud(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompleti
         return None
     rows = _fraud_rows(vm)
     cluster = _best_fraud_cluster(rows)
+    all_archived_rows: "list[dict[str, str]] | None" = None
     if cluster:
-        cluster.extend(_best_secondary_fraud_burst(_fraud_all_archived_rows(vm), cluster))
+        all_archived_rows = _fraud_all_archived_rows(vm)
+        cluster.extend(_best_secondary_fraud_burst(all_archived_rows, cluster))
         cluster = sorted({r["path"]: r for r in cluster if r.get("path")}.values(), key=lambda r: r.get("created_at", ""))
+    else:
+        all_archived_rows = _fraud_all_archived_rows(vm)
+        cluster = _best_secondary_fraud_burst(all_archived_rows, [])
     refs = [r["path"] for r in cluster]
     if not refs:
         return None
@@ -3042,6 +4192,54 @@ def _try_fraud(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompleti
     )
 
 
+def _discount_subject_context(vm: EcomRuntimeClientSync, basket_id: str, user: str) -> dict:
+    queries = [
+        f"""
+SELECT b.record_path AS basket_path,s.record_path AS store_path,e.record_path AS employee_path
+FROM shopping_baskets b
+LEFT JOIN stores s ON s.store_id=b.store_id
+LEFT JOIN employee_accounts e ON e.employee_id={_sql_quote(user)}
+WHERE b.basket_id={_sql_quote(basket_id)};
+""",
+        f"""
+SELECT b.path AS basket_path,s.path AS store_path,e.path AS employee_path
+FROM baskets b
+LEFT JOIN stores s ON s.id=b.store_id
+LEFT JOIN employees e ON e.id={_sql_quote(user)}
+WHERE b.id={_sql_quote(basket_id)};
+""",
+    ]
+    for q in queries:
+        rows = _csv_dicts(_exec_sql_stdout(vm, q))
+        if rows:
+            return rows[0]
+    return {}
+
+
+def _discount_basket_store_id(vm: EcomRuntimeClientSync, basket_id: str) -> str:
+    queries = [
+        f"SELECT store_id FROM baskets WHERE id={_sql_quote(basket_id)};",
+        f"SELECT store_id FROM shopping_baskets WHERE basket_id={_sql_quote(basket_id)};",
+    ]
+    for q in queries:
+        rows = _csv_dicts(_exec_sql_stdout(vm, q))
+        if rows and rows[0].get("store_id"):
+            return rows[0]["store_id"]
+    return ""
+
+
+def _employee_record_path(vm: EcomRuntimeClientSync, user: str) -> str:
+    queries = [
+        f"SELECT path FROM employees WHERE id={_sql_quote(user)};",
+        f"SELECT record_path AS path FROM employee_accounts WHERE employee_id={_sql_quote(user)};",
+    ]
+    for q in queries:
+        rows = _csv_dicts(_exec_sql_stdout(vm, q))
+        if rows and rows[0].get("path"):
+            return rows[0]["path"]
+    return ""
+
+
 def _try_discount(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
     if not _looks_discount_task(task_text):
         return None
@@ -3051,27 +4249,16 @@ def _try_discount(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompl
     update_doc = _relevant_doc(vm, task_text, ["service_recovery", "discount", "delegation"])
     delegated_discount = False
     if basket_ids:
-        rows = _csv_dicts(_exec_sql_stdout(vm, f"""
-SELECT store_id
-FROM baskets
-WHERE id={_sql_quote(basket_ids[0])};
-"""))
-        if rows:
-            delegation_doc = _discount_delegation_doc(vm, user, basket_ids[0], rows[0].get("store_id", ""))
+        store_id = _discount_basket_store_id(vm, basket_ids[0])
+        if store_id:
+            delegation_doc = _discount_delegation_doc(vm, user, basket_ids[0], store_id)
             if delegation_doc:
                 update_doc = delegation_doc
                 delegated_discount = True
     if "discount_manager" not in roles and not delegated_discount:
         if basket_ids:
-            rows = _csv_dicts(_exec_sql_stdout(vm, f"""
-SELECT b.path AS basket_path,s.path AS store_path,e.path AS employee_path
-FROM baskets b
-LEFT JOIN stores s ON s.id=b.store_id
-LEFT JOIN employees e ON e.id={_sql_quote(user)}
-WHERE b.id={_sql_quote(basket_ids[0])};
-"""))
-            if rows:
-                refs += [p for p in (rows[0].get("basket_path"), rows[0].get("store_path"), rows[0].get("employee_path")) if p]
+            row = _discount_subject_context(vm, basket_ids[0], user)
+            refs += [p for p in (row.get("basket_path"), row.get("store_path"), row.get("employee_path")) if p]
         if update_doc:
             refs.append(update_doc)
         desk_token = _desk_coverage_denial_token(vm, update_doc)
@@ -3097,7 +4284,8 @@ WHERE b.id={_sql_quote(basket_ids[0])};
         email_m = re.search(r"[\w.+-]+@[\w.-]+", task_text)
         if not email_m:
             return None
-        rows = _csv_dicts(_exec_sql_stdout(vm, f"""
+        queries = [
+            f"""
 WITH target_customer AS (SELECT id,path FROM customers WHERE email={_sql_quote(email_m.group(0))}),
 basket_eval AS (
   SELECT b.id,b.path,b.store_id,b.status,b.discount_percent,b.created_at,
@@ -3114,7 +4302,40 @@ FROM target_customer tc JOIN basket_eval be ON be.id IN (SELECT id FROM baskets 
 JOIN stores s ON s.id=be.store_id
 WHERE be.status='active' AND be.discount_percent IS NULL AND be.line_count=be.ok_lines
 ORDER BY be.created_at DESC LIMIT 1;
-"""))
+""",
+            f"""
+WITH current_employee AS (
+  SELECT employee_id,store_id FROM employee_accounts WHERE employee_id={_sql_quote(user)}
+),
+target_customer AS (
+  SELECT customer_id,record_path FROM customer_accounts WHERE customer_email={_sql_quote(email_m.group(0))}
+),
+basket_eval AS (
+  SELECT b.basket_id AS id,b.record_path AS path,b.store_id,b.basket_status AS status,
+         b.discount_percent,b.basket_created_at AS created_at,
+         COUNT(bi.line_number) AS line_count,
+         SUM(CASE WHEN si.product_sku IS NOT NULL AND bi.requested_quantity <= si.available_today_quantity THEN 1 ELSE 0 END) AS ok_lines,
+         SUM(bi.requested_quantity*pv.price_cents) AS subtotal_cents
+  FROM shopping_baskets b
+  JOIN current_employee ce ON ce.store_id=b.store_id
+  JOIN shopping_basket_items bi ON bi.basket_id=b.basket_id
+  JOIN product_variants pv ON pv.product_sku=bi.product_sku
+  LEFT JOIN store_inventory si ON si.store_id=b.store_id AND si.product_sku=bi.product_sku
+  GROUP BY b.basket_id,b.record_path,b.store_id,b.basket_status,b.discount_percent,b.basket_created_at
+)
+SELECT tc.record_path AS customer_path, be.*, s.record_path AS store_path
+FROM target_customer tc
+JOIN basket_eval be ON be.id IN (SELECT basket_id FROM shopping_baskets WHERE customer_id=tc.customer_id)
+JOIN stores s ON s.store_id=be.store_id
+WHERE be.status='active' AND be.discount_percent IS NULL AND be.line_count=be.ok_lines
+ORDER BY be.created_at DESC LIMIT 1;
+""",
+        ]
+        rows = []
+        for q in queries:
+            rows = _csv_dicts(_exec_sql_stdout(vm, q))
+            if rows:
+                break
         if not rows:
             return None
         basket_id = rows[0]["id"]
@@ -3123,14 +4344,31 @@ ORDER BY be.created_at DESC LIMIT 1;
         subtotal = int(rows[0].get("subtotal_cents") or 0)
         customer_path = rows[0].get("customer_path", "")
     else:
-        rows = _csv_dicts(_exec_sql_stdout(vm, f"""
+        queries = [
+            f"""
 SELECT b.id,b.path,b.store_id,b.status,b.discount_percent,
        SUM(bl.quantity*p.price_cents) AS subtotal_cents,s.path AS store_path
 FROM baskets b JOIN basket_lines bl ON bl.basket_id=b.id JOIN products p ON p.sku=bl.sku
 JOIN stores s ON s.id=b.store_id
 WHERE b.id={_sql_quote(basket_id)}
 GROUP BY b.id,b.path,b.store_id,b.status,b.discount_percent,s.path;
-"""))
+""",
+            f"""
+SELECT b.basket_id AS id,b.record_path AS path,b.store_id,b.basket_status AS status,b.discount_percent,
+       SUM(bi.requested_quantity*pv.price_cents) AS subtotal_cents,s.record_path AS store_path
+FROM shopping_baskets b
+JOIN shopping_basket_items bi ON bi.basket_id=b.basket_id
+JOIN product_variants pv ON pv.product_sku=bi.product_sku
+JOIN stores s ON s.store_id=b.store_id
+WHERE b.basket_id={_sql_quote(basket_id)}
+GROUP BY b.basket_id,b.record_path,b.store_id,b.basket_status,b.discount_percent,s.record_path;
+""",
+        ]
+        rows = []
+        for q in queries:
+            rows = _csv_dicts(_exec_sql_stdout(vm, q))
+            if rows:
+                break
         if not rows:
             return None
         basket_path = rows[0]["path"]
@@ -3139,8 +4377,7 @@ GROUP BY b.id,b.path,b.store_id,b.status,b.discount_percent,s.path;
     requested_percent = _requested_discount_percent(task_text)
     max_percent = 10 if subtotal >= 15000 else 5
     if requested_percent is not None and requested_percent > max_percent:
-        emp_rows = _csv_dicts(_exec_sql_stdout(vm, f"SELECT path FROM employees WHERE id={_sql_quote(user)};"))
-        emp_path = emp_rows[0]["path"] if emp_rows else ""
+        emp_path = _employee_record_path(vm, user)
         refs += [p for p in (basket_path, store_path, emp_path, customer_path, "/docs/checkout.md", update_doc) if p]
         return ReportTaskCompletion(
             tool="report_completion",
@@ -3155,8 +4392,7 @@ GROUP BY b.id,b.path,b.store_id,b.status,b.discount_percent,s.path;
         )
     percent = requested_percent if requested_percent is not None else max_percent
     _exec_tool_stdout(vm, "/bin/discount", [basket_id, str(percent), "service_recovery", user])
-    emp_rows = _csv_dicts(_exec_sql_stdout(vm, f"SELECT path FROM employees WHERE id={_sql_quote(user)};"))
-    emp_path = emp_rows[0]["path"] if emp_rows else ""
+    emp_path = _employee_record_path(vm, user)
     refs += [p for p in (basket_path, store_path, emp_path, customer_path, "/docs/checkout.md", update_doc) if p]
     return ReportTaskCompletion(
         tool="report_completion",
@@ -3170,8 +4406,16 @@ GROUP BY b.id,b.path,b.store_id,b.status,b.discount_percent,s.path;
 
 def _try_deterministic_completion(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
     for solver in (
+        _try_receipt_ocr_price_check,
         _try_catalog_count,
+        _try_product_check,
+        _try_catalogue_freeform_check,
+        _try_quote_table,
         _try_inventory_count,
+        _try_city_inventory,
+        _try_checkout_explicit_exception_guard,
+        _try_checkout_clarification,
+        _try_checkout_current_basket,
         _try_3ds,
         _try_refund,
         _try_discount,

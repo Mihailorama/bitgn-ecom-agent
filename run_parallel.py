@@ -34,6 +34,8 @@ from connectrpc.errors import ConnectError
 
 from agent import run_agent
 from degradation_gate import build_sweep_report, format_gate_summary, write_sweep_report
+from harness_retry import retry_delay_for_connect_error
+from harness_scoring import merge_submit_scores
 
 BITGN_URL = os.getenv("BITGN_HOST") or os.getenv("BENCHMARK_HOST") or "https://api.bitgn.com"
 BITGN_API_KEY = os.getenv("BITGN_API_KEY") or ""
@@ -52,10 +54,10 @@ def _retry(fn, attempts: int = 5):
     for i in range(attempts):
         try:
             return fn()
-        except ConnectError:
+        except ConnectError as exc:
             if i == attempts - 1:
                 raise
-            time.sleep(delay)
+            time.sleep(retry_delay_for_connect_error(exc, delay))
             delay = min(delay * 2, 8.0)
 
 
@@ -77,13 +79,11 @@ def _run_one(trial_id: str, task_filter: list[str]):
     except ConnectError as exc:
         return (trial_id, None, None, f"start_trial: {exc.code} {exc.message}", 0.0)
 
-    # End filtered-out trials immediately (task_id is only known after start) so a
-    # subset run does not leak dozens of open trials on the harness.
+    # In the post-submit scoring harness, filtered-out trials must stay
+    # incomplete. `SubmitRun(force=True)` closes the run and the official sample
+    # skips non-DONE trials in the batch result; ending them here could turn a
+    # diagnostic subset into dozens of scored blank answers.
     if task_filter and trial.task_id not in task_filter:
-        try:
-            _retry(lambda: client.end_trial(EndTrialRequest(trial_id=trial.trial_id)))
-        except ConnectError:
-            pass
         return (trial.task_id, "skip", None, None, 0.0)
 
     log_path = os.path.join(LOG_DIR, f"{trial.task_id}.log")
@@ -133,6 +133,8 @@ def main() -> None:
     )
 
     results = []
+    submit_result = None
+    submit_error = None
     ctx = mp.get_context("spawn")  # avoid fork-after-threads with the gRPC client
     wall0 = time.time()
     try:
@@ -148,10 +150,19 @@ def main() -> None:
                 tag = f"{score:.2f}" if isinstance(score, (int, float)) else (err or "n/a")
                 print(f"[done] {task_id}: {tag} ({secs:.0f}s)", flush=True)
     finally:
-        client.submit_run(SubmitRunRequest(run_id=run.run_id, force=True))
+        try:
+            submit_result = _retry(
+                lambda: client.submit_run(SubmitRunRequest(run_id=run.run_id, force=True))
+            )
+        except ConnectError as exc:
+            submit_error = f"submit_run: {exc.code} {exc.message}"
     wall = time.time() - wall0
+    if submit_result is not None:
+        results = merge_submit_scores(results, submit_result, task_filter=set(task_filter))
 
     print("\n==== SUMMARY ====")
+    if submit_error:
+        print(f"RUN CLOSE ERROR: {submit_error}")
     scored, times = [], []
     for task_id, score, detail, err, secs in sorted(results):
         times.append(secs)

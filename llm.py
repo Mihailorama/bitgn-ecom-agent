@@ -212,6 +212,41 @@ _CODEX_INSTRUCTIONS = (
 )
 
 
+def _codex_cli_config_args() -> list[str]:
+    """Optional Codex CLI runtime knobs for fast diagnostic sweeps.
+
+    We run Codex with --ignore-user-config to keep benchmark prompts isolated
+    from local instructions, so speed/model-detail settings must be passed
+    explicitly.
+    """
+    allowed = {
+        "CODEX_REASONING_EFFORT": (
+            "model_reasoning_effort",
+            {"minimal", "low", "medium", "high", "xhigh"},
+        ),
+        "CODEX_VERBOSITY": (
+            "model_verbosity",
+            {"low", "medium", "high"},
+        ),
+        "CODEX_REASONING_SUMMARY": (
+            "model_reasoning_summary",
+            {"auto", "concise", "detailed", "none"},
+        ),
+    }
+    args: list[str] = []
+    for env_name, (config_key, valid_values) in allowed.items():
+        value = os.environ.get(env_name, "").strip()
+        if not value:
+            continue
+        if value not in valid_values:
+            raise LLMError(
+                f"{env_name}={value!r} is unsupported; expected one of "
+                f"{', '.join(sorted(valid_values))}"
+            )
+        args.extend(["-c", f"{config_key}={value}"])
+    return args
+
+
 def _strictify_schema(node):
     """Mutate a pydantic-generated JSON Schema in place to satisfy OpenAI
     strict-mode rules for `response_format=json_schema`:
@@ -290,6 +325,7 @@ def _codex_cli_parse(
                     "--color", "never",
                     "-m", model,
                     "-c", f"instructions={_CODEX_INSTRUCTIONS}",
+                    *_codex_cli_config_args(),
                     "--output-schema", schema_path,
                     "-o", out_path,
                     "-C", "/tmp",

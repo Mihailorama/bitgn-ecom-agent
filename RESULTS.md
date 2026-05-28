@@ -119,3 +119,6 @@ lookups, strong model for security/fraud/mutation.
 | 2026-05-27 23:25 | mixed claude:opus + codex:gpt-5.5 | 100.0% (50.00/50 points) | 50/50 | 350s local | 48s agent avg | 12 (6+6) |
 | 2026-05-28 | mixed claude:opus + codex:gpt-5.5 submit-gate diagnostic | 66.0% (33.00/50 points, not submitted) | 33/50 | 234s local / 1081s platform-open | 22s agent avg | 12 (6+6) |
 | 2026-05-28 | all-codex:gpt-5.5 via mixed runner submit-gate diagnostic | 99.0858% (49.5429/50 points, not submitted) | 49/50 | 415s local / 1886s platform-open | 38s agent avg | 6 codex |
+| 2026-05-29 | mixed claude:opus + codex:gpt-5.3-codex-spark dev53 diagnostic | 98.1132% (52.00/53 points, rejected: goal 53.00/53) | 52/53 | 367s local / 1712s platform-open | 32s agent avg | 12 (6+6) |
+| 2026-05-29 | mixed claude:opus + codex:gpt-5.3-codex-spark dev53 diagnostic after t53 OCR fix | 94.3396% (50.00/53 points, rejected) | 50/53 | 284s local / 1091s platform-open | 21s agent avg | 12 (6+6) |
+| 2026-05-29 | mixed claude:opus + codex:gpt-5.3-codex-spark dev53 diagnostic after t07/t42 fixes | 90.5660% (48.00/53 points, rejected) | 48/53 | 250s local / 1143s platform-open | 21s agent avg | 12 (6+6) |

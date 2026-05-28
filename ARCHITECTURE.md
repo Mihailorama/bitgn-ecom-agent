@@ -7,14 +7,15 @@ these diagrams and one validation gate in the risk table.
 
 ## Current Milestone
 
-As of 2026-05-27, the current saved leaderboard milestone is:
+As of 2026-05-28, the current saved leaderboard milestone is:
 
-- Milestone profile: mixed `claude:opus` + `codex:gpt-5.5`.
+- Milestone profile: `run_mixed_parallel.py` with all tasks routed to
+  `codex:gpt-5.5`.
 - Full-sweep result: `50.00/50` points (`100.00%`) with `50/50` perfect tasks.
 - Accepted sweep logs:
-  `artifacts/sweeps/2026-05-27-goal495-mixed-opus-codex55-r1/`.
-- Local wall time: `350s`; the mixed runner records `agent_seconds`,
-  `platform_open_seconds`, and `slot_wait_seconds`.
+  `artifacts/sweeps/2026-05-28-t48-rowlevel-fix6-full-codex55-r1/`.
+- Local wall time: `351s`; `platform_open_seconds_sum=1741s`.
+- Leaderboard submit: `run-22ReRoZEhobjc7YsSjEW9N9kM`.
 
 The operational target is leaderboard points, not perfect-task count. Perfect
 count remains useful triage, but fractional task scores count toward the goal.
@@ -403,9 +404,99 @@ flowchart TD
 | Full sweep preserves points target | Safe maintenance / documentation-worthy | Yes, if security clean |
 | Full sweep raises points target | Scoring milestone | Yes, tag and document |
 
+## Tournament Fix Runbook
+
+This runbook is for the three-hour hard-close tournament window, especially if
+the task list grows to around 100 tasks. The objective is leaderboard points and
+percentage, not just perfect-task count. A `0.80` partial is worth keeping while
+a security miss is a hard reject.
+
+### Gates
+
+1. Keep a saved accepted baseline: points, max points, percent, platform time,
+   model profile, commit, and log directory.
+2. A new full sweep is accepted only if all are true:
+   - normalized points do not fall below the saved accepted points;
+   - percent is at or above the configured tournament gate;
+   - security grep is clean;
+   - leaderboard submit guard says it either improves points or ties normalized
+     points with a faster platform time.
+3. A targeted, isolated, or family-subset pass is diagnostic evidence only. It is
+   not a new baseline.
+4. If any task says `expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK`,
+   reject the run immediately and fix security before scoring work.
+
+### After Every Full Sweep
+
+The agent should triage without waiting for a manual prompt:
+
+1. Parse `sweep_report.json`, not just stdout. Sort non-perfect tasks by point
+   loss: `1.00 - score`.
+2. Split tasks into `security miss`, `full miss`, `partial`, `infra/timeout`,
+   and `format/grounding` buckets.
+3. If there are up to 10 non-perfect tasks, start 10 isolated runs for each in
+   unique `SWEEP_LOG_DIR`s. If there are more, sample the largest point-loss
+   tasks first, but never postpone security.
+4. Classify each sampled failure as stable bug, flaky model behavior, changed
+   benchmark condition, missing ref, resolver overcount, false positive,
+   amount/count mismatch, unsupported format, or infrastructure issue.
+5. Pick exactly one top-priority task family for a fix cycle. Full misses come
+   before partials unless a partial is the only thing blocking the percent gate.
+
+### Fast Fix Cycle
+
+For the selected task:
+
+1. Read concrete failed logs and identify the row-level or record-level
+   difference between expected and submitted behavior.
+2. Add diagnostic output only if the logs do not expose the failing boundary.
+   Remove or gate noisy diagnostics after the cycle.
+3. Write a RED smoke test from the exact failure class. Do not write broad tests
+   against imagined future variants.
+4. Make one task-local behavior change. Do not rewrite shared resolvers,
+   prompts, or ref policy inside a scoring emergency.
+5. Run:
+   `rtk uv run python -m py_compile agent.py llm.py smoke_test.py` and
+   `rtk uv run python smoke_test.py`.
+6. Run at least 10 fresh isolated samples for the task with unique log dirs.
+7. Run a related-family subset. Examples: inventory `t13 t14 t15 t16 t45`;
+   fraud/archive `t38 t39 t40 t48`; catalogue/reporting `t12 t49`.
+8. Run one full guarded sweep. Accept only through the gates above.
+
+If three narrow fixes for the same task keep producing new long-tail miss
+patterns, stop treating it as a quick scoring patch. Record the evidence and
+move to the next highest point-loss task unless the task blocks the full
+accepted baseline.
+
+### Time Budget
+
+Use the first full sweep as the source of truth, then compress everything else:
+
+1. First 0-20 minutes: full guarded sweep, parse report, security grep.
+2. Next 20-50 minutes: automatic isolated sampling for non-perfect tasks.
+3. Next 50-100 minutes: one RED test and one task-local fix.
+4. Next 100-130 minutes: local gates, 10 isolated samples, related subset.
+5. Final 130-180 minutes: full guarded sweep and submit only through the
+   leaderboard guard.
+
+Do not spend tournament time polishing abstractions, cleaning historical logs,
+or tuning already-perfect tasks. Reference repositories can suggest heuristics,
+but hardcoded task answers, randomized ids, and overfit constants are rejected.
+
+### Why t48 Worked
+
+The successful `t48` cycle is the template. The full sweep showed a stable
+partial archive-fraud problem. Isolated samples showed the resolver often found
+part of the fraud amount but mixed true archive rows with same-customer or
+same-device false positives. The accepted fix did not broaden the whole fraud
+resolver; it added row-level distinctions, RED tests from concrete logs, 10
+fresh isolated `t48` passes, a `t38 t39 t40 t48` related subset, and only then a
+full `50.00/50` accepted sweep.
+
 ### Current Stable Target
 
-The accepted target is `50.00/50` points on `bitgn/ecom1-dev` v50. The next
+The accepted target is `50.00/50` points on `bitgn/ecom1-dev` v50 with logs at
+`artifacts/sweeps/2026-05-28-t48-rowlevel-fix6-full-codex55-r1/`. The next
 accepted improvement must preserve the full points total or improve time,
 preserve the configured percent gate, and remain security-clean.
 

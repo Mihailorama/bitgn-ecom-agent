@@ -19,6 +19,7 @@ from bitgn.harness_pb2 import (
 from connectrpc.errors import ConnectError
 
 from agent import run_agent
+from harness_scoring import merge_submit_scores, submit_score_available
 
 
 BITGN_URL = (
@@ -41,7 +42,8 @@ CLI_BLUE = "\x1B[34m"
 
 def main() -> None:
     task_filter = os.sys.argv[1:]
-    scores = []
+    results = []
+    submit_result = None
 
     try:
         client = HarnessServiceClientSync(BITGN_URL)
@@ -77,8 +79,10 @@ def main() -> None:
                     print(f"{CLI_RED}agent crashed: {exc}{CLI_CLR}")
 
                 result = client.end_trial(EndTrialRequest(trial_id=trial.trial_id))
+                score = result.score if result.score_available else None
+                detail = list(result.score_detail) if result.score_available else []
+                results.append((trial.task_id, score, detail, None, 0.0))
                 if result.score_available:
-                    scores.append((trial.task_id, result.score))
                     style = CLI_GREEN if result.score == 1 else CLI_RED
                     explain = textwrap.indent("\n".join(result.score_detail), "  ")
                     print(
@@ -87,19 +91,29 @@ def main() -> None:
                 else:
                     print(f"\n{CLI_BLUE}Score: not available{CLI_CLR}\n")
         finally:
-            client.submit_run(SubmitRunRequest(run_id=run.run_id, force=True))
+            submit_result = client.submit_run(SubmitRunRequest(run_id=run.run_id, force=True))
 
     except ConnectError as exc:
         print(f"{exc.code}: {exc.message}")
     except KeyboardInterrupt:
         print(f"{CLI_RED}Interrupted{CLI_CLR}")
 
-    if scores:
-        for task_id, score in scores:
+    if submit_result is not None:
+        results = merge_submit_scores(results, submit_result, task_filter=set(task_filter))
+        if submit_score_available(submit_result):
+            print(f"FINAL SCORE: {submit_result.score:0.2f}")
+
+    scored = [
+        (task_id, score)
+        for task_id, score, _detail, err, _secs in results
+        if err is None and isinstance(score, (int, float))
+    ]
+    if scored:
+        for task_id, score in scored:
             style = CLI_GREEN if score == 1 else CLI_RED
             print(f"{task_id}: {style}{score:0.2f}{CLI_CLR}")
 
-        total = sum(score for _, score in scores) / len(scores) * 100.0
+        total = sum(score for _, score in scored) / len(scored) * 100.0
         print(f"FINAL: {total:0.2f}%")
 
 

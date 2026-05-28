@@ -47,6 +47,8 @@ from degradation_gate import (
     points_for_gate,
     write_sweep_report,
 )
+from harness_retry import retry_delay_for_connect_error
+from harness_scoring import merge_submit_scores, submit_score_available
 
 
 BITGN_URL = os.getenv("BITGN_HOST") or os.getenv("BENCHMARK_HOST") or "https://api.bitgn.com"
@@ -82,10 +84,10 @@ def _retry(fn, attempts: int = 5):
     for i in range(attempts):
         try:
             return fn()
-        except ConnectError:
+        except ConnectError as exc:
             if i == attempts - 1:
                 raise
-            time.sleep(delay)
+            time.sleep(retry_delay_for_connect_error(exc, delay))
             delay = min(delay * 2, 8.0)
 
 
@@ -299,10 +301,6 @@ def _run_one(
         return (trial_id, None, None, f"start_trial: {exc.code} {exc.message}", start_secs, "", 0.0, 0.0)
 
     if task_filter and trial.task_id not in task_filter:
-        try:
-            _retry(lambda: client.end_trial(EndTrialRequest(trial_id=trial.trial_id)))
-        except ConnectError:
-            pass
         if reservation:
             reservation.release()
         platform_open = time.time() - trial_open0
@@ -407,28 +405,45 @@ def main() -> None:
         trial_task_ids = {trial_id: trial_id for trial_id in run.trial_ids if trial_id in benchmark_task_ids}
 
     results = []
+    submit_result = None
+    submit_error = None
     ctx = mp.get_context("spawn")
     wall0 = time.time()
-    with ProcessPoolExecutor(max_workers=MIXED_PARALLEL, mp_context=ctx) as pool:
-        futures = {
-            pool.submit(run_one, tid, task_filter, semaphores, trial_task_ids): tid
-            for tid in run.trial_ids
-        }
-        for fut in as_completed(futures):
-            task_id, score, detail, err, secs, model_id, platform_secs, wait_secs = fut.result()
-            if score == "skip":
-                continue
-            results.append((task_id, score, detail, err, secs, model_id, platform_secs, wait_secs))
-            tag = f"{score:.2f}" if isinstance(score, (int, float)) else (err or "n/a")
-            wait_part = f", wait {wait_secs:.0f}s" if wait_secs >= 0.5 else ""
-            print(
-                f"[done] {task_id}: {tag} "
-                f"({secs:.0f}s agent, {platform_secs:.0f}s open{wait_part}, {model_id})",
-                flush=True,
+    try:
+        with ProcessPoolExecutor(max_workers=MIXED_PARALLEL, mp_context=ctx) as pool:
+            futures = {
+                pool.submit(run_one, tid, task_filter, semaphores, trial_task_ids): tid
+                for tid in run.trial_ids
+            }
+            for fut in as_completed(futures):
+                task_id, score, detail, err, secs, model_id, platform_secs, wait_secs = fut.result()
+                if score == "skip":
+                    continue
+                results.append((task_id, score, detail, err, secs, model_id, platform_secs, wait_secs))
+                tag = f"{score:.2f}" if isinstance(score, (int, float)) else (err or "n/a")
+                wait_part = f", wait {wait_secs:.0f}s" if wait_secs >= 0.5 else ""
+                print(
+                    f"[done] {task_id}: {tag} "
+                    f"({secs:.0f}s agent, {platform_secs:.0f}s open{wait_part}, {model_id})",
+                    flush=True,
+                )
+    finally:
+        try:
+            submit_result = _retry(
+                lambda: client.submit_run(SubmitRunRequest(run_id=run.run_id, force=True))
             )
+        except ConnectError as exc:
+            submit_error = f"submit_run: {exc.code} {exc.message}"
     wall = time.time() - wall0
+    if submit_result is not None:
+        results = merge_submit_scores(results, submit_result, task_filter=set(task_filter))
 
     print("\n==== SUMMARY ====")
+    if submit_error:
+        print(f"RUN CLOSE ERROR: {submit_error}")
+    elif submit_result is not None:
+        status = "batch scores available" if submit_score_available(submit_result) else "batch scores unavailable"
+        print(f"RUN CLOSED: run_id={run.run_id} ({status})")
     scored, times, platform_times, slot_waits = [], [], [], []
     for task_id, score, detail, err, secs, model_id, platform_secs, wait_secs in sorted(results):
         times.append(secs)
@@ -495,18 +510,17 @@ def main() -> None:
     }
     print(format_gate_summary(report))
     should_submit, submit_reason = should_submit_leaderboard(report, task_filter)
-    submitted = False
     if should_submit:
-        client.submit_run(SubmitRunRequest(run_id=run.run_id, force=True))
-        submitted = True
-        print(f"leaderboard submit: submitted run_id={run.run_id}")
+        print(f"leaderboard gate: eligible after run close ({submit_reason}) run_id={run.run_id}")
     else:
-        print(f"leaderboard submit: skipped ({submit_reason}) run_id={run.run_id}")
+        print(f"leaderboard gate: rejected after run close ({submit_reason}) run_id={run.run_id}")
     report["leaderboard_submit"] = {
         "eligible": should_submit,
         "reason": submit_reason,
         "run_id": run.run_id,
-        "submitted": submitted,
+        "submitted": submit_result is not None,
+        "submit_error": submit_error,
+        "submit_required_for_score": True,
     }
     report_path = write_sweep_report(report, LOG_DIR)
     print(f"gate report: {report_path}")
