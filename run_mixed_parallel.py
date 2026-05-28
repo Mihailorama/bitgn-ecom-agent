@@ -142,6 +142,15 @@ def model_slot(model_id: str) -> str:
     return "codex"
 
 
+def should_submit_leaderboard(report: dict[str, Any], task_filter: list[str]) -> tuple[bool, str]:
+    if task_filter:
+        return False, "subset run"
+    if not report.get("accepted"):
+        reasons = "; ".join(str(reason) for reason in report.get("reasons") or [])
+        return False, reasons or "gate rejected"
+    return True, "accepted full sweep"
+
+
 def _acquire_for_model(model_id: str, semaphores: dict[str, Any]):
     slot = model_slot(model_id)
     sem = semaphores[slot]
@@ -343,26 +352,23 @@ def main() -> None:
     results = []
     ctx = mp.get_context("spawn")
     wall0 = time.time()
-    try:
-        with ProcessPoolExecutor(max_workers=MIXED_PARALLEL, mp_context=ctx) as pool:
-            futures = {
-                pool.submit(run_one, tid, task_filter, semaphores, trial_task_ids): tid
-                for tid in run.trial_ids
-            }
-            for fut in as_completed(futures):
-                task_id, score, detail, err, secs, model_id, platform_secs, wait_secs = fut.result()
-                if score == "skip":
-                    continue
-                results.append((task_id, score, detail, err, secs, model_id, platform_secs, wait_secs))
-                tag = f"{score:.2f}" if isinstance(score, (int, float)) else (err or "n/a")
-                wait_part = f", wait {wait_secs:.0f}s" if wait_secs >= 0.5 else ""
-                print(
-                    f"[done] {task_id}: {tag} "
-                    f"({secs:.0f}s agent, {platform_secs:.0f}s open{wait_part}, {model_id})",
-                    flush=True,
-                )
-    finally:
-        client.submit_run(SubmitRunRequest(run_id=run.run_id, force=True))
+    with ProcessPoolExecutor(max_workers=MIXED_PARALLEL, mp_context=ctx) as pool:
+        futures = {
+            pool.submit(run_one, tid, task_filter, semaphores, trial_task_ids): tid
+            for tid in run.trial_ids
+        }
+        for fut in as_completed(futures):
+            task_id, score, detail, err, secs, model_id, platform_secs, wait_secs = fut.result()
+            if score == "skip":
+                continue
+            results.append((task_id, score, detail, err, secs, model_id, platform_secs, wait_secs))
+            tag = f"{score:.2f}" if isinstance(score, (int, float)) else (err or "n/a")
+            wait_part = f", wait {wait_secs:.0f}s" if wait_secs >= 0.5 else ""
+            print(
+                f"[done] {task_id}: {tag} "
+                f"({secs:.0f}s agent, {platform_secs:.0f}s open{wait_part}, {model_id})",
+                flush=True,
+            )
     wall = time.time() - wall0
 
     print("\n==== SUMMARY ====")
@@ -430,8 +436,22 @@ def main() -> None:
         "platform_open_seconds_max": round(max(platform_times), 3) if platform_times else 0.0,
         "slot_wait_seconds_max": round(max(slot_waits), 3) if slot_waits else 0.0,
     }
-    report_path = write_sweep_report(report, LOG_DIR)
     print(format_gate_summary(report))
+    should_submit, submit_reason = should_submit_leaderboard(report, task_filter)
+    submitted = False
+    if should_submit:
+        client.submit_run(SubmitRunRequest(run_id=run.run_id, force=True))
+        submitted = True
+        print(f"leaderboard submit: submitted run_id={run.run_id}")
+    else:
+        print(f"leaderboard submit: skipped ({submit_reason}) run_id={run.run_id}")
+    report["leaderboard_submit"] = {
+        "eligible": should_submit,
+        "reason": submit_reason,
+        "run_id": run.run_id,
+        "submitted": submitted,
+    }
+    report_path = write_sweep_report(report, LOG_DIR)
     print(f"gate report: {report_path}")
     print(f"route manifest: {LOG_DIR}/route_manifest.json")
     print(f"per-task logs: {LOG_DIR}/<task>.log")

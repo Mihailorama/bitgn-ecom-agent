@@ -427,6 +427,25 @@ def test_mixed_runner_reserves_known_trial_slot_before_start():
     print("ok: mixed runner reserves known trial model slot before start_trial")
 
 
+def test_mixed_runner_submits_only_accepted_full_sweeps():
+    accepted = {"accepted": True, "reasons": [], "points": 50.0}
+    rejected = {"accepted": False, "reasons": ["points 49.00 < required 49.50"]}
+
+    ok, reason = run_mixed_parallel.should_submit_leaderboard(accepted, [])
+    assert ok is True
+    assert reason == "accepted full sweep"
+
+    ok, reason = run_mixed_parallel.should_submit_leaderboard(accepted, ["t48"])
+    assert ok is False
+    assert reason == "subset run"
+
+    ok, reason = run_mixed_parallel.should_submit_leaderboard(rejected, [])
+    assert ok is False
+    assert "points 49.00" in reason
+
+    print("ok: mixed runner submits only accepted full sweeps")
+
+
 def test_connect_error_recovery():
     vm = FakeVM()
     vm.raise_on_read_path = "/missing.json"
@@ -2178,6 +2197,7 @@ def main():
     test_mixed_runner_model_slots()
     test_mixed_runner_task_model_overrides_take_priority()
     test_mixed_runner_reserves_known_trial_slot_before_start()
+    test_mixed_runner_submits_only_accepted_full_sweeps()
     test_connect_error_recovery()
     test_sql_path_extraction()
     test_format_enforcement()
