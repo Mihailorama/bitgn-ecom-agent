@@ -132,6 +132,20 @@ skifmax rules-evolution, plan-repl-agent, azamat1c filesystem-agent).
     mismatches. Failed runs recovered `~67-92%` of fraudulent EUR and usually
     carried `up to ten` false positives; the near-full `0.9979` run recovered
     `~100%` but still had a small amount mismatch and a few false positives.
+  - Row-level diagnostic mode added in commit `d80fbf1`: set
+    `ARCHIVE_FRAUD_DIAG=1` to print selected archive rows, candidate groups, and
+    compact all-row TSV features into the per-task log without changing default
+    solver behavior. Diagnostic logs:
+    `artifacts/sweeps/2026-05-28-t48-rowdiag-r01..r10/`. Result: `3/10` raw
+    perfect, one near-full `0.9981`, average score `0.804711`; all were subset
+    runs with `leaderboard_submit.submitted=false` and no security misses.
+  - Rejected row-level hypothesis: requiring `>=4` distinct stores for
+    high-value customer/device archive predicates. It looked plausible because
+    some false positives sit in 2-3-store groups, but real scorer evidence
+    showed this is too strict: stopped after `15` isolated runs at `0/15`
+    perfect with many scores in the `0.34-0.63` range. Logs:
+    `artifacts/sweeps/2026-05-28-t48-store4-postfix-r01..r15/`. The code change
+    and RED tests were reverted; do not retry this predicate as-is.
   - Current `t48` status: unresolved. The next RED test must distinguish the
     real archive fraud rows from same-customer false positives rather than
     broadening customer cohorts.
