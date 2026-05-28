@@ -102,7 +102,26 @@ skifmax rules-evolution, plan-repl-agent, azamat1c filesystem-agent).
     It was faster than the best leaderboard time
     (`platform_open_seconds_sum=1885.628s`) but correctly did not submit
     because points were below `50.00/50`.
-- Active next isolated cycle: `t48` archive fraud amount mismatch.
+- `t48` isolated cycle started 2026-05-28:
+  - Pre-fix sample logs:
+    `artifacts/sweeps/2026-05-28-t48-isolated-codex55-r01..r10/`.
+    Result: `4/10` perfect, average score `0.7263`. All misses were partial
+    `answer amount mismatch`; details consistently said archive fraud refs
+    recovered `~67-86%` of fraudulent EUR and also included false positives.
+    Every subset run correctly had `leaderboard_submit.submitted=false`.
+  - Diagnostic TSV inspection run:
+    `run-22Rd5MU6A7YMYraK6ZXF6mJVu` (not submitted) showed suspicious
+    long-tail customer cohorts, so a narrow high-value-customer-cohort shape was
+    tested locally.
+  - Rejected experiment logs:
+    `artifacts/sweeps/2026-05-28-t48-longtail-postfix-r01..r10/`.
+    Result: still `4/10` perfect, average score `0.8162`, but several misses
+    changed to `recovered ~100% EUR` with too many false positives. The
+    experiment was therefore not accepted and the code/test change was reverted
+    before commit.
+  - Current `t48` status: unresolved. The next RED test must distinguish the
+    real archive fraud rows from same-customer false positives rather than
+    broadening customer cohorts.
 
 ## Status & next steps (historical notes, updated 2026-05-26 morning state)
 
