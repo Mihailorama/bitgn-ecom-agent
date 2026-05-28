@@ -86,10 +86,13 @@ skifmax rules-evolution, plan-repl-agent, azamat1c filesystem-agent).
   security grep clean.
 - The previous `48.9905/50` mixed run is now historical evidence, not the active
   target.
-- Current runner/control version: commit `e306b6f` adds the leaderboard submit
-  guard. A run submits only if it is a full accepted sweep with no security miss
-  and either improves points over the personal best or ties points with the same
-  denominator and a faster `platform_open_seconds_sum`.
+- Current runner/control version: commit `ef61e7f` keeps the leaderboard submit
+  guard and compares gate points after two-decimal normalization. A run submits
+  only if it is a full accepted sweep with no security miss and either improves
+  normalized points over the personal best or ties normalized points with the
+  same denominator and a faster `platform_open_seconds_sum`. This avoids
+  skipping near-`50.00/50` runs such as raw `49.9979/50`, which leaderboard
+  display rounds to `50.0/50`.
 - Current leaderboard best used by the submit guard:
   `LEADERBOARD_BEST_POINTS=50`, `LEADERBOARD_BEST_MAX_POINTS=50`,
   `LEADERBOARD_BEST_SECONDS=3603`.
@@ -119,6 +122,16 @@ skifmax rules-evolution, plan-repl-agent, azamat1c filesystem-agent).
     changed to `recovered ~100% EUR` with too many false positives. The
     experiment was therefore not accepted and the code/test change was reverted
     before commit.
+  - Wide diagnostic sample logs:
+    `artifacts/sweeps/2026-05-28-t48-wide-sample-r01..r30/`.
+    Result: `12/30` raw full-score runs, one near-full run at `0.9979`, average
+    score `0.800816`, median `0.767814`, min `0.449317`, max `1.000000`.
+    All runs were subset diagnostics with `leaderboard_submit.submitted=false`
+    (`reason=subset run`) and no security misses.
+  - Wide-sample miss pattern: all non-full runs were partial archive amount
+    mismatches. Failed runs recovered `~67-92%` of fraudulent EUR and usually
+    carried `up to ten` false positives; the near-full `0.9979` run recovered
+    `~100%` but still had a small amount mismatch and a few false positives.
   - Current `t48` status: unresolved. The next RED test must distinguish the
     real archive fraud rows from same-customer false positives rather than
     broadening customer cohorts.
