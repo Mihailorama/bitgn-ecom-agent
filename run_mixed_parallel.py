@@ -53,8 +53,17 @@ MIXED_PARALLEL = int(os.getenv("MIXED_PARALLEL", "12"))
 MIXED_CLAUDE_LIMIT = int(os.getenv("MIXED_CLAUDE_LIMIT", "6"))
 MIXED_CODEX_LIMIT = int(os.getenv("MIXED_CODEX_LIMIT", "6"))
 LOG_DIR = os.getenv("SWEEP_LOG_DIR", "/tmp/mixed_sweep_logs")
-MIN_ACCEPTED_POINTS = float(os.getenv("MIN_ACCEPTED_POINTS", os.getenv("MIN_ACCEPTED_SOLVED", "48.9905")))
-MIN_ACCEPTED_PCT = float(os.getenv("MIN_ACCEPTED_PCT", "97"))
+LEADERBOARD_BEST_POINTS = float(os.getenv("LEADERBOARD_BEST_POINTS", "50.0"))
+LEADERBOARD_BEST_MAX_POINTS = int(os.getenv("LEADERBOARD_BEST_MAX_POINTS", "50"))
+_BEST_SECONDS_RAW = os.getenv("LEADERBOARD_BEST_SECONDS", "3603")
+LEADERBOARD_BEST_SECONDS = float(_BEST_SECONDS_RAW) if _BEST_SECONDS_RAW else None
+MIN_ACCEPTED_POINTS = float(
+    os.getenv(
+        "MIN_ACCEPTED_POINTS",
+        os.getenv("MIN_ACCEPTED_SOLVED", str(LEADERBOARD_BEST_POINTS)),
+    )
+)
+MIN_ACCEPTED_PCT = float(os.getenv("MIN_ACCEPTED_PCT", "98"))
 
 # Keep known fragile / high-value families on Codex by default. Everything else
 # is diagnostic Claude traffic unless overridden by env.
@@ -142,13 +151,55 @@ def model_slot(model_id: str) -> str:
     return "codex"
 
 
-def should_submit_leaderboard(report: dict[str, Any], task_filter: list[str]) -> tuple[bool, str]:
+def report_leaderboard_seconds(report: dict[str, Any]) -> float | None:
+    timing = report.get("timing")
+    if not isinstance(timing, dict):
+        return None
+    seconds = timing.get("platform_open_seconds_sum")
+    if not isinstance(seconds, (int, float)):
+        return None
+    return float(seconds)
+
+
+def should_submit_leaderboard(
+    report: dict[str, Any],
+    task_filter: list[str],
+    *,
+    best_points: float = LEADERBOARD_BEST_POINTS,
+    best_max_points: int = LEADERBOARD_BEST_MAX_POINTS,
+    best_time_seconds: float | None = LEADERBOARD_BEST_SECONDS,
+) -> tuple[bool, str]:
     if task_filter:
         return False, "subset run"
     if not report.get("accepted"):
         reasons = "; ".join(str(reason) for reason in report.get("reasons") or [])
         return False, reasons or "gate rejected"
-    return True, "accepted full sweep"
+
+    points = float(report.get("points") or 0.0)
+    epsilon = 1e-6
+    if points > best_points + epsilon:
+        return True, f"points improved {points:.2f} > {best_points:.2f}"
+    if points < best_points - epsilon:
+        return False, f"points {points:.2f} below leaderboard best {best_points:.2f}"
+
+    max_points = int(report.get("max_points") or 0)
+    if max_points != best_max_points:
+        return False, f"same points but denominator changed {max_points} != {best_max_points}"
+
+    current_seconds = report_leaderboard_seconds(report)
+    if current_seconds is None:
+        return False, "same points but platform_open_seconds_sum is missing"
+    if best_time_seconds is None:
+        return False, "same points but leaderboard best time is not configured"
+    if current_seconds < best_time_seconds - 0.5:
+        return True, (
+            f"same points and faster leaderboard time "
+            f"{current_seconds:.0f}s < {best_time_seconds:.0f}s"
+        )
+    return False, (
+        f"same points but not faster "
+        f"{current_seconds:.0f}s >= {best_time_seconds:.0f}s"
+    )
 
 
 def _acquire_for_model(model_id: str, semaphores: dict[str, Any]):

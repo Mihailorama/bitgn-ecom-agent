@@ -428,12 +428,24 @@ def test_mixed_runner_reserves_known_trial_slot_before_start():
 
 
 def test_mixed_runner_submits_only_accepted_full_sweeps():
-    accepted = {"accepted": True, "reasons": [], "points": 50.0}
+    accepted = {
+        "accepted": True,
+        "reasons": [],
+        "points": 50.0,
+        "max_points": 50,
+        "timing": {"platform_open_seconds_sum": 3500.0},
+    }
     rejected = {"accepted": False, "reasons": ["points 49.00 < required 49.50"]}
 
-    ok, reason = run_mixed_parallel.should_submit_leaderboard(accepted, [])
+    ok, reason = run_mixed_parallel.should_submit_leaderboard(
+        accepted,
+        [],
+        best_points=50.0,
+        best_max_points=50,
+        best_time_seconds=3603.0,
+    )
     assert ok is True
-    assert reason == "accepted full sweep"
+    assert "faster leaderboard time" in reason
 
     ok, reason = run_mixed_parallel.should_submit_leaderboard(accepted, ["t48"])
     assert ok is False
@@ -443,7 +455,58 @@ def test_mixed_runner_submits_only_accepted_full_sweeps():
     assert ok is False
     assert "points 49.00" in reason
 
-    print("ok: mixed runner submits only accepted full sweeps")
+    better_points = {
+        "accepted": True,
+        "reasons": [],
+        "points": 50.5,
+        "max_points": 51,
+        "timing": {"platform_open_seconds_sum": 5000.0},
+    }
+    ok, reason = run_mixed_parallel.should_submit_leaderboard(
+        better_points,
+        [],
+        best_points=50.0,
+        best_max_points=50,
+        best_time_seconds=3603.0,
+    )
+    assert ok is True
+    assert "points improved" in reason
+
+    slower_equal = {
+        "accepted": True,
+        "reasons": [],
+        "points": 50.0,
+        "max_points": 50,
+        "timing": {"platform_open_seconds_sum": 3700.0},
+    }
+    ok, reason = run_mixed_parallel.should_submit_leaderboard(
+        slower_equal,
+        [],
+        best_points=50.0,
+        best_max_points=50,
+        best_time_seconds=3603.0,
+    )
+    assert ok is False
+    assert "not faster" in reason
+
+    same_points_new_denominator = {
+        "accepted": True,
+        "reasons": [],
+        "points": 50.0,
+        "max_points": 51,
+        "timing": {"platform_open_seconds_sum": 3000.0},
+    }
+    ok, reason = run_mixed_parallel.should_submit_leaderboard(
+        same_points_new_denominator,
+        [],
+        best_points=50.0,
+        best_max_points=50,
+        best_time_seconds=3603.0,
+    )
+    assert ok is False
+    assert "denominator changed" in reason
+
+    print("ok: mixed runner submits only leaderboard-improving full sweeps")
 
 
 def test_connect_error_recovery():
