@@ -3163,6 +3163,158 @@ def test_red_dev53_product_check_supports_app_based_scheduling_absent():
     print("red: dev53 product check handles missing app-based scheduling claim")
 
 
+def test_red_t08_product_check_season_absent_returns_no():
+    vm = FakeVM()
+    family_root = "/proc/catalog/automotive/engine_oil/fam_automotive_engine_oil_0016_342wos7v"
+    product_path = f"{family_root}/AUT-1F13I2NX.json"
+    vm.sql_outputs["lower(pv.brand) = lower('WD-40')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        f"AUT-1F13I2NX,{product_path},fam_automotive_engine_oil_0016_342wos7v,"
+        "WD-40,Specialist Smart,3T7-ORP,WD-40 Specialist Smart 3T7-ORP Engine Oil,"
+        "Engine Oil,volume_ml,,250\n"
+        f"AUT-1F13I2NX,{product_path},fam_automotive_engine_oil_0016_342wos7v,"
+        "WD-40,Specialist Smart,3T7-ORP,WD-40 Specialist Smart 3T7-ORP Engine Oil,"
+        "Engine Oil,viscosity,5W-40,\n"
+    )
+    task = (
+        "A support note claims we stock the Engine Oil from WD-40 in the WD-40 Specialist Smart "
+        "3T7-ORP Engine Oil line that has volume 250 ml and viscosity 5W-40 and has season summer. "
+        "Check the actual catalogue item, cite the exact product record, and if the base product exists "
+        "but that extra catalogue claim is absent, answer with <NO> and include the checked SKU."
+    )
+
+    fn = agent._try_product_check(vm, task)
+
+    assert fn is not None
+    assert "<NO>" in fn.message
+    assert "AUT-1F13I2NX" in fn.message
+    assert product_path in fn.grounding_refs
+    print("red: t08 product check season absent returns NO")
+
+
+def test_red_t08_product_check_kneepad_pockets_absent_checks_family_sibling():
+    vm = FakeVM()
+    family_root = "/proc/catalog/workwear/work_trousers/fam_workwear_work_trousers_0011_2j8hygnw"
+    base_path = f"{family_root}/WRK-17SERLIN.json"
+    required_path = f"{family_root}/WRK-2XIG2OXH.json"
+    wrong_size_path = f"{family_root}/WRK-0WRONGXL.json"
+    vm.sql_outputs["lower(pv.brand) = lower('Helly Hansen')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        f"WRK-17SERLIN,{base_path},fam_workwear_work_trousers_0011_2j8hygnw,"
+        "Helly Hansen,Chelsea Evolution HH,1KJ-HJR,Helly Hansen Chelsea Evolution HH 1KJ-HJR Work Trousers Blue XL,"
+        "Work Trousers,color_family,Blue,\n"
+        f"WRK-17SERLIN,{base_path},fam_workwear_work_trousers_0011_2j8hygnw,"
+        "Helly Hansen,Chelsea Evolution HH,1KJ-HJR,Helly Hansen Chelsea Evolution HH 1KJ-HJR Work Trousers Blue XL,"
+        "Work Trousers,size,XL,\n"
+    )
+    vm.list_outputs[family_root] = [
+        SimpleNamespace(name="WRK-0WRONGXL.json"),
+        SimpleNamespace(name="WRK-2XIG2OXH.json"),
+    ]
+    vm.read_outputs[wrong_size_path] = json.dumps(
+        {
+            "product_sku": "WRK-0WRONGXL",
+            "record_path": wrong_size_path,
+            "product_family_id": "fam_workwear_work_trousers_0011_2j8hygnw",
+            "brand": "Helly Hansen",
+            "series": "Chelsea Evolution HH",
+            "model": "1KJ-HJR",
+            "product_name": "Helly Hansen Chelsea Evolution HH 1KJ-HJR Work Trousers Blue M",
+            "product_kind_name": "Work Trousers",
+            "properties": [
+                {"property_key": "color_family", "property_value_text": "Blue"},
+                {"property_key": "size", "property_value_text": "M"},
+            ],
+        }
+    )
+    vm.read_outputs[required_path] = json.dumps(
+        {
+            "product_sku": "WRK-2XIG2OXH",
+            "record_path": required_path,
+            "product_family_id": "fam_workwear_work_trousers_0011_2j8hygnw",
+            "brand": "Helly Hansen",
+            "series": "Chelsea Evolution HH",
+            "model": "1KJ-HJR",
+            "product_name": "Helly Hansen Chelsea Evolution HH 1KJ-HJR Work Trousers Blue XL",
+            "product_kind_name": "Work Trousers",
+            "properties": [
+                {"property_key": "color_family", "property_value_text": "Blue"},
+                {"property_key": "size", "property_value_text": "XL"},
+            ],
+        }
+    )
+    task = (
+        "A support note claims we stock the Work Trousers from Helly Hansen in the Helly Hansen "
+        "Chelsea Evolution HH 1KJ-HJR Work Trousers line that has color family Blue and size XL "
+        "and has kneepad pockets no. Check the actual catalogue item, cite the exact product record, "
+        "and if the base product exists but that extra catalogue claim is absent, answer with <NO> "
+        "and include the checked SKU."
+    )
+
+    fn = agent._try_product_check(vm, task)
+
+    assert fn is not None
+    assert "<NO>" in fn.message
+    assert "WRK-2XIG2OXH" in fn.message
+    assert required_path in fn.grounding_refs
+    assert wrong_size_path not in fn.grounding_refs
+    print("red: t08 product check kneepad pockets absent checks family sibling")
+
+
+def test_red_t08_product_check_family_json_string_properties_sibling_is_checked():
+    vm = FakeVM()
+    family_root = "/proc/catalog/fasteners/nuts_bolts_washers/fam_fasteners_nuts_bolts_washers_0014_22xnnom1"
+    base_path = f"{family_root}/FST-167J05VR.json"
+    required_path = f"{family_root}/FST-2L7R4SAN.json"
+    vm.sql_outputs["lower(pv.brand) = lower('Dresselhaus')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        f"FST-167J05VR,{base_path},fam_fasteners_nuts_bolts_washers_0014_22xnnom1,"
+        "Dresselhaus,Pro Pack,DRE 320-E3I,Dresselhaus Pro Pack DRE 320-E3I Nut Bolt and Washer,"
+        "Nut Bolt and Washer,fastener_type,bolt,\n"
+        f"FST-167J05VR,{base_path},fam_fasteners_nuts_bolts_washers_0014_22xnnom1,"
+        "Dresselhaus,Pro Pack,DRE 320-E3I,Dresselhaus Pro Pack DRE 320-E3I Nut Bolt and Washer,"
+        "Nut Bolt and Washer,diameter_mm,,12\n"
+        f"FST-167J05VR,{base_path},fam_fasteners_nuts_bolts_washers_0014_22xnnom1,"
+        "Dresselhaus,Pro Pack,DRE 320-E3I,Dresselhaus Pro Pack DRE 320-E3I Nut Bolt and Washer,"
+        "Nut Bolt and Washer,length_mm,,12\n"
+    )
+    vm.list_outputs[family_root] = [SimpleNamespace(name="FST-2L7R4SAN.json")]
+    vm.read_outputs[required_path] = json.dumps(
+        {
+            "product_sku": "FST-2L7R4SAN",
+            "record_path": required_path,
+            "product_family_id": "fam_fasteners_nuts_bolts_washers_0014_22xnnom1",
+            "brand": "Dresselhaus",
+            "series": "Pro Pack",
+            "model": "DRE 320-E3I",
+            "product_name": "Dresselhaus Pro Pack DRE 320-E3I Nut Bolt and Washer",
+            "product_kind_name": "Nut Bolt and Washer",
+            "properties": json.dumps(
+                {
+                    "fastener_type": "bolt",
+                    "diameter_mm": 12,
+                    "length_mm": 12,
+                }
+            ),
+        }
+    )
+    task = (
+        "A support note claims we stock the Nut Bolt and Washer from Dresselhaus in the Dresselhaus "
+        "Pro Pack DRE 320-E3I Nut Bolt and Washer line that has fastener type bolt, diameter 12 mm, "
+        "and length 12 mm and has pack count 10 pcs. Check the actual catalogue item, cite the exact "
+        "product record, and if the base product exists but that extra catalogue claim is absent, "
+        "answer with <NO> and include the checked SKU."
+    )
+
+    fn = agent._try_product_check(vm, task)
+
+    assert fn is not None
+    assert "<NO>" in fn.message
+    assert "FST-2L7R4SAN" in fn.message
+    assert required_path in fn.grounding_refs
+    print("red: t08 product check reads family JSON string properties")
+
+
 def test_red_t07_product_check_fragrance_absent_returns_no():
     vm = FakeVM()
     vm.sql_outputs["lower(pv.brand) = lower('Karcher')"] = (
@@ -3356,6 +3508,53 @@ def test_red_t32_product_check_voice_control_absent_checks_family_sibling():
     assert "HND-3UDOT1DU" in fn.message
     assert required_path in fn.grounding_refs
     print("red: t32 product check voice control absent checks family sibling")
+
+
+def test_red_t32_product_check_family_json_dashless_model_sibling_is_checked():
+    vm = FakeVM()
+    family_root = "/proc/catalog/hand_tools/pliers_wrenches/fam_hand_tools_pliers_wrenches_0013_1frtvrwe"
+    base_path = f"{family_root}/HND-1892JKHK.json"
+    required_path = f"{family_root}/HND-RELQP8TS.json"
+    vm.sql_outputs["lower(pv.brand) = lower('Hazet')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        f"HND-1892JKHK,{base_path},fam_hand_tools_pliers_wrenches_0013_1frtvrwe,"
+        "Hazet,Professional 900,1PG-QS4,Hazet Professional 900 1PG-QS4 Pliers and Wrenches,"
+        "Pliers and Wrenches,tool_type,water pump pliers,\n"
+        f"HND-1892JKHK,{base_path},fam_hand_tools_pliers_wrenches_0013_1frtvrwe,"
+        "Hazet,Professional 900,1PG-QS4,Hazet Professional 900 1PG-QS4 Pliers and Wrenches,"
+        "Pliers and Wrenches,length_mm,,125\n"
+    )
+    vm.list_outputs[family_root] = [SimpleNamespace(name="HND-RELQP8TS.json")]
+    vm.read_outputs[required_path] = json.dumps(
+        {
+            "product_sku": "HND-RELQP8TS",
+            "record_path": required_path,
+            "product_family_id": "fam_hand_tools_pliers_wrenches_0013_1frtvrwe",
+            "brand": "Hazet",
+            "series": "Professional 900",
+            "model": "1PG QS4",
+            "product_name": "Hazet Professional 900 1PG QS4 Pliers and Wrenches",
+            "product_kind_name": "Pliers and Wrenches",
+            "properties": [
+                {"property_key": "tool_type", "property_value_text": "water pump pliers"},
+                {"property_key": "length_mm", "property_value_number": 125},
+            ],
+        }
+    )
+    task = (
+        "A support note claims we stock the Pliers and Wrenches from Hazet in the Hazet Professional "
+        "900 1PG-QS4 Pliers and Wrenches line that has tool type water pump pliers and length 125 mm "
+        "and supports app-based scheduling. Check the actual catalogue item, cite the exact product record, "
+        "and if the base product exists but that extra capability is absent, answer with <NO> and include the checked SKU."
+    )
+
+    fn = agent._try_product_check(vm, task)
+
+    assert fn is not None
+    assert "<NO>" in fn.message
+    assert "HND-RELQP8TS" in fn.message
+    assert required_path in fn.grounding_refs
+    print("red: t32 product check includes dashless-model family JSON sibling")
 
 
 def test_red_dev53_product_check_cites_family_json_base_sibling_for_absent_extra_claim():
@@ -4565,11 +4764,15 @@ def main():
     test_red_dev53_product_check_rejects_conflicting_duplicate_properties()
     test_red_dev53_freeform_catalogue_check_returns_no_without_llm()
     test_red_dev53_product_check_supports_app_based_scheduling_absent()
+    test_red_t08_product_check_season_absent_returns_no()
+    test_red_t08_product_check_kneepad_pockets_absent_checks_family_sibling()
+    test_red_t08_product_check_family_json_string_properties_sibling_is_checked()
     test_red_t07_product_check_fragrance_absent_returns_no()
     test_red_t32_product_check_gps_tracking_absent_returns_no_with_checked_sku()
     test_red_t32_product_check_family_json_numeric_float_sibling_is_checked()
     test_red_t32_product_check_family_json_current_schema_property_list_sibling_is_checked()
     test_red_t32_product_check_voice_control_absent_checks_family_sibling()
+    test_red_t32_product_check_family_json_dashless_model_sibling_is_checked()
     test_red_dev53_product_check_cites_family_json_base_sibling_for_absent_extra_claim()
     test_red_dev53_product_check_standard_claim_absent_returns_no()
     test_red_dev53_product_check_bluetooth_control_absent_returns_no()

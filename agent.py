@@ -1684,9 +1684,9 @@ _PROP_PREFIXES = [
     "bar length", "battery platform", "bluetooth control", "cleaner type", "coating", "color family", "connection type", "connector type", "current",
     "cutting width",
     "device type", "disc diameter", "drive type", "fastener type", "fitting type", "ip rating", "kit contents",
-    "finish", "fit", "fragrance", "garment type", "gps tracking", "lens color", "luminous flux", "machine type", "mask type", "material", "piece count", "product type",
+    "finish", "fit", "fragrance", "garment type", "gps tracking", "kneepad pockets", "lens color", "luminous flux", "machine type", "mask type", "material", "piece count", "product type",
     "protection class", "protection type",
-    "pack count", "power source", "screw type", "sealant type", "standard", "storage type", "tank volume", "thread type",
+    "pack count", "power source", "screw type", "sealant type", "season", "standard", "storage type", "tank volume", "thread type",
     "stackable system", "stackable", "tool profile", "tool type", "trap type", "use area", "vehicle type", "viscosity", "voice control", "wattage", "voltage", "volume",
     "chemistry", "cleaning type", "color temperature", "colour temperature", "wifi enabled", "diameter", "length", "power", "size", "surface", "fitting",
 ]
@@ -1941,6 +1941,12 @@ def _product_from_catalog_json(path: str, body: str, base: dict) -> "dict | None
     sku = str(data.get("sku") or data.get("product_sku") or path.rsplit("/", 1)[-1].removesuffix(".json"))
     props = {}
     raw_props = data.get("properties") or data.get("props") or {}
+    if isinstance(raw_props, str):
+        try:
+            parsed_props = json.loads(raw_props)
+        except Exception:
+            parsed_props = raw_props
+        raw_props = parsed_props
     if isinstance(raw_props, dict):
         for key, value in raw_props.items():
             if isinstance(value, dict):
@@ -1999,7 +2005,8 @@ def _family_json_exact_candidates(vm: EcomRuntimeClientSync, product: dict, spec
             continue
         if hints:
             hay = " ".join([candidate.get("series", ""), candidate.get("model", ""), candidate.get("name", "")]).lower()
-            if not all(h in hay for h in hints):
+            hay_compact = _norm_compact(hay)
+            if not all(h in hay or _norm_compact(h) in hay_compact for h in hints):
                 continue
         if _line_score(candidate, spec) < max(1, len(_norm_word(spec.get("line", "")).split()) - 2):
             continue
