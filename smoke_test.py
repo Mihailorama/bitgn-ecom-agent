@@ -3552,6 +3552,106 @@ def test_red_t08_product_check_grip_type_absent_returns_no():
     print("red: t08 product check grip type absent returns NO")
 
 
+def test_red_t08_product_check_reads_variant_properties_blob_sibling():
+    vm = FakeVM()
+    family_root = "/proc/catalog/adhesives_sealants/sealants/fam_adhesives_sealants_sealants_0022_1w18qj1n"
+    base_path = f"{family_root}/ADH-1DQLG4I4.json"
+    required_path = f"{family_root}/ADH-O68C5ZA5.json"
+    required_props = json.dumps({"sealant_type": "acrylic sealant", "color_family": "Clear"}).replace('"', '""')
+    vm.sql_outputs["lower(pv.brand) = lower('Soudal')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number,row_properties\n"
+        f"ADH-1DQLG4I4,{base_path},fam_adhesives_sealants_sealants_0022_1w18qj1n,"
+        "Soudal,Crystal Fix,CRQ-KYU,Soudal Crystal Fix CRQ-KYU Sealant,Sealant,sealant_type,acrylic sealant,,\n"
+        f"ADH-1DQLG4I4,{base_path},fam_adhesives_sealants_sealants_0022_1w18qj1n,"
+        "Soudal,Crystal Fix,CRQ-KYU,Soudal Crystal Fix CRQ-KYU Sealant,Sealant,color_family,Clear,,\n"
+        f"ADH-O68C5ZA5,{required_path},fam_adhesives_sealants_sealants_0022_1w18qj1n,"
+        "Soudal,Crystal Fix,CRQ-KYU,Soudal Crystal Fix CRQ-KYU Sealant,Sealant,,,,"
+        f'"{required_props}"\n'
+    )
+    task = (
+        "A support note claims we stock the Sealant from Soudal in the Soudal Crystal Fix CRQ-KYU "
+        "Sealant line that has sealant type acrylic sealant and color family Clear and has use area "
+        "interior. Check the actual catalogue item, cite the exact product record, and if the base "
+        "product exists but that extra catalogue claim is absent, answer with <NO> and include the "
+        "checked SKU."
+    )
+
+    fn = agent._try_product_check(vm, task)
+
+    assert fn is not None
+    assert "<NO>" in fn.message
+    assert "ADH-O68C5ZA5" in fn.message
+    assert required_path in fn.grounding_refs
+    print("red: t08 product check reads variant properties blob sibling")
+
+
+def test_red_t08_product_check_sql_dashless_model_sibling_is_checked():
+    vm = FakeVM()
+    family_root = "/proc/catalog/adhesives_sealants/sealants/fam_adhesives_sealants_sealants_0009_1giszqpo"
+    base_path = f"{family_root}/ADH-1M5XCAHE.json"
+    required_path = f"{family_root}/ADH-2DPPU38B.json"
+    vm.sql_outputs["lower(pv.brand) = lower('Soudal')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number,row_properties\n"
+        f"ADH-1M5XCAHE,{base_path},fam_adhesives_sealants_sealants_0009_1giszqpo,"
+        "Soudal,Flexible Soudafoam,1V4-H6H,Soudal Flexible Soudafoam 1V4-H6H Sealant,"
+        "Sealant,sealant_type,hybrid sealant,,\n"
+        f"ADH-2DPPU38B,{required_path},fam_adhesives_sealants_sealants_0009_1giszqpo,"
+        "Soudal,Flexible Soudafoam,1V4 H6H,Soudal Flexible Soudafoam 1V4 H6H Sealant,"
+        "Sealant,sealant_type,hybrid sealant,,\n"
+    )
+    task = (
+        "A support note claims we stock the Sealant from Soudal in the Soudal Flexible Soudafoam "
+        "1V4-H6H Sealant line that has sealant type hybrid sealant and has color family clear. "
+        "Check the actual catalogue item, cite the exact product record, and if the base product "
+        "exists but that extra catalogue claim is absent, answer with <NO> and include the checked SKU."
+    )
+
+    fn = agent._try_product_check(vm, task)
+
+    assert fn is not None
+    assert "<NO>" in fn.message
+    assert "ADH-2DPPU38B" in fn.message
+    assert required_path in fn.grounding_refs
+    print("red: t08 product check SQL dashless model sibling is checked")
+
+
+def test_red_t08_product_check_size_3xl_matches_xxxl_sibling():
+    vm = FakeVM()
+    family_root = "/proc/catalog/workwear/work_trousers/fam_workwear_work_trousers_0008_3stg95kk"
+    base_path = f"{family_root}/WRK-1GH1A91T.json"
+    required_path = f"{family_root}/WRK-63JUIPZW.json"
+    vm.sql_outputs["lower(pv.brand) = lower('Snickers Workwear')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number,row_properties\n"
+        f"WRK-1GH1A91T,{base_path},fam_workwear_work_trousers_0008_3stg95kk,"
+        "Snickers Workwear,Pro FlexiWork,30C-4Q0,Snickers Workwear Pro FlexiWork 30C-4Q0 Work Trousers Gray 3XL,"
+        "Work Trousers,color_family,Gray,,\n"
+        f"WRK-1GH1A91T,{base_path},fam_workwear_work_trousers_0008_3stg95kk,"
+        "Snickers Workwear,Pro FlexiWork,30C-4Q0,Snickers Workwear Pro FlexiWork 30C-4Q0 Work Trousers Gray 3XL,"
+        "Work Trousers,size,3XL,,\n"
+        f"WRK-63JUIPZW,{required_path},fam_workwear_work_trousers_0008_3stg95kk,"
+        "Snickers Workwear,Pro FlexiWork,30C-4Q0,Snickers Workwear Pro FlexiWork 30C-4Q0 Work Trousers Gray XXXL,"
+        "Work Trousers,color_family,Gray,,\n"
+        f"WRK-63JUIPZW,{required_path},fam_workwear_work_trousers_0008_3stg95kk,"
+        "Snickers Workwear,Pro FlexiWork,30C-4Q0,Snickers Workwear Pro FlexiWork 30C-4Q0 Work Trousers Gray XXXL,"
+        "Work Trousers,size,XXXL,,\n"
+    )
+    task = (
+        "A support note claims we stock the Work Trousers from Snickers Workwear in the Snickers "
+        "Workwear Pro FlexiWork 30C-4Q0 Work Trousers line that has color family Gray and size 3XL "
+        "and has kneepad pockets no. Check the actual catalogue item, cite the exact product record, "
+        "and if the base product exists but that extra catalogue claim is absent, answer with <NO> "
+        "and include the checked SKU."
+    )
+
+    fn = agent._try_product_check(vm, task)
+
+    assert fn is not None
+    assert "<NO>" in fn.message
+    assert "WRK-63JUIPZW" in fn.message
+    assert required_path in fn.grounding_refs
+    print("red: t08 product check size 3XL matches XXXL sibling")
+
+
 def test_red_t07_product_check_fragrance_absent_returns_no():
     vm = FakeVM()
     vm.sql_outputs["lower(pv.brand) = lower('Karcher')"] = (
@@ -5010,6 +5110,9 @@ def main():
     test_red_t08_product_check_family_json_space_separated_property_keys_sibling_is_checked()
     test_red_t08_product_check_positive_exists_prompt_returns_yes_for_selected_base_product()
     test_red_t08_product_check_grip_type_absent_returns_no()
+    test_red_t08_product_check_reads_variant_properties_blob_sibling()
+    test_red_t08_product_check_sql_dashless_model_sibling_is_checked()
+    test_red_t08_product_check_size_3xl_matches_xxxl_sibling()
     test_red_t07_product_check_fragrance_absent_returns_no()
     test_red_t32_product_check_gps_tracking_absent_returns_no_with_checked_sku()
     test_red_t32_product_check_family_json_numeric_float_sibling_is_checked()

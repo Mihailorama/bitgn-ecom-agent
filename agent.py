@@ -1790,12 +1790,47 @@ def _extract_product_specs(task_text: str) -> "list[dict]":
     return specs
 
 
+def _props_from_raw_properties(raw_props) -> "dict[str, tuple[str, str]]":
+    props = {}
+    if not raw_props:
+        return props
+    if isinstance(raw_props, str):
+        try:
+            raw_props = json.loads(raw_props)
+        except Exception:
+            return props
+    if isinstance(raw_props, dict):
+        for key, value in raw_props.items():
+            if isinstance(value, dict):
+                text = value.get("value_text", value.get("text", value.get("value", "")))
+                num = value.get("value_number", value.get("number", ""))
+            else:
+                text = value
+                num = value if isinstance(value, (int, float)) else ""
+            props[str(key)] = ("" if text is None else str(text), "" if num is None else str(num))
+    elif isinstance(raw_props, list):
+        for item in raw_props:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key") or item.get("property_key") or item.get("name") or item.get("property_name")
+            if not key:
+                continue
+            text = item.get(
+                "value_text",
+                item.get("property_value_text", item.get("text", item.get("value", item.get("property_value", "")))),
+            )
+            num = item.get("value_number", item.get("property_value_number", item.get("number", item.get("numeric_value", ""))))
+            props[str(key)] = ("" if text is None else str(text), "" if num is None else str(num))
+    return props
+
+
 def _load_product_candidates(vm: EcomRuntimeClientSync, spec: dict) -> "list[dict]":
     queries = [
         f"""
 SELECT pv.product_sku AS sku, pv.record_path AS path, pv.product_family_id AS family_id,
        pv.brand, pv.series, pv.model, pv.product_name AS name, pk.product_kind_name AS kind_name,
-       pvp.property_key AS key, pvp.property_value_text AS value_text, pvp.property_value_number AS value_number
+       pvp.property_key AS key, pvp.property_value_text AS value_text, pvp.property_value_number AS value_number,
+       pv.properties AS row_properties
 FROM product_variants pv
 JOIN product_kinds pk ON pk.product_kind_id = pv.product_kind_id
 LEFT JOIN product_variant_properties pvp ON pvp.product_sku = pv.product_sku
@@ -1809,7 +1844,7 @@ ORDER BY pv.product_sku, pvp.property_key;
 """,
         f"""
 SELECT p.sku, p.path, p.family_id, p.brand, p.series, p.model, p.name, pk.name AS kind_name,
-       pp.key, pp.value_text, pp.value_number
+       pp.key, pp.value_text, pp.value_number, p.properties AS row_properties
 FROM products p
 JOIN product_kinds pk ON pk.id = p.kind_id
 LEFT JOIN product_properties pp ON pp.sku = p.sku
@@ -1846,10 +1881,22 @@ ORDER BY p.sku, pp.key;
                 "props": {},
             },
         )
+        for key, value in _props_from_raw_properties(row.get("row_properties", "")).items():
+            cur["props"].setdefault(key, value)
         key = row.get("key", "")
         if key:
             cur["props"][key] = (row.get("value_text", ""), row.get("value_number", ""))
     return list(by_sku.values())
+
+
+def _canonical_size_code(value: str) -> str:
+    compact = _norm_compact(value)
+    return {
+        "2xl": "xxl",
+        "3xl": "xxxl",
+        "4xl": "xxxxl",
+        "one_size": "onesize",
+    }.get(compact, compact)
 
 
 def _prop_matches(product: dict, key_candidates: "list[str]", value: str) -> bool:
@@ -1878,7 +1925,7 @@ def _prop_matches(product: dict, key_candidates: "list[str]", value: str) -> boo
                 ("size" in key_norm or "size" in key_candidates)
                 and (want in size_codes or got_text in size_codes)
             ):
-                if got_text == want:
+                if _canonical_size_code(got_text) == _canonical_size_code(want):
                     return True
             elif len(want) <= 2 and want.isalpha():
                 if got_text == want:
@@ -1907,6 +1954,59 @@ def _line_model_hints(spec: dict) -> "list[str]":
     line = spec.get("line", "") or ""
     hints = re.findall(r"\b[A-Z0-9]{1,6}-[A-Z0-9]{1,6}\b", line)
     return [h.lower() for h in hints]
+
+
+def _product_matches_line_hints(product: dict, hints: "list[str]") -> bool:
+    hay = " ".join([product.get("series", ""), product.get("model", ""), product.get("name", "")]).lower()
+    hay_compact = _norm_compact(hay)
+    return all(h in hay or _norm_compact(h) in hay_compact for h in hints)
+
+
+def _product_check_diag(vm: EcomRuntimeClientSync, spec: dict) -> None:
+    if os.environ.get("PRODUCT_CHECK_DIAG") != "1":
+        return
+    props = spec.get("props", [])
+    base_props = props[:-1] if props else []
+    hints = _line_model_hints(spec)
+    try:
+        candidates = _load_product_candidates(vm, spec)
+    except Exception as exc:
+        print("PRODUCT_CHECK_DIAG " + json.dumps({"error": str(exc)}, sort_keys=True))
+        return
+    rows = []
+    for product in sorted(candidates, key=lambda p: (-_line_score(p, spec), p.get("sku", "")))[:40]:
+        rows.append(
+            {
+                "sku": product.get("sku", ""),
+                "path": product.get("path", ""),
+                "model": product.get("model", ""),
+                "name": product.get("name", ""),
+                "line_score": _line_score(product, spec),
+                "hint_match": _product_matches_line_hints(product, hints) if hints else True,
+                "prop_keys": sorted(product.get("props", {}).keys()),
+                "full_matches": [
+                    value for keys, value in props if _prop_matches(product, keys, value)
+                ],
+                "base_matches": [
+                    value for keys, value in base_props if _prop_matches(product, keys, value)
+                ],
+            }
+        )
+    print(
+        "PRODUCT_CHECK_DIAG "
+        + json.dumps(
+            {
+                "brand": spec.get("brand", ""),
+                "kind": spec.get("kind", ""),
+                "line": spec.get("line", ""),
+                "props": [value for _keys, value in props],
+                "hints": hints,
+                "candidate_count": len(candidates),
+                "candidates": rows,
+            },
+            sort_keys=True,
+        )
+    )
 
 
 def _canonical_product_path(vm: EcomRuntimeClientSync, product: dict) -> dict:
@@ -1951,36 +2051,7 @@ def _product_from_catalog_json(path: str, body: str, base: dict) -> "dict | None
     if not isinstance(data, dict):
         return None
     sku = str(data.get("sku") or data.get("product_sku") or path.rsplit("/", 1)[-1].removesuffix(".json"))
-    props = {}
-    raw_props = data.get("properties") or data.get("props") or {}
-    if isinstance(raw_props, str):
-        try:
-            parsed_props = json.loads(raw_props)
-        except Exception:
-            parsed_props = raw_props
-        raw_props = parsed_props
-    if isinstance(raw_props, dict):
-        for key, value in raw_props.items():
-            if isinstance(value, dict):
-                text = value.get("value_text", value.get("text", value.get("value", "")))
-                num = value.get("value_number", value.get("number", ""))
-            else:
-                text = value
-                num = value if isinstance(value, (int, float)) else ""
-            props[str(key)] = ("" if text is None else str(text), "" if num is None else str(num))
-    elif isinstance(raw_props, list):
-        for item in raw_props:
-            if not isinstance(item, dict):
-                continue
-            key = item.get("key") or item.get("property_key") or item.get("name") or item.get("property_name")
-            if not key:
-                continue
-            text = item.get(
-                "value_text",
-                item.get("property_value_text", item.get("text", item.get("value", item.get("property_value", "")))),
-            )
-            num = item.get("value_number", item.get("property_value_number", item.get("number", item.get("numeric_value", ""))))
-            props[str(key)] = ("" if text is None else str(text), "" if num is None else str(num))
+    props = _props_from_raw_properties(data.get("properties") or data.get("props") or {})
     return {
         "sku": sku,
         "path": str(data.get("path") or data.get("record_path") or path),
@@ -2030,9 +2101,7 @@ def _family_json_exact_candidates(vm: EcomRuntimeClientSync, product: dict, spec
         if not candidate or not candidate.get("sku") or candidate["sku"] in seen:
             continue
         if hints:
-            hay = " ".join([candidate.get("series", ""), candidate.get("model", ""), candidate.get("name", "")]).lower()
-            hay_compact = _norm_compact(hay)
-            if not all(h in hay or _norm_compact(h) in hay_compact for h in hints):
+            if not _product_matches_line_hints(candidate, hints):
                 continue
         required_line_score = 1 if hints else max(1, len(_norm_word(spec.get("line", "")).split()) - 2)
         if _line_score(candidate, spec) < required_line_score:
@@ -2052,8 +2121,7 @@ def _select_product(vm: EcomRuntimeClientSync, spec: dict, strict_props: bool = 
     if hints:
         hinted = []
         for p in candidates:
-            hay = " ".join([p.get("series", ""), p.get("model", ""), p.get("name", "")]).lower()
-            if all(h in hay for h in hints):
+            if _product_matches_line_hints(p, hints):
                 hinted.append(p)
         if hinted:
             candidates = hinted
@@ -2087,8 +2155,7 @@ def _exact_product_candidates(vm: EcomRuntimeClientSync, spec: dict) -> "list[di
     if hints:
         hinted = []
         for p in candidates:
-            hay = " ".join([p.get("series", ""), p.get("model", ""), p.get("name", "")]).lower()
-            if all(h in hay for h in hints):
+            if _product_matches_line_hints(p, hints):
                 hinted.append(p)
         if hinted:
             candidates = hinted
@@ -2627,6 +2694,7 @@ def _try_product_check(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTask
     if len(specs) != 1:
         return None
     spec = specs[0]
+    _product_check_diag(vm, spec)
     positive_exists_prompt = bool(
         re.search(r"\bif\s+(?:the\s+)?catalogue product exists,\s*answer with\s+<YES>", task_text, re.I)
     )
