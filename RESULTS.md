@@ -122,3 +122,4 @@ lookups, strong model for security/fraud/mutation.
 | 2026-05-29 | mixed claude:opus + codex:gpt-5.3-codex-spark dev53 diagnostic | 98.1132% (52.00/53 points, rejected: goal 53.00/53) | 52/53 | 367s local / 1712s platform-open | 32s agent avg | 12 (6+6) |
 | 2026-05-29 | mixed claude:opus + codex:gpt-5.3-codex-spark dev53 diagnostic after t53 OCR fix | 94.3396% (50.00/53 points, rejected) | 50/53 | 284s local / 1091s platform-open | 21s agent avg | 12 (6+6) |
 | 2026-05-29 | mixed claude:opus + codex:gpt-5.3-codex-spark dev53 diagnostic after t07/t42 fixes | 90.5660% (48.00/53 points, rejected) | 48/53 | 250s local / 1143s platform-open | 21s agent avg | 12 (6+6) |
+| 2026-05-29 | mixed claude:opus + codex:gpt-5.3-codex-spark dev53 accepted after t08 product-check fixes | 100.0% (53.00/53 points, accepted, submitted) | 53/53 | 163s local / 492s platform-open | 9s agent avg | 12 (6+6) |

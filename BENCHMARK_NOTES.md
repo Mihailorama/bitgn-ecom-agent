@@ -74,31 +74,38 @@ upgrade if validation shows family-specific weaknesses.
 Sources: https://bitgn.com/insights/ (operation-pangolin, codex-on-rails,
 skifmax rules-evolution, plan-repl-agent, azamat1c filesystem-agent).
 
-## Current accepted milestone (updated 2026-05-28)
+## Current accepted milestone (updated 2026-05-29)
 
-- Current accepted leaderboard score: `50.00/50` points (`100.00%`),
-  `50/50` perfect tasks.
+- Current accepted leaderboard score: `53.00/53` points (`100.00%`),
+  `53/53` perfect tasks.
 - Accepted logs:
-  `artifacts/sweeps/2026-05-28-t48-rowlevel-fix6-full-codex55-r1/`.
-- Profile: `run_mixed_parallel.py` with all tasks routed to
-  `codex:gpt-5.5`, `MIXED_PARALLEL=6`, `MIXED_CODEX_LIMIT=6`.
-- Gate: accepted against `MIN_ACCEPTED_POINTS=50` and `MIN_ACCEPTED_PCT=98`;
+  `artifacts/sweeps/2026-05-29-dev53-mixed-opus-spark-r9-t08-postfix11/`.
+- Accepted report:
+  `artifacts/sweeps/2026-05-29-dev53-mixed-opus-spark-r9-t08-postfix11/sweep_report.json`.
+- Profile: `run_mixed_parallel.py` with default tasks routed to `claude:opus`
+  and selected complex tasks routed to `codex:gpt-5.3-codex-spark`,
+  `MIXED_PARALLEL=12`, `MIXED_CLAUDE_LIMIT=6`, `MIXED_CODEX_LIMIT=6`.
+- Gate: accepted against `MIN_ACCEPTED_POINTS=53` and `MIN_ACCEPTED_PCT=98`;
   security grep clean.
 - Leaderboard submit:
-  `run-22ReRoZEhobjc7YsSjEW9N9kM`.
-- The previous `48.9905/50` and 2026-05-27 `50.00/50` mixed runs are now
+  `run-22Rk3WrytSkFG5QoQUCo3uyVU`.
+- Timing: local wall `163s`, `platform_open_seconds_sum=492s`,
+  `agent_seconds_sum=489s`, `slot_wait_seconds_sum=212s`.
+- Current leaderboard best for the next submit guard should be:
+  `LEADERBOARD_BEST_POINTS=53`, `LEADERBOARD_BEST_MAX_POINTS=53`,
+  `LEADERBOARD_BEST_SECONDS=492`.
+- The 2026-05-28 `50.00/50` and earlier `48.9905/50` mixed runs are now
   historical evidence, not the active target.
-- Current runner/control version: commit `ef61e7f` keeps the leaderboard submit
-  guard and compares gate points after two-decimal normalization. A run submits
-  only if it is a full accepted sweep with no security miss and either improves
-  normalized points over the personal best or ties normalized points with the
-  same denominator and a faster `platform_open_seconds_sum`. This avoids
-  skipping near-`50.00/50` runs such as raw `49.9979/50`, which leaderboard
-  display rounds to `50.0/50`.
-- Current leaderboard best used by the submit guard:
-  `LEADERBOARD_BEST_POINTS=50`, `LEADERBOARD_BEST_MAX_POINTS=50`,
-  `LEADERBOARD_BEST_SECONDS=1741`.
-- 2026-05-28 diagnostic submit-gate checks:
+- Current runner/control version keeps the leaderboard submit guard and compares
+  gate points after two-decimal normalization. A run submits only if it is a
+  full accepted sweep with no security miss and either improves normalized
+  points over the personal best or ties normalized points with the same
+  denominator and a faster `platform_open_seconds_sum`.
+- Product-check `t08` closed variants in this cycle:
+  positive-exists answers include the checked SKU, model hints constrain SQL
+  before broad brand/kind truncation, and `concentrate` is parsed as a separate
+  product property instead of being merged into a volume phrase.
+- 2026-05-28 previous `50.00/50` milestone and submit-gate checks:
   - `artifacts/sweeps/2026-05-28-submitgate-mixed-opus-codex55-r1/` scored
     `33.00/50`, was rejected, and did not submit. The current `claude:opus`
     CLI path returned `OUTCOME_ERR_INTERNAL` on many non-deterministic tasks.
@@ -785,9 +792,10 @@ Current state in `agent.py` includes:
   as research input only; do not implement sidecar proposals without the normal
   task-local sampling, RED-test, and full-sweep no-regression gates.
 
-**Model decision.** Use mixed `claude:opus` + `codex:gpt-5.5` as the current
-accepted leaderboard profile. Keep `codex:gpt-5.3-codex` as the historical
-codex-only baseline and `claude:sonnet` as the cheap regression canary.
+**Model decision.** Use mixed `claude:opus` + `codex:gpt-5.3-codex-spark` as
+the current accepted dev53 leaderboard profile. Keep `codex:gpt-5.5` as the
+previous v50 strong profile, `codex:gpt-5.3-codex` as the historical codex-only
+baseline, and `claude:sonnet` as the cheap regression canary.
 
 **Parallel envelope (2026-05-25).**
 - `PARALLEL=6`: best quality envelope; observed `100.0% (44/44)` at `202s` wall.
@@ -806,24 +814,24 @@ codex-only baseline and `claude:sonnet` as the cheap regression canary.
    unless promoted by evidence from multiple tasks and accepted as a separate
    architecture cycle. A targeted/subset pass is only diagnostic; acceptance
    still requires the full sweep not to reduce leaderboard points.
-1. Preserve the accepted leaderboard baseline: `50.00/50` points from
-   `artifacts/sweeps/2026-05-28-t48-rowlevel-fix6-full-codex55-r1/`. The
-   previous codex-only `46/47` milestone at commit `e4a2d41`, tag
+1. Preserve the accepted leaderboard baseline: `53.00/53` points from
+   `artifacts/sweeps/2026-05-29-dev53-mixed-opus-spark-r9-t08-postfix11/`. The
+   previous `50.00/50` milestone at
+   `artifacts/sweeps/2026-05-28-t48-rowlevel-fix6-full-codex55-r1/` and the
+   codex-only `46/47` milestone at commit `e4a2d41`, tag
    `bench-ecom1-dev-v47-46of47-20260526`, remains historical evidence but is no
    longer the active leaderboard target. Any later run with fewer points is
    diagnostic evidence only, even if its perfect-task count looks different.
-2. Do not keep tuning `t16`, `t38-t40`, or `t48` unless a new full sweep
+2. Do not keep tuning `t08`, `t16`, `t38-t40`, or `t48` unless a new full sweep
    regresses them. Current accepted full sweep closes them at `1.00`.
 3. Degraded 48-task portfolio misses (`t05`, `t26`, `t48`) are not accepted
    baseline misses. Treat them as evidence for future benchmark-drift triage
    only after first re-establishing or exceeding the `46` solved-task baseline
    on the current denominator.
-4. Product-check checked-SKU stability remains open for `t04`/`t05`/catalogue
-   impossible-claim tasks: when multiple sibling SKUs share the base product,
-   the answer must decide `<NO>` when the requested shorthand/pack claim is not
-   an exact catalogue item, and for impossible claims must name the SKU whose
-   actual property conflicts with the requested extra claim. Treat this as a
-   separate cycle from inventory refs.
+4. Product-check checked-SKU stability is closed for the saved `t08` dev53
+   patterns. If a future catalogue impossible-claim task regresses, start a new
+   isolated cycle from current logs rather than broadening product resolution
+   preemptively.
 5. `t45` parser coverage is closed for the saved `have N or more ready` wording:
    keep the RED/GREEN smoke test and do not add more t45 parser patterns unless
    a new wording falls back to LLM.

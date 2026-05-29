@@ -1682,7 +1682,7 @@ _PROP_PREFIXES = [
     "adapter type", "adhesive type", "anchor type",
     "app based scheduling",
     "bar length", "battery platform", "bluetooth control", "cleaner type", "coating", "color family", "connection type", "connector type", "current",
-    "cutting width", "working width",
+    "concentrate", "cutting width", "working width",
     "device type", "disc diameter", "drive type", "fastener type", "fitting type", "ip rating", "kit contents",
     "finish", "fit", "fragrance", "garment type", "gps tracking", "grip type", "kneepad pockets", "lens color", "luminous flux", "machine type", "mask type", "material", "piece count", "product type",
     "protection class", "protection type",
@@ -1824,7 +1824,27 @@ def _props_from_raw_properties(raw_props) -> "dict[str, tuple[str, str]]":
     return props
 
 
+def _model_hint_sql_filter(model_col: str, name_col: str, hints: "list[str]") -> str:
+    clauses = []
+    for hint in hints:
+        compact = _norm_compact(hint)
+        clauses.append(
+            "("
+            f"lower({model_col}) LIKE '%' || lower({_sql_quote(hint)}) || '%' "
+            f"OR lower({name_col}) LIKE '%' || lower({_sql_quote(hint)}) || '%' "
+            f"OR replace(replace(lower({model_col}), '-', ''), ' ', '') LIKE '%' || lower({_sql_quote(compact)}) || '%' "
+            f"OR replace(replace(lower({name_col}), '-', ''), ' ', '') LIKE '%' || lower({_sql_quote(compact)}) || '%'"
+            ")"
+        )
+    if not clauses:
+        return ""
+    return "\n  AND (" + " OR ".join(clauses) + ")"
+
+
 def _load_product_candidates(vm: EcomRuntimeClientSync, spec: dict) -> "list[dict]":
+    hints = _line_model_hints(spec)
+    current_hint_filter = _model_hint_sql_filter("pv.model", "pv.product_name", hints)
+    legacy_hint_filter = _model_hint_sql_filter("p.model", "p.name", hints)
     queries = [
         f"""
 SELECT pv.product_sku AS sku, pv.record_path AS path, pv.product_family_id AS family_id,
@@ -1839,7 +1859,7 @@ WHERE lower(pv.brand) = lower({_sql_quote(spec['brand'])})
     lower(pk.product_kind_name) = lower({_sql_quote(spec['kind'])})
     OR lower(pk.product_kind_name) = lower({_sql_quote(spec['kind'] + "s")})
     OR lower(pv.product_name) LIKE '%' || lower({_sql_quote(spec['kind'])}) || '%'
-  )
+  ){current_hint_filter}
 ORDER BY pv.product_sku, pvp.property_key;
 """,
         f"""
@@ -1853,7 +1873,7 @@ WHERE lower(p.brand) = lower({_sql_quote(spec['brand'])})
     lower(pk.name) = lower({_sql_quote(spec['kind'])})
     OR lower(pk.name) = lower({_sql_quote(spec['kind'] + "s")})
     OR lower(p.name) LIKE '%' || lower({_sql_quote(spec['kind'])}) || '%'
-  )
+  ){legacy_hint_filter}
 ORDER BY p.sku, pp.key;
 """,
     ]
@@ -1968,8 +1988,25 @@ def _product_check_diag(vm: EcomRuntimeClientSync, spec: dict) -> None:
     props = spec.get("props", [])
     base_props = props[:-1] if props else []
     hints = _line_model_hints(spec)
+    exact_products = []
+    base_exact_products = []
+    base_family_products = []
     try:
         candidates = _load_product_candidates(vm, spec)
+        exact_products = _exact_product_candidates(vm, spec)
+        base_spec = _base_spec_for_conflicting_duplicate_props(spec)
+        if base_spec is None and props:
+            base_spec = dict(spec)
+            base_spec["props"] = props[:-1]
+        if base_spec is not None:
+            base_exact_products = _exact_product_candidates(vm, base_spec)
+            merged = {}
+            for product in base_exact_products:
+                for sibling in _family_json_exact_candidates(vm, product, base_spec):
+                    sku = sibling.get("sku", "")
+                    if sku:
+                        merged.setdefault(sku, sibling)
+            base_family_products = list(merged.values())
     except Exception as exc:
         print("PRODUCT_CHECK_DIAG " + json.dumps({"error": str(exc)}, sort_keys=True))
         return
@@ -2002,6 +2039,9 @@ def _product_check_diag(vm: EcomRuntimeClientSync, spec: dict) -> None:
                 "props": [value for _keys, value in props],
                 "hints": hints,
                 "candidate_count": len(candidates),
+                "exact_skus": [p.get("sku", "") for p in exact_products],
+                "base_exact_skus": [p.get("sku", "") for p in base_exact_products],
+                "base_family_skus": [p.get("sku", "") for p in base_family_products],
                 "candidates": rows,
             },
             sort_keys=True,
@@ -2734,9 +2774,13 @@ def _try_product_check(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTask
     if not product:
         return None
     if all_match or positive_exists_prompt:
-        msg = "<YES>"
         if not ref_products:
             ref_products = [product]
+        if positive_exists_prompt:
+            checked = ", ".join(p["sku"] for p in ref_products if p and p.get("sku"))
+            msg = f"<YES> SKU checked: {checked or product['sku']}"
+        else:
+            msg = "<YES>"
     else:
         checked = ", ".join(p["sku"] for p in ref_products if p and p.get("sku"))
         msg = f"<NO> SKU checked: {checked or product['sku']}"

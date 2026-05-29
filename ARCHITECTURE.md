@@ -7,15 +7,16 @@ these diagrams and one validation gate in the risk table.
 
 ## Current Milestone
 
-As of 2026-05-28, the current saved leaderboard milestone is:
+As of 2026-05-29, the current saved leaderboard milestone is:
 
-- Milestone profile: `run_mixed_parallel.py` with all tasks routed to
-  `codex:gpt-5.5`.
-- Full-sweep result: `50.00/50` points (`100.00%`) with `50/50` perfect tasks.
+- Milestone profile: `run_mixed_parallel.py` with default tasks routed to
+  `claude:opus` and selected complex tasks routed to
+  `codex:gpt-5.3-codex-spark`.
+- Full-sweep result: `53.00/53` points (`100.00%`) with `53/53` perfect tasks.
 - Accepted sweep logs:
-  `artifacts/sweeps/2026-05-28-t48-rowlevel-fix6-full-codex55-r1/`.
-- Local wall time: `351s`; `platform_open_seconds_sum=1741s`.
-- Leaderboard submit: `run-22ReRoZEhobjc7YsSjEW9N9kM`.
+  `artifacts/sweeps/2026-05-29-dev53-mixed-opus-spark-r9-t08-postfix11/`.
+- Local wall time: `163s`; `platform_open_seconds_sum=492s`.
+- Leaderboard submit: `run-22Rk3WrytSkFG5QoQUCo3uyVU`.
 
 The operational target is leaderboard points, not perfect-task count. Perfect
 count remains useful triage, but fractional task scores count toward the goal.
@@ -41,7 +42,7 @@ accepted points target and is security-clean.
 Later diagnostic runs that scored fewer points are not the current state.
 In particular, the 2026-05-27 portfolio comparison is evidence about backend
 behavior on the then-current 48-task denominator, but its best codex result was
-`44/48`; it must not replace the accepted `50.00/50` mixed milestone as the
+`44/48`; it must not replace the accepted `53.00/53` mixed milestone as the
 leaderboard baseline for future development.
 
 ## Historical Rollback Point
@@ -94,9 +95,8 @@ Key properties:
 
 ## Mixed Runner
 
-`run_mixed_parallel.py` is a separate diagnostic runner. It must not replace
-`run_parallel.py` until a full mixed sweep proves it preserves or improves the
-accepted gates.
+`run_mixed_parallel.py` is the current accepted leaderboard runner for dev53.
+Keep `run_parallel.py` intact as the codex-only baseline runner.
 
 Required shape:
 
@@ -106,10 +106,12 @@ Required shape:
   wait out of BitGN's platform-open trial duration, which is what the
   leaderboard reports as run time. If metadata is absent, `trial_id == task_id`
   remains a fallback.
-- Simple/deterministic tasks may run on `CLAUDE_MODEL_ID=claude:sonnet`.
+- Simple/deterministic tasks currently run on `CLAUDE_MODEL_ID=claude:opus` for
+  the accepted dev53 profile. `claude:sonnet` remains a cheaper diagnostic
+  option, not the active leaderboard route.
 - Fragile resolver, fraud, archive, quote, ambiguous, and security-sensitive
-  tasks stay on `CODEX_MODEL_ID=codex:gpt-5.3-codex` unless evidence says
-  otherwise.
+  tasks stay on the Codex route. The accepted dev53 profile uses
+  `CODEX_MODEL_ID=codex:gpt-5.3-codex-spark`.
 - `MIXED_PARALLEL` can be 12, but per-model semaphores cap concurrency:
   `MIXED_CLAUDE_LIMIT=6` and `MIXED_CODEX_LIMIT=6`.
 - The runner writes `route_manifest.json` and `sweep_report.json` in the unique
@@ -495,8 +497,9 @@ full `50.00/50` accepted sweep.
 
 ### Current Stable Target
 
-The accepted target is `50.00/50` points on `bitgn/ecom1-dev` v50 with logs at
-`artifacts/sweeps/2026-05-28-t48-rowlevel-fix6-full-codex55-r1/`. The next
+The accepted target is `53.00/53` points on the current `bitgn/ecom1-dev` dev53
+contour with logs at
+`artifacts/sweeps/2026-05-29-dev53-mixed-opus-spark-r9-t08-postfix11/`. The next
 accepted improvement must preserve the full points total or improve time,
 preserve the configured percent gate, and remain security-clean.
 

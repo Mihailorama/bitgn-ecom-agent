@@ -3519,6 +3519,7 @@ def test_red_t08_product_check_positive_exists_prompt_returns_yes_for_selected_b
 
     assert fn is not None
     assert "<YES>" in fn.message
+    assert "WRK-15IOR9ZN" in fn.message
     assert product_path in fn.grounding_refs
     print("red: t08 product check positive exists prompt returns YES")
 
@@ -3650,6 +3651,80 @@ def test_red_t08_product_check_size_3xl_matches_xxxl_sibling():
     assert "WRK-63JUIPZW" in fn.message
     assert required_path in fn.grounding_refs
     print("red: t08 product check size 3XL matches XXXL sibling")
+
+
+def test_red_t08_product_check_model_hint_avoids_truncated_brand_pool():
+    vm = FakeVM()
+    family_root = "/proc/catalog/plumbing/pipe_fittings/fam_plumbing_pipe_fittings_0006_29mcczjr"
+    wrong_path = f"{family_root}/PLB-18LLJYCA.json"
+    required_path = f"{family_root}/PLB-34HDMT8T.json"
+    vm.sql_outputs["replace(replace(lower(pv.model)"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number,row_properties\n"
+        f"PLB-34HDMT8T,{required_path},fam_plumbing_pipe_fittings_0006_29mcczjr,"
+        "Geberit,Professional,Silent 2DR-1PY,Geberit Professional Silent 2DR-1PY Pipe Fitting pipe clamp 16mm press,"
+        "Pipe Fitting,fitting_type,pipe clamp,,\n"
+        f"PLB-34HDMT8T,{required_path},fam_plumbing_pipe_fittings_0006_29mcczjr,"
+        "Geberit,Professional,Silent 2DR-1PY,Geberit Professional Silent 2DR-1PY Pipe Fitting pipe clamp 16mm press,"
+        "Pipe Fitting,diameter_mm,,16,\n"
+    )
+    vm.sql_outputs["lower(pv.brand) = lower('Geberit')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number,row_properties\n"
+        f"PLB-18LLJYCA,{wrong_path},fam_plumbing_pipe_fittings_0006_29mcczjr,"
+        "Geberit,Professional,Silent 2DR-1PY,Geberit Professional Silent 2DR-1PY Pipe Fitting thread adapter 25mm press,"
+        "Pipe Fitting,fitting_type,thread adapter,,\n"
+        f"PLB-18LLJYCA,{wrong_path},fam_plumbing_pipe_fittings_0006_29mcczjr,"
+        "Geberit,Professional,Silent 2DR-1PY,Geberit Professional Silent 2DR-1PY Pipe Fitting thread adapter 25mm press,"
+        "Pipe Fitting,diameter_mm,,25,\n"
+        "warning: result truncated at 100 rows,,,,,,,,,,,\n"
+    )
+    task = (
+        "A support note claims we stock the Pipe Fitting from Geberit in the Geberit Professional "
+        "Silent 2DR-1PY Pipe Fitting line that has fitting type pipe clamp and diameter 16 mm and "
+        "has fitting type seal ring. Check the actual catalogue item, cite the exact product record, "
+        "and if the base product exists but that extra catalogue claim is absent, answer with <NO> "
+        "and include the checked SKU."
+    )
+
+    fn = agent._try_product_check(vm, task)
+
+    assert fn is not None
+    assert "<NO>" in fn.message
+    assert "PLB-34HDMT8T" in fn.message
+    assert required_path in fn.grounding_refs
+    print("red: t08 product check model hint avoids truncated brand pool")
+
+
+def test_red_t08_product_check_concentrate_claim_splits_from_volume():
+    vm = FakeVM()
+    family_root = "/proc/catalog/cleaning/cleaning_liquids/fam_cleaning_cleaning_liquids_0008_15opw7ey"
+    base_path = f"{family_root}/CLN-28J1GXQE.json"
+    vm.sql_outputs["replace(replace(lower(pv.model)"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number,row_properties\n"
+        f"CLN-28J1GXQE,{base_path},fam_cleaning_cleaning_liquids_0008_15opw7ey,"
+        "Ajax,Heavy Duty,Classic 36B-JOL,Ajax Heavy Duty Classic 36B-JOL Cleaning Liquid glass cleaner 500ml fresh,"
+        "Cleaning Liquid,cleaner_type,glass cleaner,,\n"
+        f"CLN-28J1GXQE,{base_path},fam_cleaning_cleaning_liquids_0008_15opw7ey,"
+        "Ajax,Heavy Duty,Classic 36B-JOL,Ajax Heavy Duty Classic 36B-JOL Cleaning Liquid glass cleaner 500ml fresh,"
+        "Cleaning Liquid,volume_ml,,500,\n"
+        f"CLN-28J1GXQE,{base_path},fam_cleaning_cleaning_liquids_0008_15opw7ey,"
+        "Ajax,Heavy Duty,Classic 36B-JOL,Ajax Heavy Duty Classic 36B-JOL Cleaning Liquid glass cleaner 500ml fresh,"
+        "Cleaning Liquid,concentrate,yes,,\n"
+    )
+    task = (
+        "A support note claims we stock the Cleaning Liquid from Ajax in the Ajax Heavy Duty Classic "
+        "36B-JOL Cleaning Liquid line that has cleaner type glass cleaner and volume 500 ml and has "
+        "concentrate no. Check the actual catalogue item, cite the exact product record, and if the "
+        "base product exists but that extra catalogue claim is absent, answer with <NO> and include "
+        "the checked SKU."
+    )
+
+    fn = agent._try_product_check(vm, task)
+
+    assert fn is not None
+    assert "<NO>" in fn.message
+    assert "CLN-28J1GXQE" in fn.message
+    assert base_path in fn.grounding_refs
+    print("red: t08 product check concentrate claim splits from volume")
 
 
 def test_red_t07_product_check_fragrance_absent_returns_no():

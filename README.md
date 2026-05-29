@@ -9,11 +9,13 @@ tools such as `/bin/sql`) over the schema published at
 [buf.build/bitgn/api](https://buf.build/bitgn/api), and drives an LLM with
 [Schema-Guided Reasoning](https://abdullin.com/schema-guided-reasoning/).
 
-Current accepted leaderboard milestone: `50.00/50` points (`100.00%`) with
-`run_mixed_parallel.py` routing all tasks to `codex:gpt-5.5`, logs
-`artifacts/sweeps/2026-05-28-t48-rowlevel-fix6-full-codex55-r1/`. The previous
-codex-only milestone remains `46/47` with `codex:gpt-5.3-codex` at `PARALLEL=6`,
-commit `e4a2d41`, tag `bench-ecom1-dev-v47-46of47-20260526`.
+Current accepted leaderboard milestone: `53.00/53` points (`100.00%`) with
+`run_mixed_parallel.py` routing default tasks to `claude:opus` and selected
+complex tasks to `codex:gpt-5.3-codex-spark`, logs
+`artifacts/sweeps/2026-05-29-dev53-mixed-opus-spark-r9-t08-postfix11/`. The
+previous codex-only milestone remains `46/47` with `codex:gpt-5.3-codex` at
+`PARALLEL=6`, commit `e4a2d41`, tag
+`bench-ecom1-dev-v47-46of47-20260526`.
 
 ## Why this scores well
 
@@ -52,7 +54,7 @@ every provider.
 
 | Context | `MODEL_ID` | Auth | Why |
 |---|---|---|---|
-| **Leaderboard attempts** | mixed `claude:opus` + `codex:gpt-5.5` | local Claude/Codex CLIs over OAuth | current best saved leaderboard profile |
+| **Leaderboard attempts** | mixed `claude:opus` + `codex:gpt-5.3-codex-spark` | local Claude/Codex CLIs over OAuth | current best saved dev53 leaderboard profile |
 | Codex-only baseline | `codex:gpt-5.3-codex` | local `codex` CLI over ChatGPT OAuth | previous strongest single-profile baseline |
 | Regression canary | `claude:sonnet` | local `claude` CLI over OAuth | cheaper validation, but lower current score |
 | Gemini CLI comparison | `agy` | local Antigravity CLI over Google AI Pro OAuth | available, but currently slower and less stable |
