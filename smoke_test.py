@@ -3315,6 +3315,243 @@ def test_red_t08_product_check_family_json_string_properties_sibling_is_checked(
     print("red: t08 product check reads family JSON string properties")
 
 
+def test_red_t08_product_check_working_width_absent_returns_no():
+    vm = FakeVM()
+    product_path = (
+        "/proc/catalog/workshop_machines/saws_cutters/"
+        "fam_workshop_machines_saws_cutters_0010_k5392u2y/MAC-5E1EH8W1.json"
+    )
+    vm.sql_outputs["lower(pv.brand) = lower('Holzmann')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        f"MAC-5E1EH8W1,{product_path},fam_workshop_machines_saws_cutters_0010_k5392u2y,"
+        "Holzmann,Bench HBS,2FN-0YS,Holzmann Bench HBS 2FN-0YS Workshop Saw and Cutter,"
+        "Workshop Saw and Cutter,machine_type,band saw,\n"
+    )
+    task = (
+        "A support note claims we stock the Workshop Saw and Cutter from Holzmann in the Holzmann "
+        "Bench HBS 2FN-0YS Workshop Saw and Cutter line that has machine type band saw and has "
+        "working width 150 mm. Check the actual catalogue item, cite the exact product record, "
+        "and if the base product exists but that extra catalogue claim is absent, answer with <NO> "
+        "and include the checked SKU."
+    )
+
+    fn = agent._try_product_check(vm, task)
+
+    assert fn is not None
+    assert "<NO>" in fn.message
+    assert "MAC-5E1EH8W1" in fn.message
+    assert product_path in fn.grounding_refs
+    print("red: t08 product check working width absent returns NO")
+
+
+def test_red_t08_product_check_hint_matched_family_sibling_can_have_lower_line_score():
+    vm = FakeVM()
+    family_root = "/proc/catalog/fasteners/anchors_plugs/fam_fasteners_anchors_plugs_0011_tvn435ym"
+    base_path = f"{family_root}/FST-1PMJ2Z2K.json"
+    required_path = f"{family_root}/FST-3OFTV45N.json"
+    vm.sql_outputs["lower(pv.brand) = lower('Fischer')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        f"FST-1PMJ2Z2K,{base_path},fam_fasteners_anchors_plugs_0011_tvn435ym,"
+        "Fischer,Pro Pack FAZ,3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug,"
+        "Anchor and Wall Plug,anchor_type,frame fixing,\n"
+        f"FST-1PMJ2Z2K,{base_path},fam_fasteners_anchors_plugs_0011_tvn435ym,"
+        "Fischer,Pro Pack FAZ,3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug,"
+        "Anchor and Wall Plug,diameter_mm,,5\n"
+        f"FST-1PMJ2Z2K,{base_path},fam_fasteners_anchors_plugs_0011_tvn435ym,"
+        "Fischer,Pro Pack FAZ,3OI-FPZ,Fischer Pro Pack FAZ 3OI-FPZ Anchor and Wall Plug,"
+        "Anchor and Wall Plug,length_mm,,100\n"
+    )
+    vm.list_outputs[family_root] = [SimpleNamespace(name="FST-3OFTV45N.json")]
+    vm.read_outputs[required_path] = json.dumps(
+        {
+            "product_sku": "FST-3OFTV45N",
+            "record_path": required_path,
+            "product_family_id": "fam_fasteners_anchors_plugs_0011_tvn435ym",
+            "brand": "Fischer",
+            "series": "DuoPower",
+            "model": "3OI FPZ",
+            "product_name": "Fischer 3OI FPZ Anchor and Wall Plug",
+            "product_kind_name": "Anchor and Wall Plug",
+            "properties": [
+                {"property_key": "anchor_type", "property_value_text": "frame fixing"},
+                {"property_key": "diameter_mm", "property_value_number": 5},
+                {"property_key": "length_mm", "property_value_number": 100},
+            ],
+        }
+    )
+    task = (
+        "A support note claims we stock the Anchor and Wall Plug from Fischer in the Fischer Pro Pack "
+        "FAZ 3OI-FPZ Anchor and Wall Plug line that has anchor type frame fixing, diameter 5 mm, "
+        "and length 100 mm and has anchor type concrete anchor. Check the actual catalogue item, "
+        "cite the exact product record, and if the base product exists but that extra catalogue claim "
+        "is absent, answer with <NO> and include the checked SKU."
+    )
+
+    fn = agent._try_product_check(vm, task)
+
+    assert fn is not None
+    assert "<NO>" in fn.message
+    assert "FST-3OFTV45N" in fn.message
+    assert required_path in fn.grounding_refs
+    print("red: t08 product check lower-score hint sibling is checked")
+
+
+def test_red_t08_product_check_family_json_name_value_properties_sibling_is_checked():
+    vm = FakeVM()
+    family_root = "/proc/catalog/storage/tool_boxes_bags/fam_storage_tool_boxes_bags_0002_p2wk382v"
+    base_path = f"{family_root}/STO-1EJXT594.json"
+    required_path = f"{family_root}/STO-3TXK5YYY.json"
+    vm.sql_outputs["lower(pv.brand) = lower('Raaco')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        f"STO-1EJXT594,{base_path},fam_storage_tool_boxes_bags_0002_p2wk382v,"
+        "Raaco,Heavy Duty CarryLite,1NI-95P,Raaco Heavy Duty CarryLite 1NI-95P Tool Box and Bag,"
+        "Tool Box and Bag,storage_type,parts case,\n"
+        f"STO-1EJXT594,{base_path},fam_storage_tool_boxes_bags_0002_p2wk382v,"
+        "Raaco,Heavy Duty CarryLite,1NI-95P,Raaco Heavy Duty CarryLite 1NI-95P Tool Box and Bag,"
+        "Tool Box and Bag,color_family,Yellow,\n"
+    )
+    vm.list_outputs[family_root] = [SimpleNamespace(name="STO-3TXK5YYY.json")]
+    vm.read_outputs[required_path] = json.dumps(
+        {
+            "product_sku": "STO-3TXK5YYY",
+            "record_path": required_path,
+            "product_family_id": "fam_storage_tool_boxes_bags_0002_p2wk382v",
+            "brand": "Raaco",
+            "series": "Heavy Duty CarryLite",
+            "model": "1NI-95P",
+            "product_name": "Raaco Heavy Duty CarryLite 1NI-95P Tool Box and Bag",
+            "product_kind_name": "Tool Box and Bag",
+            "properties": [
+                {"name": "storage_type", "value": "parts case"},
+                {"name": "colour_family", "value": "Yellow"},
+            ],
+        }
+    )
+    task = (
+        "A support note claims we stock the Tool Box and Bag from Raaco in the Raaco Heavy Duty "
+        "CarryLite 1NI-95P Tool Box and Bag line that has storage type parts case and color family "
+        "Yellow and has material polypropylene. Check the actual catalogue item, cite the exact "
+        "product record, and if the base product exists but that extra catalogue claim is absent, "
+        "answer with <NO> and include the checked SKU."
+    )
+
+    fn = agent._try_product_check(vm, task)
+
+    assert fn is not None
+    assert "<NO>" in fn.message
+    assert "STO-3TXK5YYY" in fn.message
+    assert required_path in fn.grounding_refs
+    print("red: t08 product check reads name/value family JSON props")
+
+
+def test_red_t08_product_check_family_json_space_separated_property_keys_sibling_is_checked():
+    vm = FakeVM()
+    family_root = "/proc/catalog/fasteners/wood_drywall_screws/fam_fasteners_wood_drywall_screws_0012_3a3qt124"
+    base_path = f"{family_root}/FST-28VSITTI.json"
+    required_path = f"{family_root}/FST-46M10HE4.json"
+    vm.sql_outputs["lower(pv.brand) = lower('Spax')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        f"FST-28VSITTI,{base_path},fam_fasteners_wood_drywall_screws_0012_3a3qt124,"
+        "Spax,Pro Pack SPX,25G-PJQ,Spax Pro Pack SPX 25G-PJQ Wood and Drywall Screw,"
+        "Wood and Drywall Screw,screw_type,deck screw,\n"
+        f"FST-28VSITTI,{base_path},fam_fasteners_wood_drywall_screws_0012_3a3qt124,"
+        "Spax,Pro Pack SPX,25G-PJQ,Spax Pro Pack SPX 25G-PJQ Wood and Drywall Screw,"
+        "Wood and Drywall Screw,diameter_mm,,6\n"
+        f"FST-28VSITTI,{base_path},fam_fasteners_wood_drywall_screws_0012_3a3qt124,"
+        "Spax,Pro Pack SPX,25G-PJQ,Spax Pro Pack SPX 25G-PJQ Wood and Drywall Screw,"
+        "Wood and Drywall Screw,length_mm,,40\n"
+    )
+    vm.list_outputs[family_root] = [SimpleNamespace(name="FST-46M10HE4.json")]
+    vm.read_outputs[required_path] = json.dumps(
+        {
+            "product_sku": "FST-46M10HE4",
+            "record_path": required_path,
+            "product_family_id": "fam_fasteners_wood_drywall_screws_0012_3a3qt124",
+            "brand": "Spax",
+            "series": "Pro Pack SPX",
+            "model": "25G-PJQ",
+            "product_name": "Spax Pro Pack SPX 25G-PJQ Wood and Drywall Screw",
+            "product_kind_name": "Wood and Drywall Screw",
+            "properties": [
+                {"property_name": "screw type", "property_value": "deck screw"},
+                {"property_name": "diameter mm", "numeric_value": 6},
+                {"property_name": "length mm", "numeric_value": 40},
+            ],
+        }
+    )
+    task = (
+        "A support note claims we stock the Wood and Drywall Screw from Spax in the Spax Pro Pack "
+        "SPX 25G-PJQ Wood and Drywall Screw line that has screw type deck screw, diameter 6 mm, "
+        "and length 40 mm and has material brass. Check the actual catalogue item, cite the exact "
+        "product record, and if the base product exists but that extra catalogue claim is absent, "
+        "answer with <NO> and include the checked SKU."
+    )
+
+    fn = agent._try_product_check(vm, task)
+
+    assert fn is not None
+    assert "<NO>" in fn.message
+    assert "FST-46M10HE4" in fn.message
+    assert required_path in fn.grounding_refs
+    print("red: t08 product check reads space-separated family JSON property keys")
+
+
+def test_red_t08_product_check_positive_exists_prompt_returns_yes_for_selected_base_product():
+    vm = FakeVM()
+    product_path = "/proc/catalog/workwear/work_tops/fam_workwear_work_tops_0009_2qliue3e/WRK-15IOR9ZN.json"
+    vm.sql_outputs["lower(pv.brand) = lower('Sparco')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        f"WRK-15IOR9ZN,{product_path},fam_workwear_work_tops_0009_2qliue3e,"
+        "Sparco,Classic SP,CT4-DY9,Sparco Classic SP CT4-DY9 Work Top thermal vest Gray XXL,"
+        "Work Top,garment_type,thermal vest,\n"
+        f"WRK-15IOR9ZN,{product_path},fam_workwear_work_tops_0009_2qliue3e,"
+        "Sparco,Classic SP,CT4-DY9,Sparco Classic SP CT4-DY9 Work Top thermal vest Gray XXL,"
+        "Work Top,color,Gray,\n"
+    )
+    task = (
+        "A support note claims we stock the Work Top from Sparco in the Sparco Classic SP CT4-DY9 "
+        "Work Top line that has garment type thermal vest, color family Gray, and size XXL. "
+        "Check the exact product record, and if the catalogue product exists, answer with <YES> "
+        "and include the checked SKU."
+    )
+
+    fn = agent._try_product_check(vm, task)
+
+    assert fn is not None
+    assert "<YES>" in fn.message
+    assert product_path in fn.grounding_refs
+    print("red: t08 product check positive exists prompt returns YES")
+
+
+def test_red_t08_product_check_grip_type_absent_returns_no():
+    vm = FakeVM()
+    product_path = "/proc/catalog/hand_tools/pliers_wrenches/fam_hand_tools_pliers_wrenches_0001_3akaz7dk/HND-3SM7M7KN.json"
+    vm.sql_outputs["lower(pv.brand) = lower('Gedore')"] = (
+        "sku,path,family_id,brand,series,model,name,kind_name,key,value_text,value_number\n"
+        f"HND-3SM7M7KN,{product_path},fam_hand_tools_pliers_wrenches_0001_3akaz7dk,"
+        "Gedore,Professional RED,2X0-1DW,Gedore Professional RED 2X0-1DW Pliers and Wrenches,"
+        "Pliers and Wrenches,tool_type,adjustable wrench,\n"
+        f"HND-3SM7M7KN,{product_path},fam_hand_tools_pliers_wrenches_0001_3akaz7dk,"
+        "Gedore,Professional RED,2X0-1DW,Gedore Professional RED 2X0-1DW Pliers and Wrenches,"
+        "Pliers and Wrenches,length_mm,,150\n"
+    )
+    task = (
+        "A support note claims we stock the Pliers and Wrenches from Gedore in the Gedore "
+        "Professional RED 2X0-1DW Pliers and Wrenches line that has tool type adjustable wrench "
+        "and length 150 mm and has grip type ergonomic. Check the actual catalogue item, cite the "
+        "exact product record, and if the base product exists but that extra catalogue claim is absent, "
+        "answer with <NO> and include the checked SKU."
+    )
+
+    fn = agent._try_product_check(vm, task)
+
+    assert fn is not None
+    assert "<NO>" in fn.message
+    assert "HND-3SM7M7KN" in fn.message
+    assert product_path in fn.grounding_refs
+    print("red: t08 product check grip type absent returns NO")
+
+
 def test_red_t07_product_check_fragrance_absent_returns_no():
     vm = FakeVM()
     vm.sql_outputs["lower(pv.brand) = lower('Karcher')"] = (
@@ -4767,6 +5004,12 @@ def main():
     test_red_t08_product_check_season_absent_returns_no()
     test_red_t08_product_check_kneepad_pockets_absent_checks_family_sibling()
     test_red_t08_product_check_family_json_string_properties_sibling_is_checked()
+    test_red_t08_product_check_working_width_absent_returns_no()
+    test_red_t08_product_check_hint_matched_family_sibling_can_have_lower_line_score()
+    test_red_t08_product_check_family_json_name_value_properties_sibling_is_checked()
+    test_red_t08_product_check_family_json_space_separated_property_keys_sibling_is_checked()
+    test_red_t08_product_check_positive_exists_prompt_returns_yes_for_selected_base_product()
+    test_red_t08_product_check_grip_type_absent_returns_no()
     test_red_t07_product_check_fragrance_absent_returns_no()
     test_red_t32_product_check_gps_tracking_absent_returns_no_with_checked_sku()
     test_red_t32_product_check_family_json_numeric_float_sibling_is_checked()

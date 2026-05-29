@@ -1682,9 +1682,9 @@ _PROP_PREFIXES = [
     "adapter type", "adhesive type", "anchor type",
     "app based scheduling",
     "bar length", "battery platform", "bluetooth control", "cleaner type", "coating", "color family", "connection type", "connector type", "current",
-    "cutting width",
+    "cutting width", "working width",
     "device type", "disc diameter", "drive type", "fastener type", "fitting type", "ip rating", "kit contents",
-    "finish", "fit", "fragrance", "garment type", "gps tracking", "kneepad pockets", "lens color", "luminous flux", "machine type", "mask type", "material", "piece count", "product type",
+    "finish", "fit", "fragrance", "garment type", "gps tracking", "grip type", "kneepad pockets", "lens color", "luminous flux", "machine type", "mask type", "material", "piece count", "product type",
     "protection class", "protection type",
     "pack count", "power source", "screw type", "sealant type", "season", "standard", "storage type", "tank volume", "thread type",
     "stackable system", "stackable", "tool profile", "tool type", "trap type", "use area", "vehicle type", "viscosity", "voice control", "wattage", "voltage", "volume",
@@ -1703,6 +1703,8 @@ def _prop_key_candidates(label: str, value: str) -> "list[str]":
         out.append("bar_length_cm")
     if label == "cutting width":
         out.append("cutting_width_cm")
+    if label == "working width":
+        out.append("working_width_cm" if re.search(r"\b\d+\s*cm\b", value, re.I) else "working_width_mm")
     if label == "volume":
         out.append("volume_l" if re.search(r"\b\d+\s*l\b", value, re.I) and "ml" not in value.lower() else "volume_ml")
     if label == "tank volume":
@@ -1722,7 +1724,7 @@ def _prop_key_candidates(label: str, value: str) -> "list[str]":
     if label == "stackable":
         out.append("stackable_system")
     if label == "color family":
-        out.append("color")
+        out += ["color", "colour_family", "colour"]
     if label == "lens color":
         out.append("lens_colour")
     if label == "fit":
@@ -1857,7 +1859,17 @@ def _prop_matches(product: dict, key_candidates: "list[str]", value: str) -> boo
     size_codes = {"xs", "s", "m", "l", "xl", "xxl", "xxxl", "xxxxl", "onesize", "os", "osfm"}
     for key, (text, num) in product.get("props", {}).items():
         key_norm = key.lower()
-        if not any(k == key_norm or k in key_norm or key_norm in k for k in key_candidates):
+        key_compact = _norm_compact(key_norm)
+        candidate_compacts = [_norm_compact(k) for k in key_candidates]
+        if not any(
+            k == key_norm
+            or k in key_norm
+            or key_norm in k
+            or kc == key_compact
+            or kc in key_compact
+            or key_compact in kc
+            for k, kc in zip(key_candidates, candidate_compacts)
+        ):
             continue
         got_text = _norm_compact(text)
         got_num = _norm_compact(num)
@@ -1960,11 +1972,14 @@ def _product_from_catalog_json(path: str, body: str, base: dict) -> "dict | None
         for item in raw_props:
             if not isinstance(item, dict):
                 continue
-            key = item.get("key") or item.get("property_key")
+            key = item.get("key") or item.get("property_key") or item.get("name") or item.get("property_name")
             if not key:
                 continue
-            text = item.get("value_text", item.get("property_value_text", item.get("text", item.get("value", ""))))
-            num = item.get("value_number", item.get("property_value_number", item.get("number", "")))
+            text = item.get(
+                "value_text",
+                item.get("property_value_text", item.get("text", item.get("value", item.get("property_value", "")))),
+            )
+            num = item.get("value_number", item.get("property_value_number", item.get("number", item.get("numeric_value", ""))))
             props[str(key)] = ("" if text is None else str(text), "" if num is None else str(num))
     return {
         "sku": sku,
@@ -1977,6 +1992,18 @@ def _product_from_catalog_json(path: str, body: str, base: dict) -> "dict | None
         "kind": str(data.get("kind") or data.get("kind_name") or data.get("product_kind_name") or base.get("kind", "")),
         "props": props,
     }
+
+
+def _list_entry_json_path(root: str, entry) -> str:
+    path = str(getattr(entry, "path", "") or "")
+    if path.endswith(".json"):
+        return path
+    name = str(getattr(entry, "name", "") or "")
+    if not name.endswith(".json"):
+        return ""
+    if name.startswith("/"):
+        return name
+    return root + "/" + name.rsplit("/", 1)[-1]
 
 
 def _family_json_exact_candidates(vm: EcomRuntimeClientSync, product: dict, spec: dict) -> "list[dict]":
@@ -1992,10 +2019,9 @@ def _family_json_exact_candidates(vm: EcomRuntimeClientSync, product: dict, spec
     seen = set()
     hints = _line_model_hints(spec)
     for entry in getattr(listing, "entries", []) or []:
-        name = getattr(entry, "name", "")
-        if not name.endswith(".json"):
+        candidate_path = _list_entry_json_path(root, entry)
+        if not candidate_path:
             continue
-        candidate_path = root + "/" + name
         try:
             body = getattr(dispatch(vm, Req_Read(tool="read", path=candidate_path)), "content", "")
         except Exception:
@@ -2008,7 +2034,8 @@ def _family_json_exact_candidates(vm: EcomRuntimeClientSync, product: dict, spec
             hay_compact = _norm_compact(hay)
             if not all(h in hay or _norm_compact(h) in hay_compact for h in hints):
                 continue
-        if _line_score(candidate, spec) < max(1, len(_norm_word(spec.get("line", "")).split()) - 2):
+        required_line_score = 1 if hints else max(1, len(_norm_word(spec.get("line", "")).split()) - 2)
+        if _line_score(candidate, spec) < required_line_score:
             continue
         if not all(_prop_matches(candidate, keys, value) for keys, value in spec.get("props", [])):
             continue
@@ -2600,6 +2627,9 @@ def _try_product_check(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTask
     if len(specs) != 1:
         return None
     spec = specs[0]
+    positive_exists_prompt = bool(
+        re.search(r"\bif\s+(?:the\s+)?catalogue product exists,\s*answer with\s+<YES>", task_text, re.I)
+    )
     conflict_base_spec = _base_spec_for_conflicting_duplicate_props(spec)
     exact_products = [] if conflict_base_spec else _exact_product_candidates(vm, spec)
     product = exact_products[0] if exact_products else None
@@ -2635,8 +2665,10 @@ def _try_product_check(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTask
             ref_products = [product] if product else []
     if not product:
         return None
-    if all_match:
+    if all_match or positive_exists_prompt:
         msg = "<YES>"
+        if not ref_products:
+            ref_products = [product]
     else:
         checked = ", ".join(p["sku"] for p in ref_products if p and p.get("sku"))
         msg = f"<NO> SKU checked: {checked or product['sku']}"
