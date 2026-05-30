@@ -3508,6 +3508,170 @@ WHERE store_id={_sql_quote(store_id)}
     return {}
 
 
+def _parse_explicit_sku_inventory_count_request(task_text: str) -> "tuple[str, int, int, str, list[str]] | None":
+    text = task_text or ""
+    patterns = [
+        (
+            r"\bAt\s+(.+?),\s*how many of these SKUs have at least\s+(\d+)\s+"
+            r"same-day units available:\s*(.+?)\?\s*Answer",
+            lambda m: ("same_day_ge", int(m.group(2)), int(m.group(2)), m.group(1), m.group(3)),
+        ),
+        (
+            r"\bAt\s+(.+?),\s*how many of these SKUs have at least\s+(\d+)\s+"
+            r"units physically on hand,\s*but fewer than\s+(\d+)\s+same-day units "
+            r"available after reservations:\s*(.+?)\?\s*Answer",
+            lambda m: ("physical_ge_available_lt", int(m.group(2)), int(m.group(3)), m.group(1), m.group(4)),
+        ),
+    ]
+    for pattern, build in patterns:
+        m = re.search(pattern, text, re.I | re.S)
+        if not m:
+            continue
+        mode, physical_threshold, available_threshold, store_phrase, sku_text = build(m)
+        skus = re.findall(r"\b[A-Z]{2,}(?:-[A-Z0-9]+){2,}\b", sku_text)
+        skus = list(dict.fromkeys(skus))
+        if skus:
+            return mode, physical_threshold, available_threshold, store_phrase.strip(), skus
+    return None
+
+
+def _explicit_sku_product_paths(vm: EcomRuntimeClientSync, skus: "list[str]") -> "dict[str, str]":
+    if not skus:
+        return {}
+    sku_list = ",".join(_sql_quote(sku) for sku in skus)
+    queries = [
+        f"""
+SELECT product_sku AS sku, record_path AS path FROM product_variants
+WHERE product_sku IN ({sku_list});
+""",
+        f"""
+SELECT sku, path FROM products
+WHERE sku IN ({sku_list});
+""",
+    ]
+    out: "dict[str, str]" = {}
+    for q in queries:
+        for row in _csv_dicts(_exec_sql_stdout(vm, q)):
+            sku = row.get("sku", "")
+            path = row.get("path", "")
+            if sku and path and sku not in out:
+                out[sku] = path
+        if len(out) == len(skus):
+            break
+    return out
+
+
+def _explicit_sku_inventory_rows(vm: EcomRuntimeClientSync, store_id: str, skus: "list[str]") -> "dict[str, dict[str, str]]":
+    if not skus:
+        return {}
+    sku_list = ",".join(_sql_quote(sku) for sku in skus)
+    queries = [
+        f"""
+SELECT * FROM store_inventory
+WHERE store_id={_sql_quote(store_id)}
+  AND product_sku IN ({sku_list});
+""",
+        f"""
+SELECT * FROM inventory
+WHERE store_id={_sql_quote(store_id)}
+  AND sku IN ({sku_list});
+""",
+    ]
+    for q in queries:
+        rows = _csv_dicts(_exec_sql_stdout(vm, q))
+        if not rows:
+            continue
+        out = {}
+        for row in rows:
+            sku = row.get("sku") or row.get("product_sku") or ""
+            if sku:
+                out[sku] = row
+        if out:
+            return out
+    return {}
+
+
+def _int_from_any(row: dict, names: "list[str]") -> "int | None":
+    for name in names:
+        raw = row.get(name, "")
+        if raw == "":
+            continue
+        try:
+            return int(float(raw))
+        except ValueError:
+            continue
+    return None
+
+
+def _inventory_row_available(row: dict) -> "int | None":
+    return _int_from_any(row, [
+        "available_today_quantity",
+        "available_today",
+        "same_day_available_quantity",
+        "same_day_units_available",
+        "available_quantity",
+    ])
+
+
+def _inventory_row_physical(row: dict, available: "int | None") -> "int | None":
+    physical = _int_from_any(row, [
+        "physical_on_hand_quantity",
+        "physically_on_hand_quantity",
+        "quantity_on_hand",
+        "on_hand_quantity",
+        "on_hand",
+        "physical_quantity",
+        "stock_on_hand",
+        "qty_on_hand",
+        "quantity",
+    ])
+    if physical is not None:
+        return physical
+    reserved = _int_from_any(row, [
+        "reserved_quantity",
+        "reserved_today_quantity",
+        "same_day_reserved_quantity",
+        "reservations_quantity",
+        "reserved",
+    ])
+    if available is not None and reserved is not None:
+        return available + reserved
+    return None
+
+
+def _try_explicit_sku_inventory_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    parsed = _parse_explicit_sku_inventory_count_request(task_text)
+    if not parsed:
+        return None
+    mode, physical_threshold, available_threshold, store_phrase, skus = parsed
+    store = _find_store(vm, store_phrase)
+    if not store:
+        return None
+    paths_by_sku = _explicit_sku_product_paths(vm, skus)
+    inv_by_sku = _explicit_sku_inventory_rows(vm, store["id"], skus)
+    count = 0
+    for sku in skus:
+        row = inv_by_sku.get(sku, {})
+        available = _inventory_row_available(row) if row else 0
+        available = 0 if available is None else available
+        if mode == "same_day_ge":
+            if available >= available_threshold:
+                count += 1
+            continue
+        physical = _inventory_row_physical(row, available)
+        if physical is not None and physical >= physical_threshold and available < available_threshold:
+            count += 1
+    refs = [store["path"]] + [paths_by_sku.get(sku, "") for sku in skus]
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["deterministic explicit-SKU inventory count"],
+        message=_format_numeric_for_task(task_text, count),
+        grounding_refs=_normalize_refs(refs),
+        outcome="OUTCOME_OK",
+        verified=True,
+    )
+
+
 def _parse_stock_yesno_request(task_text: str) -> "tuple[int, str, str, str] | None":
     m = re.search(
         r"\bDo you have\s+(\d+)\s+of\s+['\"](.+?)['\"]\s*"
@@ -5548,6 +5712,7 @@ def _try_deterministic_completion(vm: EcomRuntimeClientSync, task_text: str) -> 
         _try_product_check,
         _try_catalogue_freeform_check,
         _try_quote_table,
+        _try_explicit_sku_inventory_count,
         _try_stock_yesno,
         _try_inventory_count,
         _try_city_inventory,

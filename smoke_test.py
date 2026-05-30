@@ -3170,6 +3170,85 @@ def test_red_prod_stock_yesno_does_not_cite_excluded_negative_variants():
     print("red: prod stock yes/no does not cite excluded negative variants")
 
 
+def test_red_prod_explicit_sku_same_day_count_cites_all_sku_records():
+    vm = FakeVM()
+    vm.sql_outputs[
+        "SELECT store_id AS id, record_path AS path, store_name AS name, city, is_open FROM stores ORDER BY store_id;"
+    ] = (
+        "id,path,name,city,is_open\n"
+        "store_innsbruck_mitte,/proc/stores/store_innsbruck_mitte.json,PowerTools Innsbruck Mitte,Innsbruck,1\n"
+    )
+    vm.sql_outputs["SELECT product_sku AS sku, record_path AS path FROM product_variants"] = (
+        "sku,path\n"
+        "PT-HDG-STI-HSA50-AK10,/proc/catalog/Stihl/PT-HDG-STI-HSA50-AK10.json\n"
+        "PT-CMP-EIN-TEAC270-50,/proc/catalog/Einhell/PT-CMP-EIN-TEAC270-50.json\n"
+        "PT-SAW-DEW-DWE575K-FINE,/proc/catalog/DeWalt/PT-SAW-DEW-DWE575K-FINE.json\n"
+    )
+    vm.sql_outputs["SELECT * FROM store_inventory"] = (
+        "product_sku,available_today_quantity,physical_on_hand_quantity\n"
+        "PT-HDG-STI-HSA50-AK10,3,3\n"
+        "PT-CMP-EIN-TEAC270-50,2,6\n"
+        "PT-SAW-DEW-DWE575K-FINE,5,5\n"
+    )
+    task = (
+        "At PowerTools at Innsbruck Mitte, how many of these SKUs have at least 3 same-day units available: "
+        "PT-HDG-STI-HSA50-AK10, PT-CMP-EIN-TEAC270-50, PT-SAW-DEW-DWE575K-FINE? "
+        'Answer exactly in format "<COUNT:%d>" (no quotes).'
+    )
+
+    fn = agent._try_deterministic_completion(vm, task)
+
+    assert fn is not None, "explicit SKU inventory counts should not fall through to LLM"
+    assert fn.message == "<COUNT:2>"
+    assert fn.grounding_refs == [
+        "/proc/stores/store_innsbruck_mitte.json",
+        "/proc/catalog/Stihl/PT-HDG-STI-HSA50-AK10.json",
+        "/proc/catalog/Einhell/PT-CMP-EIN-TEAC270-50.json",
+        "/proc/catalog/DeWalt/PT-SAW-DEW-DWE575K-FINE.json",
+    ]
+    print("red: prod explicit SKU same-day count cites all SKU records")
+
+
+def test_red_prod_explicit_sku_physical_vs_reserved_count():
+    vm = FakeVM()
+    vm.sql_outputs[
+        "SELECT store_id AS id, record_path AS path, store_name AS name, city, is_open FROM stores ORDER BY store_id;"
+    ] = (
+        "id,path,name,city,is_open\n"
+        "store_graz_eggenberg,/proc/stores/store_graz_eggenberg.json,PowerTools Graz Eggenberg,Graz,1\n"
+    )
+    vm.sql_outputs["SELECT product_sku AS sku, record_path AS path FROM product_variants"] = (
+        "sku,path\n"
+        "PT-SAFE-3M-SF400-GASKET,/proc/catalog/3M/PT-SAFE-3M-SF400-GASKET.json\n"
+        "PT-DRL-MAK-DDF485-5AH,/proc/catalog/Makita/PT-DRL-MAK-DDF485-5AH.json\n"
+        "PT-SAW-MAK-DHS680-BLADE,/proc/catalog/Makita/PT-SAW-MAK-DHS680-BLADE.json\n"
+    )
+    vm.sql_outputs["SELECT * FROM store_inventory"] = (
+        "product_sku,available_today_quantity,physical_on_hand_quantity\n"
+        "PT-SAFE-3M-SF400-GASKET,1,2\n"
+        "PT-DRL-MAK-DDF485-5AH,2,5\n"
+        "PT-SAW-MAK-DHS680-BLADE,0,1\n"
+    )
+    task = (
+        "At eggenberg tools place, how many of these SKUs have at least 2 units physically on hand, "
+        "but fewer than 2 same-day units available after reservations: "
+        "PT-SAFE-3M-SF400-GASKET, PT-DRL-MAK-DDF485-5AH, PT-SAW-MAK-DHS680-BLADE? "
+        "Answer with number only."
+    )
+
+    fn = agent._try_deterministic_completion(vm, task)
+
+    assert fn is not None
+    assert fn.message == "1"
+    assert fn.grounding_refs == [
+        "/proc/stores/store_graz_eggenberg.json",
+        "/proc/catalog/3M/PT-SAFE-3M-SF400-GASKET.json",
+        "/proc/catalog/Makita/PT-DRL-MAK-DDF485-5AH.json",
+        "/proc/catalog/Makita/PT-SAW-MAK-DHS680-BLADE.json",
+    ]
+    print("red: prod explicit SKU physical/reserved count uses inventory columns")
+
+
 def test_red_dev53_inventory_solver_reads_current_schema_tables():
     vm = FakeVM()
     vm.sql_outputs[
@@ -5548,6 +5627,8 @@ def main():
     test_inventory_solver_handles_have_n_or_more_ready_shape()
     test_red_prod_stock_yesno_uses_non_excluded_available_sibling()
     test_red_prod_stock_yesno_does_not_cite_excluded_negative_variants()
+    test_red_prod_explicit_sku_same_day_count_cites_all_sku_records()
+    test_red_prod_explicit_sku_physical_vs_reserved_count()
     test_red_dev53_inventory_solver_reads_current_schema_tables()
     test_red_dev53_product_check_names_base_sku_when_extra_claim_absent()
     test_red_dev53_product_check_cites_all_base_candidates_when_extra_claim_absent()
