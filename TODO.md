@@ -61,6 +61,10 @@
 - Rework or disable the discount fast path that zeroed `t095-t100` in the open
   diagnostic. It over-denied OK tasks, returned DENIED where unsupported was
   expected, and missed required basket refs.
+- DONE: normalize prod `/bin/id` roles such as `RoleDiscountManager` to
+  `discount_manager` and parse hyphenated ids such as `basket-0004`; this
+  targets the false discount denials in `t095-t100`, but still needs a full
+  evaluated run to measure point gain.
 - Tighten product/catalog/inventory/OCR grounding gates using scorer evidence:
   avoid extra family refs, cite every required SKU/product ref, and preserve
   exact `TRUE(1)`/`FALSE(0)` style answers when the task demands them.

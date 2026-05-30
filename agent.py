@@ -1747,7 +1747,15 @@ def _norm_compact(text: str) -> str:
 
 
 def _task_ids(task_text: str, prefix: str) -> "list[str]":
-    return list(dict.fromkeys(re.findall(rf"\b{prefix}_[A-Za-z0-9]+\b", task_text or "")))
+    return list(dict.fromkeys(re.findall(rf"\b{prefix}[-_][A-Za-z0-9]+\b", task_text or "")))
+
+
+def _normalize_role_name(role: str) -> str:
+    raw = role.strip()
+    if raw.startswith("Role") and len(raw) > 4:
+        raw = raw[4:]
+    raw = re.sub(r"(?<!^)(?=[A-Z])", "_", raw)
+    return raw.lower().replace("-", "_").replace(" ", "_")
 
 
 def _id_context(vm: EcomRuntimeClientSync) -> "tuple[str, set[str]]":
@@ -1758,7 +1766,7 @@ def _id_context(vm: EcomRuntimeClientSync) -> "tuple[str, set[str]]":
         if line.startswith("user:"):
             user = line.split(":", 1)[1].strip()
         if line.startswith("roles:"):
-            roles = {r.strip() for r in line.split(":", 1)[1].split(",") if r.strip()}
+            roles = {_normalize_role_name(r) for r in line.split(":", 1)[1].split(",") if r.strip()}
     return user, roles
 
 

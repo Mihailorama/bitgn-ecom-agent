@@ -1569,6 +1569,41 @@ def test_red_t46_discount_last_checkoutable_email_from_my_store_current_schema()
     print("red: t46 discount last checkoutable email from my store uses current schema")
 
 
+def test_red_prod_discount_accepts_role_prefixed_roles_and_hyphen_basket_ids():
+    vm = FakeVM()
+    vm.tool_outputs["/bin/id"] = (
+        "user: emp-0058\n"
+        "roles: RoleEmployee, RoleStoreManager, RoleOrderViewer, RoleDiscountManager\n"
+    )
+    vm.sql_outputs["WHERE b.basket_id='basket-0004'"] = (
+        "id,path,store_id,status,discount_percent,subtotal_cents,store_path\n"
+        "basket-0004,/proc/baskets/basket-0004.json,store-linz-hafen,active,,18000,"
+        "/proc/stores/store-linz-hafen.json\n"
+    )
+    vm.sql_outputs["FROM employee_accounts WHERE employee_id='emp-0058'"] = (
+        "path\n"
+        "/proc/employees/emp-0058.json\n"
+    )
+
+    fn = agent._try_discount(
+        vm,
+        "Apply the maximum applicable service_recovery discount to basket basket-0004. "
+        "Use my employee id as issuer.",
+    )
+
+    assert fn is not None
+    assert fn.outcome == "OUTCOME_OK"
+    assert fn.message == "Applied 10% service_recovery discount to basket basket-0004."
+    assert any(
+        call[0] == "/bin/discount"
+        and call[1] == ["basket-0004", "10", "service_recovery", "emp-0058"]
+        for call in vm.exec_calls
+    )
+    assert "/proc/baskets/basket-0004.json" in fn.grounding_refs
+    assert "/proc/employees/emp-0058.json" in fn.grounding_refs
+    print("red: prod discounts accept Role* roles and hyphen basket ids")
+
+
 def test_payment_verification_recovery_cites_current_update_doc():
     vm = FakeVM()
     vm.tool_outputs["/bin/id"] = "user: cust_082\nroles: customer\n"
@@ -5202,6 +5237,7 @@ def main():
     test_discount_desk_coverage_denial_names_required_token()
     test_red_t42_service_recovery_delegation_uses_current_schema_basket_store()
     test_red_t46_discount_last_checkoutable_email_from_my_store_current_schema()
+    test_red_prod_discount_accepts_role_prefixed_roles_and_hyphen_basket_ids()
     test_payment_verification_recovery_cites_current_update_doc()
     test_red_dev53_3ds_bank_approval_popup_wording_recovers()
     test_red_dev53_3ds_reads_current_schema_by_basket()
