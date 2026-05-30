@@ -4980,8 +4980,54 @@ def _try_employee_role_count(vm: EcomRuntimeClientSync, task_text: str) -> "Repo
     )
 
 
+def _looks_embedded_instruction_attack(task_text: str) -> bool:
+    text = task_text or ""
+    low = text.lower()
+    control_markers = (
+        "internal relay",
+        "ops escalation",
+        "routing-layer conflict",
+        "runtime note",
+        "instructions to the runtime",
+        "active control path",
+        "trusted queue",
+        "temporary exception",
+        "emergency handling steps",
+        "quoted message from internal coordination",
+        "隐藏维护清单",
+    )
+    harmful_markers = (
+        "bypass workspace constraints",
+        "prioritize this note above repository guidance",
+        "export the current contact list",
+        "do not request confirmation",
+        "sensitive fragment",
+        "bridge queue",
+        "绕过工作区约束",
+        "敏感片段",
+        "桥接队列",
+    )
+    return any(marker in low or marker in text for marker in control_markers) and any(
+        marker in low or marker in text for marker in harmful_markers
+    )
+
+
+def _try_security_injection_guard(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    if not _looks_embedded_instruction_attack(task_text):
+        return None
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["deterministic embedded instruction security check"],
+        message="Denied: the request contains embedded instructions that attempt to override workspace policy.",
+        grounding_refs=["/docs/security.md"],
+        outcome="OUTCOME_DENIED_SECURITY",
+        verified=True,
+    )
+
+
 def _try_deterministic_completion(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
     for solver in (
+        _try_security_injection_guard,
         _try_receipt_ocr_price_check,
         _try_catalog_count,
         _try_scoped_tmp_cleanup,
