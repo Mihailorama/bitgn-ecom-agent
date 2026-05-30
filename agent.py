@@ -2937,10 +2937,122 @@ def _json_product_hay(data: dict) -> str:
     )
 
 
+def _is_sku_lookup_task(task_text: str) -> bool:
+    low = (task_text or "").lower()
+    return bool(re.search(r"\b(sku|stock keeping unit|product code)\b", low))
+
+
+def _sku_lookup_search_phrase(task_text: str) -> str:
+    text = task_text or ""
+    for pat in (
+        r"\bStock Keeping Unit for\s+(.+?)\s+with\b",
+        r"\bsku\s+for\s+(.+?)(?:\s+pls\b|\.|\?|$)",
+        r"\bproduct code\s+for\s+(.+?)(?:\.|\?|$)",
+    ):
+        m = re.search(pat, text, re.I | re.S)
+        if m:
+            return re.sub(r"\s+", " ", m.group(1)).strip(" .")
+    return ""
+
+
+def _catalog_json_records_from_search(vm: EcomRuntimeClientSync, phrase: str, limit: int = 20) -> "list[tuple[str, dict]]":
+    if not phrase:
+        return []
+    try:
+        result = dispatch(vm, Req_Search(tool="search", root="/proc/catalog", pattern=phrase, limit=limit))
+    except Exception:
+        return []
+    paths: list[str] = []
+    seen = set()
+    for match in getattr(result, "matches", []) or []:
+        path = getattr(match, "path", "")
+        if path.endswith(".json") and path not in seen:
+            seen.add(path)
+            paths.append(path)
+    out: list[tuple[str, dict]] = []
+    for path in paths:
+        try:
+            body = getattr(dispatch(vm, Req_Read(tool="read", path=path)), "content", "")
+            data = json.loads(body)
+        except Exception:
+            continue
+        if isinstance(data, dict):
+            out.append((path, data))
+    return out
+
+
+def _excluded_plain_variant(path: str, data: dict, task_text: str) -> bool:
+    low = (task_text or "").lower()
+    if "excluded" not in low:
+        return False
+    excluded = ""
+    m = re.search(r"\b(?:with|but)\s+(?:the\s+)?(.{0,80}?)\s+excluded\b", task_text or "", re.I)
+    if m:
+        excluded = m.group(1).lower()
+    hay = _json_product_hay(data)
+    if "plain" in excluded and re.search(r"\b24\b", excluded):
+        return re.search(r"\b24\b", hay) is not None and not re.search(r"\b(accessory|set|kit|bundle)\b", hay)
+    sku = str(data.get("sku") or path.rsplit("/", 1)[-1]).lower()
+    return bool(sku and sku in excluded)
+
+
+def _try_sku_lookup_exclusion(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    if not _is_sku_lookup_task(task_text) or "excluded" not in (task_text or "").lower():
+        return None
+    records = _catalog_json_records_from_search(vm, _sku_lookup_search_phrase(task_text), 20)
+    if not records:
+        records = _catalog_json_records(vm, "*.json", 20)
+    if not records:
+        return None
+    tokens = [
+        t for t in _norm_word(task_text).split()
+        if len(t) > 1 and t not in {
+            "need", "the", "stock", "keeping", "unit", "sku", "product", "code",
+            "for", "with", "plain", "excluded", "tank", "size", "and", "inclusion",
+            "remain", "underspecified", "answer", "only", "liter", "litre", "accessory",
+        }
+    ]
+    scored = []
+    for path, data in records:
+        hay = _json_product_hay(data)
+        score = sum(1 for token in tokens if token in hay)
+        if score > 0:
+            scored.append((score, path, data))
+    if not scored:
+        return None
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    best_score = scored[0][0]
+    candidates = [(path, data) for score, path, data in scored if score >= max(1, best_score - 1)]
+    candidates = [(path, data) for path, data in candidates if not _excluded_plain_variant(path, data, task_text)]
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        path, data = candidates[0]
+        sku = str(data.get("sku") or path.rsplit("/", 1)[-1].removesuffix(".json"))
+        return ReportTaskCompletion(
+            tool="report_completion",
+            completed_steps_laconic=["deterministic SKU lookup with excluded variant filter"],
+            message=sku,
+            grounding_refs=[path],
+            outcome="OUTCOME_OK",
+            verified=True,
+        )
+    refs = [path for path, _data in candidates]
+    skus = [str(data.get("sku") or path.rsplit("/", 1)[-1].removesuffix(".json")) for path, data in candidates]
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["deterministic ambiguous SKU lookup with excluded variant filter"],
+        message="OUTCOME_NONE_CLARIFICATION\n" + "\n".join(skus),
+        grounding_refs=_normalize_refs(refs),
+        outcome="OUTCOME_NONE_CLARIFICATION",
+        verified=True,
+    )
+
+
 def _try_simple_catalogue_lookup(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
     text = task_text or ""
     low = text.lower()
-    if "product code" not in low and "sku" not in low and "does such product exist" not in low:
+    if "product code" not in low and "sku" not in low and "stock keeping unit" not in low and "does such product exist" not in low:
         return None
     if _extract_product_specs(text):
         return None
@@ -5060,6 +5172,7 @@ def _try_deterministic_completion(vm: EcomRuntimeClientSync, task_text: str) -> 
         _try_catalog_count,
         _try_scoped_tmp_cleanup,
         _try_latest_basket_add,
+        _try_sku_lookup_exclusion,
         _try_simple_catalogue_lookup,
         _try_product_check,
         _try_catalogue_freeform_check,

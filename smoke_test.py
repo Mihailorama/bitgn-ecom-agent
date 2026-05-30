@@ -101,6 +101,8 @@ class FakeVM:
         self.tool_outputs = {}
         self.read_outputs = {}
         self.list_outputs = {}
+        self.find_outputs = {}
+        self.search_outputs = {}
         self.exec_calls = []
         self.sql_default_fails = False
 
@@ -120,9 +122,17 @@ class FakeVM:
         return SimpleNamespace(entries=[])
 
     def search(self, req):
+        if req.pattern in self.search_outputs:
+            matches = [
+                SimpleNamespace(path=path, line=i + 1, line_text=line)
+                for i, (path, line) in enumerate(self.search_outputs[req.pattern])
+            ]
+            return SimpleNamespace(matches=matches, truncated=False)
         return SimpleNamespace(matches=[], truncated=False)
 
     def find(self, req):
+        if req.name in self.find_outputs:
+            return SimpleNamespace(paths=self.find_outputs[req.name], truncated=False)
         return SimpleNamespace(paths=[], truncated=False)
 
     def exec(self, req):
@@ -951,6 +961,48 @@ Total (exkl. MwSt)       EUR  90,50
     assert fn.outcome == "OUTCOME_OK"
     assert fn.message == "1"
     print("red: receipt price check uses workspace yes/no format")
+
+
+def test_red_prod_sku_lookup_excludes_named_plain_variant_from_ambiguity_refs():
+    vm = FakeVM()
+    paths = [
+        "/proc/catalog/Aircraft/PT-CMP-AIR-CA240-24.json",
+        "/proc/catalog/Aircraft/PT-CMP-AIR-CA240-6.json",
+        "/proc/catalog/Aircraft/PT-CMP-AIR-CA240-SET.json",
+    ]
+    vm.search_outputs["Aircraft Compact-Air 240"] = [
+        (paths[0], '"name": "Aircraft Compact-Air 240/24 compressor",'),
+        (paths[1], '"name": "Aircraft Compact-Air 240/6 compressor",'),
+        (paths[2], '"name": "Aircraft Compact-Air 240/24 compressor accessory set",'),
+    ]
+    vm.read_outputs[paths[0]] = json.dumps({
+        "sku": "PT-CMP-AIR-CA240-24",
+        "name": "Aircraft Compact-Air 240/24 compressor",
+        "brand": "Aircraft",
+    })
+    vm.read_outputs[paths[1]] = json.dumps({
+        "sku": "PT-CMP-AIR-CA240-6",
+        "name": "Aircraft Compact-Air 240/6 compressor",
+        "brand": "Aircraft",
+    })
+    vm.read_outputs[paths[2]] = json.dumps({
+        "sku": "PT-CMP-AIR-CA240-SET",
+        "name": "Aircraft Compact-Air 240/24 compressor accessory set",
+        "brand": "Aircraft",
+    })
+
+    fn = agent._try_deterministic_completion(
+        vm,
+        "I need the Stock Keeping Unit for Aircraft Compact-Air 240 with the plain "
+        "24 liter unit excluded. Tank size and accessory inclusion remain "
+        "underspecified.. Answer with the code only.",
+    )
+
+    assert fn is not None
+    assert fn.outcome == "OUTCOME_NONE_CLARIFICATION"
+    assert paths[0] not in fn.grounding_refs
+    assert fn.grounding_refs == [paths[1], paths[2]]
+    print("red: SKU lookup excludes named plain variant from ambiguity refs")
 
 
 def test_red_t53_ocr_receipt_single_token_legacy_match_uses_exact_price():
@@ -5304,6 +5356,7 @@ def main():
     test_red_system_prompt_defers_yesno_format_to_agents_md()
     test_red_t53_ocr_receipt_legacy_sku_matches_current_catalogue_price()
     test_red_receipt_price_uses_workspace_yesno_format()
+    test_red_prod_sku_lookup_excludes_named_plain_variant_from_ambiguity_refs()
     test_red_t53_ocr_receipt_single_token_legacy_match_uses_exact_price()
     test_red_t51_ocr_receipt_table_format_uses_subtotal_and_replacement_prices()
     test_red_t51_ocr_receipt_unique_price_fallback_handles_unreadable_description()

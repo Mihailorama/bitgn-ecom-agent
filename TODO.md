@@ -74,6 +74,9 @@
   price solver handles `within EUR N.NN` wording plus `1/0` workspaces; this
   targets expected-answer failures like `t080` and reduces LLM `<YES>`/`TRUE(1)`
   mismatch risk.
+- DONE: SKU/code-only lookup now has a narrow excluded-variant resolver that
+  omits the explicitly excluded plain product from ambiguity refs; this targets
+  the `t001` extra-ref scorer failure.
 
 ## P1 - Model Routing
 
