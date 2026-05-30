@@ -22,6 +22,21 @@ Actionable loose ends found during sessions. Newest first.
   NEXT: validate with a full sweep (security-clean, no solved-task loss) before treating as
   accepted; then commit. Remaining open items below.
 
+## Control baseline (2026-05-30, all 4 fixes, prod OPEN)
+
+Run `run-22RyVn5o6qzPqjkHFDMmeC8C5`, `gpt-5.3-codex` API, PARALLEL=20, submitted post-contest
+(prod policy now `EVAL_POLICY_OPEN`). **61.87/100 points (61.87%), 57 perfect, 7 partial, 36 zero,
+0 crashes.** Scores in `artifacts/sweeps/prod-control-scores.json`.
+- Validated: P0 security t010 cross-customer denial = 1.0, t009 legit checkout = 1.0; P1 retry → 0 crashes.
+- P2 format works (t002/t003/t006 now emit `<YES>`/`<NO>`) but those tasks still score 0 — failure is
+  correctness (polarity/refs), not format. P2 removes the format-zero mode; it can't fix a wrong answer.
+
+- **[NEXT] Triage the 36 zero-score prod tasks.** The harness returned empty `score_detail`, so
+  root-cause needs per-task log analysis (`artifacts/sweeps/2026-05-30-prod-control-allfixes-nosubmit/`).
+  Zero clusters worth classifying first: availability/inventory (t002, t005), OCR (t003), product-exists
+  (t006), and the t022-t029 / t061-t067 / t095-t100 bands (likely whole task families — fraud / logistics /
+  new prod families). Classify by instruction+tools, write RED cases, fix task-local per BENCHMARK_NOTES.
+
 ## Open
 
 - **[P0][security][prod] Checkout mutation runs BEFORE record-backed ownership verification (cross-customer leak).**
