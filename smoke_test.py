@@ -1006,6 +1006,40 @@ def test_red_prod_sku_lookup_excludes_named_plain_variant_from_ambiguity_refs():
     print("red: SKU lookup excludes named plain variant from ambiguity refs")
 
 
+def test_red_prod_catalogue_price_count_returns_number_without_catalog_refs():
+    vm = FakeVM()
+    vm.sql_outputs["catalogue_price_count"] = "n\n2\n"
+
+    fn = agent._try_deterministic_completion(
+        vm,
+        "I need powertools outdoor repair plan pack under EUR 34.91. "
+        "How many matching SKUs do you have? Answer with number only",
+    )
+
+    assert fn is not None, "prod matching-SKU price counts should stay deterministic"
+    assert fn.message == "2"
+    assert fn.grounding_refs == []
+    print("red: prod catalogue price count returns number without catalog refs")
+
+
+def test_red_prod_catalogue_price_count_ignores_unspecified_property_clause():
+    vm = FakeVM()
+    vm.sql_outputs["catalogue_price_count"] = "n\n1\n"
+
+    fn = agent._try_deterministic_completion(
+        vm,
+        "Resolve this product request: Bosch GSR 18V-55 kit. Battery capacity was not provided.. "
+        "Constraint: price must be below EUR 252.32. Respond with # of matching products as number only",
+    )
+
+    assert fn is not None
+    assert fn.message == "1"
+    assert fn.grounding_refs == []
+    sql_text = "\n".join(call[2] for call in vm.exec_calls if call[0] == "/bin/sql")
+    assert "battery" not in sql_text.lower()
+    print("red: prod catalogue price count ignores unspecified property clause")
+
+
 def test_red_t53_ocr_receipt_single_token_legacy_match_uses_exact_price():
     vm = FakeVM()
     vm.list_outputs["/uploads"] = [
@@ -5431,6 +5465,8 @@ def main():
     test_red_t53_ocr_receipt_legacy_sku_matches_current_catalogue_price()
     test_red_receipt_price_uses_workspace_yesno_format()
     test_red_prod_sku_lookup_excludes_named_plain_variant_from_ambiguity_refs()
+    test_red_prod_catalogue_price_count_returns_number_without_catalog_refs()
+    test_red_prod_catalogue_price_count_ignores_unspecified_property_clause()
     test_red_t53_ocr_receipt_single_token_legacy_match_uses_exact_price()
     test_red_t51_ocr_receipt_table_format_uses_subtotal_and_replacement_prices()
     test_red_t51_ocr_receipt_unique_price_fallback_handles_unreadable_description()

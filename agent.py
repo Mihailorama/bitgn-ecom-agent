@@ -3052,6 +3052,119 @@ def _try_sku_lookup_exclusion(vm: EcomRuntimeClientSync, task_text: str) -> "Rep
     )
 
 
+def _parse_catalogue_price_count_request(task_text: str) -> "tuple[str, int] | None":
+    text = task_text or ""
+    patterns = [
+        (
+            r"\bI need\s+(.+?)\s+under\s+EUR\s+(\d+(?:\.\d+)?)\.\s+"
+            r"How many matching SKUs do you have\?",
+            1,
+            2,
+        ),
+        (
+            r"\bResolve this product request:\s*(.+?)\.\s*Constraint:\s*"
+            r"price must be below EUR\s+(\d+(?:\.\d+)?)\.",
+            1,
+            2,
+        ),
+    ]
+    for pattern, phrase_i, price_i in patterns:
+        m = re.search(pattern, text, re.I | re.S)
+        if not m:
+            continue
+        phrase = re.sub(r"\s+", " ", m.group(phrase_i)).strip(" .")
+        cents = int(round(float(m.group(price_i)) * 100))
+        if phrase and cents > 0:
+            return phrase, cents
+    return None
+
+
+def _catalogue_price_count_tokens(phrase: str) -> "list[str]":
+    cleaned = re.sub(
+        r"\b[^.]*?\b(?:was\s+)?not\s+(?:provided|specified)[^.]*",
+        " ",
+        phrase or "",
+        flags=re.I,
+    )
+    cleaned = re.sub(
+        r"\b(?:battery capacity|battery level|accessory bundle inclusion|case inclusion)\s+"
+        r"(?:was\s+)?(?:not\s+)?(?:provided|specified)\b",
+        " ",
+        cleaned,
+        flags=re.I,
+    )
+    stop = {
+        "a", "an", "and", "as", "battery", "capacity", "constraint", "for", "has",
+        "i", "is", "it", "need", "not", "of", "provided", "request", "specified",
+        "the", "this", "was", "with",
+    }
+    out = []
+    for token in _norm_word(cleaned).split():
+        if len(token) <= 1 or token in stop:
+            continue
+        out.append(token)
+        unit = re.match(r"^(\d+)(?:l|litre|liter|mm|cm|ah|v|w)$", token)
+        if unit:
+            out.append(unit.group(1))
+    return list(dict.fromkeys(out))
+
+
+def _catalogue_price_count_query(tokens: "list[str]", limit_cents: int, current: bool) -> str:
+    if current:
+        fields = (
+            "product_sku", "brand", "series", "model", "product_name", "properties",
+        )
+        table = "product_variants"
+        price_currency = "price_currency"
+        price_cents = "price_cents"
+        sku_col = "product_sku"
+    else:
+        fields = ("sku", "brand", "series", "model", "name", "properties")
+        table = "products"
+        price_currency = "price_currency"
+        price_cents = "price_cents"
+        sku_col = "sku"
+    hay = " || ' ' || ".join(f"coalesce({field}, '')" for field in fields)
+    clauses = [
+        f"lower({hay}) LIKE '%' || lower({_sql_quote(token)}) || '%'"
+        for token in tokens
+    ]
+    return f"""
+/* catalogue_price_count */
+SELECT COUNT(DISTINCT {sku_col}) AS n
+FROM {table}
+WHERE {price_currency}='EUR'
+  AND {price_cents} < {limit_cents}
+  AND {" AND ".join(clauses)};
+"""
+
+
+def _try_catalogue_price_count(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    parsed = _parse_catalogue_price_count_request(task_text)
+    if not parsed:
+        return None
+    phrase, limit_cents = parsed
+    tokens = _catalogue_price_count_tokens(phrase)
+    if len(tokens) < 2:
+        return None
+    n = None
+    for current in (True, False):
+        stdout = _exec_sql_stdout(vm, _catalogue_price_count_query(tokens, limit_cents, current))
+        n = _sql_single_int(stdout)
+        if n is not None:
+            break
+    if n is None:
+        return None
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["deterministic catalogue price/count query"],
+        message=str(n),
+        grounding_refs=[],
+        outcome="OUTCOME_OK",
+        verified=True,
+    )
+
+
 def _try_simple_catalogue_lookup(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
     text = task_text or ""
     low = text.lower()
@@ -5372,6 +5485,7 @@ def _try_deterministic_completion(vm: EcomRuntimeClientSync, task_text: str) -> 
         _try_scoped_tmp_cleanup,
         _try_latest_basket_add,
         _try_sku_lookup_exclusion,
+        _try_catalogue_price_count,
         _try_simple_catalogue_lookup,
         _try_product_check,
         _try_catalogue_freeform_check,
