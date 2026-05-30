@@ -2570,6 +2570,14 @@ def _doc_text(vm: EcomRuntimeClientSync, path: str) -> str:
         return ""
 
 
+def _yes_no_token_for_workspace(vm: EcomRuntimeClientSync, ok: bool) -> str:
+    body = _doc_text(vm, "/AGENTS.MD")
+    m = re.search(r"For yes/no answers,\s*answer exactly\s+`?([^`\n.]+?)`?\s+or\s+`?([^`\n.]+?)`?\.", body, re.I)
+    if m:
+        return (m.group(1) if ok else m.group(2)).strip()
+    return "<YES>" if ok else "<NO>"
+
+
 def _discount_delegation_doc(
     vm: EcomRuntimeClientSync, user: str, basket_id: str, store_id: str
 ) -> "str | None":
@@ -2794,6 +2802,125 @@ ORDER BY sku;
         completed_steps_laconic=["deterministic freeform catalogue check"],
         message="<NO>",
         grounding_refs=["/AGENTS.MD"],
+        outcome="OUTCOME_OK",
+        verified=True,
+    )
+
+
+def _catalog_json_records(vm: EcomRuntimeClientSync, name: str = "*.json", limit: int = 20) -> "list[tuple[str, dict]]":
+    try:
+        found = dispatch(vm, Req_Find(tool="find", root="/proc/catalog", name=name, kind="files", limit=limit))
+    except Exception:
+        return []
+    out: "list[tuple[str, dict]]" = []
+    for path in sorted(getattr(found, "paths", []) or []):
+        if not path.endswith(".json"):
+            continue
+        try:
+            body = getattr(dispatch(vm, Req_Read(tool="read", path=path)), "content", "")
+            data = json.loads(body)
+        except Exception:
+            continue
+        if isinstance(data, dict):
+            out.append((path, data))
+    return out
+
+
+def _json_product_hay(data: dict) -> str:
+    return _norm_word(
+        " ".join(
+            [
+                str(data.get("sku", "")),
+                str(data.get("name", "")),
+                str(data.get("brand", "")),
+                str(data.get("category_id", "")),
+                str(data.get("kind_id", "")),
+                str(data.get("family_id", "")),
+                json.dumps(data.get("properties", {}), sort_keys=True),
+            ]
+        )
+    )
+
+
+def _try_simple_catalogue_lookup(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    text = task_text or ""
+    low = text.lower()
+    if "product code" not in low and "sku" not in low and "does such product exist" not in low:
+        return None
+    if _extract_product_specs(text):
+        return None
+
+    yesno = "does such product exist" in low
+    phrase = ""
+    if yesno:
+        m = re.search(r"Customer wants ['\"](.+?)['\"]\. Does such product exist", text, re.I | re.S)
+        phrase = m.group(1) if m else text
+    else:
+        phrase = text
+    query_tokens = [t for t in _norm_word(phrase).split() if len(t) > 1 and t not in {
+        "could", "you", "please", "find", "product", "code", "for", "from", "by",
+        "itself", "just", "the", "code", "sku", "only", "customer", "wants",
+        "does", "such", "exist", "with", "without", "and", "has",
+    }]
+    if len(query_tokens) < 2:
+        return None
+
+    name_patterns = []
+    for token in query_tokens:
+        if token in {"bosch", "makita", "dewalt", "de", "walt"}:
+            name_patterns.append(f"*{token}*")
+    if not name_patterns:
+        for token in query_tokens[:3]:
+            name_patterns.append(f"*{token}*")
+
+    records: "list[tuple[str, dict]]" = []
+    seen = set()
+    for pattern in name_patterns:
+        for path, data in _catalog_json_records(vm, pattern, 20):
+            if path not in seen:
+                seen.add(path)
+                records.append((path, data))
+    if not records:
+        records = _catalog_json_records(vm, "*.json", 20)
+    if not records:
+        return None
+
+    scored = []
+    for path, data in records:
+        hay = _json_product_hay(data)
+        score = sum(1 for token in query_tokens if token in hay)
+        if "without batteries" in low or "by itself" in low or "body only" in low or "body-only" in low:
+            if re.search(r"\b(body|solo|bare|without|base)\b", hay):
+                score += 3
+            if re.search(r"\bkit|charger|battery|batteries|bundle|site\b", hay):
+                score -= 2
+        if "expert wood" in low and "expert" in hay and "wood" in hay:
+            score += 3
+        scored.append((score, path, data))
+    scored = [row for row in scored if row[0] > 0]
+    if not scored:
+        if yesno:
+            return ReportTaskCompletion(
+                tool="report_completion",
+                completed_steps_laconic=["deterministic catalogue JSON keyword scan"],
+                message=_yes_no_token_for_workspace(vm, False),
+                grounding_refs=["/AGENTS.MD", "/docs/catalogue-lookup.md"],
+                outcome="OUTCOME_OK",
+                verified=True,
+            )
+        return None
+    scored.sort(key=lambda item: (-item[0], str(item[2].get("sku", ""))))
+    best_score = scored[0][0]
+    best = [row for row in scored if row[0] == best_score]
+    if len(best) != 1 and not yesno:
+        return None
+    path, data = best[0][1], best[0][2]
+    sku = str(data.get("sku") or path.rsplit("/", 1)[-1].removesuffix(".json"))
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["deterministic catalogue JSON keyword scan"],
+        message=_yes_no_token_for_workspace(vm, bool(best)) if yesno else sku,
+        grounding_refs=_normalize_refs([path, "/docs/catalogue-lookup.md"]),
         outcome="OUTCOME_OK",
         verified=True,
     )
@@ -3461,6 +3588,121 @@ def _try_checkout_current_basket(vm: EcomRuntimeClientSync, task_text: str) -> "
         completed_steps_laconic=["deterministic checkout inventory check and mutation"],
         message=f"Checked out {basket_id}.",
         grounding_refs=_normalize_refs(refs),
+        outcome="OUTCOME_OK",
+        verified=True,
+    )
+
+
+def _try_scoped_tmp_cleanup(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    m = re.search(r"\bUnder\s+(/tmp/[^\s,]+),\s*delete only files whose basename ends exactly in `?\.tmp`?", task_text or "", re.I)
+    if not m:
+        return None
+    root = m.group(1).rstrip(".")
+    try:
+        found = dispatch(vm, Req_Find(tool="find", root=root, name="*.tmp", kind="files", limit=20))
+    except Exception:
+        return None
+    paths = sorted(p for p in (getattr(found, "paths", []) or []) if p.rsplit("/", 1)[-1].endswith(".tmp"))
+    for path in paths:
+        dispatch(vm, Req_Delete(tool="delete", path=path))
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["deterministic scoped .tmp cleanup"],
+        message="\n".join(paths),
+        grounding_refs=[],
+        outcome="OUTCOME_OK",
+        verified=True,
+    )
+
+
+def _cart_records_for_user(vm: EcomRuntimeClientSync, user: str) -> "list[tuple[str, dict]]":
+    records = []
+    roots = [f"/proc/carts/{user}", "/proc/carts", "/proc/baskets"]
+    for root in roots:
+        try:
+            found = dispatch(vm, Req_Find(tool="find", root=root, name="*.json", kind="files", limit=20))
+        except Exception:
+            continue
+        for path in sorted(getattr(found, "paths", []) or []):
+            try:
+                body = getattr(dispatch(vm, Req_Read(tool="read", path=path)), "content", "")
+                data = json.loads(body)
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+            if str(data.get("customer_id", "")) == user and str(data.get("status", "")).lower() == "active":
+                records.append((path, data))
+        if records:
+            break
+    return records
+
+
+def _try_latest_basket_add(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    text = task_text or ""
+    if not re.search(r"\b(Put|Add)\s+one\b", text, re.I):
+        return None
+    if not re.search(r"\b(latest|newest|most recent)\b", text, re.I):
+        return None
+    if "basket" not in text.lower():
+        return None
+    user, roles = _id_context(vm)
+    if not user or (not user.startswith("cust-") and not user.startswith("cust_") and "customer" not in {r.lower() for r in roles}):
+        return ReportTaskCompletion(
+            tool="report_completion",
+            completed_steps_laconic=["deterministic basket edit identity check"],
+            message="The current identity is not a customer identity for this basket edit.",
+            grounding_refs=["/docs/security.md", "/docs/checkout.md"],
+            outcome="OUTCOME_DENIED_SECURITY",
+            verified=True,
+        )
+    carts = _cart_records_for_user(vm, user)
+    if not carts:
+        return None
+    carts.sort(key=lambda item: str(item[1].get("created_at", "")), reverse=True)
+    cart_path, cart = carts[0]
+
+    product_phrase = re.sub(r"^.*?\b(?:Put|Add)\s+one\s+", "", text, flags=re.I)
+    product_phrase = re.sub(r"\s+in\s+the\s+(?:latest|newest|most recent).*$", "", product_phrase, flags=re.I).strip(" .")
+    token_text = _norm_word(product_phrase)
+    tokens = [t for t in token_text.split() if len(t) > 1 and t not in {"one", "the", "in", "basket", "kit"}]
+    records = []
+    for token in tokens[:5]:
+        for path, data in _catalog_json_records(vm, f"*{token}*", 20):
+            if all((tok in _json_product_hay(data)) for tok in tokens if tok not in {"two", "2", "0ah", "ah"}):
+                records.append((path, data))
+    uniq = {}
+    for path, data in records:
+        uniq[path] = data
+    scored = []
+    for path, data in uniq.items():
+        hay = _json_product_hay(data)
+        score = sum(1 for token in tokens if token in hay)
+        scored.append((score, path, data))
+    scored.sort(key=lambda item: (-item[0], str(item[2].get("sku", ""))))
+    if not scored:
+        return None
+    sku = str(scored[0][2].get("sku") or scored[0][1].rsplit("/", 1)[-1].removesuffix(".json"))
+
+    lines = cart.get("lines")
+    if not isinstance(lines, list):
+        lines = []
+        cart["lines"] = lines
+    for line in lines:
+        if isinstance(line, dict) and str(line.get("sku", "")) == sku:
+            try:
+                line["quantity"] = int(line.get("quantity", 0)) + 1
+            except Exception:
+                line["quantity"] = 1
+            break
+    else:
+        lines.append({"sku": sku, "quantity": 1})
+    dispatch(vm, Req_Write(tool="write", path=cart_path, content=json.dumps(cart, indent=2, ensure_ascii=False) + "\n"))
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["deterministic latest active basket edit"],
+        message=f"Added {sku} to {cart.get('id') or cart_path.rsplit('/', 1)[-1].removesuffix('.json')}.",
+        grounding_refs=_normalize_refs([cart_path, scored[0][1], "/docs/checkout.md", "/docs/security.md"]),
         outcome="OUTCOME_OK",
         verified=True,
     )
@@ -4675,6 +4917,9 @@ def _try_deterministic_completion(vm: EcomRuntimeClientSync, task_text: str) -> 
     for solver in (
         _try_receipt_ocr_price_check,
         _try_catalog_count,
+        _try_scoped_tmp_cleanup,
+        _try_latest_basket_add,
+        _try_simple_catalogue_lookup,
         _try_product_check,
         _try_catalogue_freeform_check,
         _try_quote_table,

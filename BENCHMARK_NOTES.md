@@ -161,11 +161,94 @@ skifmax rules-evolution, plan-repl-agent, azamat1c filesystem-agent).
     `artifacts/sweeps/2026-05-28-t48-rowlevel-fix6-full-codex55-r1/`.
     Result: isolated `10/10` perfect, related fraud/archive subset `4/4`
     perfect, full sweep `50.00/50`.
-  - Current `t48` status: closed for the saved row-level archive-fraud patterns.
-    The productive pattern was not broad cohort expansion; it was row-level
-    distinction of true archive fraud rows from same-customer/device false
-    positives, with RED tests from concrete logs and a full-sweep acceptance
-    gate.
+- Current `t48` status: closed for the saved row-level archive-fraud patterns.
+  The productive pattern was not broad cohort expansion; it was row-level
+  distinction of true archive fraud rows from same-customer/device false
+  positives, with RED tests from concrete logs and a full-sweep acceptance
+  gate.
+
+## Production contest retrospective (2026-05-30)
+
+The production contest benchmark was `bitgn/ecom1-prod`, 100 trials, blind score
+until run close/evaluation. Public score was still `pending_eval` for submitted
+runs at documentation time, so this section is operational evidence rather than
+a score-known accepted baseline.
+
+Submitted runs:
+
+- Accuracy: R9, `run-22RyBLkxE4jAAJKgXGUsJ6WW7`, logs
+  `artifacts/sweeps/2026-05-30-prod100-all-codex53-r9-emergency-fastpaths/`.
+  Local hard-fail profile: 100 summaries, 2 local `OUTCOME_ERR_INTERNAL`
+  timeouts (`t039`, `t047`), no security miss, no model usage-limit error.
+  Public page showed `pending_eval`, 100 trials done, 0 trial errors, total
+  trial time `147 min 23 sec`, score `-`.
+- Open Weights nomination: R6, `run-22Rxi4mh3BZQYwepCzSHUnGxD`, logs
+  `artifacts/sweeps/2026-05-30-prod100-all-spark-r6-nosubmit/`. This was run
+  with `codex:gpt-5.3-codex-spark`, so the Open Weights category label is
+  likely invalid and must not be repeated without a model-family guard. Local
+  hard-fail profile: 100 summaries, 2 local `OUTCOME_ERR_INTERNAL` failures
+  (`t056`, `t059`), no security miss, no model usage-limit error. Public page
+  showed `pending_eval`, 100 trials done, 0 trial errors, total trial time
+  `99 min 16 sec`, score `-`.
+
+Other run evidence:
+
+- R1, `run-22RxEwAqh9bhf2k33uoWF2noK`, mixed Opus/Spark before SQL-outage
+  handling. It was too slow and had many simulated SQL/ODBC internal failures;
+  not a candidate.
+- R2, `run-22RxWmkHCPNF5XQfSQ7EMcA3t`, all Spark with the first SQL fix; stopped
+  early, not a candidate.
+- R3, `run-22RxZbAoqPU4hnWJ7GGqFDxiW`, canary for no-SQL-retry behavior; closed
+  only to test `SubmitRun`, not a score candidate.
+- R7, `run-22RxsQJrDqLJikgwKPZhB5dn5`, all Spark after local fixes; Spark quota
+  exhausted mid-run and most later tasks returned model-limit internals.
+- R8, `run-22RxuMeNSPib3hcipyf9QkHKG`, all ordinary
+  `codex:gpt-5.3-codex`; completed 100/100 with 4 local internals
+  (`t001`, `t026`, `t039`, `t079`) and no security miss. It fixed R6's
+  `t056/t059` family but lost more to timeouts, so it was not submitted.
+
+What changed in prod:
+
+- The task pool grew from dev53 to 100 and some first-53 task texts changed.
+- OCR and docs/proc discovery mattered more. Organizer guidance confirmed
+  `/AGENTS.MD`, `/bin/id`, `/bin/sql`, JSON objects under `/proc`, and rules in
+  `/docs`.
+- Simulated `ODBC Driver 18` / SQL outage messages are deliberate task
+  conditions. A solver should fall back to `/proc` and docs instead of reporting
+  `OUTCOME_ERR_INTERNAL` after a first SQL failure.
+- `StartRun -> StartTrial -> SubmitTrial -> SubmitRun` is the scoring contract.
+  Scores are produced only after closing the whole run; leaving a run open is
+  valid when retry/continuation is intended.
+- Rate limits were tighter than rehearsal. Treat run count and model quota as
+  scarce resources, and inspect `Retry-After`/quota text before starting another
+  platform run.
+
+Operational lessons:
+
+- Points are the optimization target. Perfect-task count is triage only because
+  fractional points count on the leaderboard.
+- Do not open a platform trial until a model slot is ready. Otherwise queueing
+  time becomes leaderboard time.
+- The runner currently submits an `OUTCOME_ERR_INTERNAL` completion when the LLM
+  times out. That makes same-run retry impossible for that trial. The next
+  runner fix must retry before `SubmitTrial`, or leave timed-out trials open when
+  continuation is possible.
+- Spark was fast enough to make 100 tasks feasible but quota-sensitive. Ordinary
+  Codex avoided Spark quota failures but had 600s timeout risk. Opus was too
+  slow for the 3-hour/100-task budget in the tested configuration.
+- Emergency deterministic fast paths can save the run only when they are narrow
+  and tested. R9's `t039` scoped `.tmp` cleanup branch had a regex bug during
+  the run; the regex was corrected afterward, but this still needs a smoke test.
+- Category submit needs a model-family guard. A Codex/Spark run should not be
+  nominated as Open Weights.
+
+Post-contest source of truth:
+
+- Until BitGN public pages leave `pending_eval`, the repo must keep the dev53
+  `53.00/53` milestone as the last score-known accepted baseline.
+- When public scores appear, update `RESULTS.md`, this section, and
+  `artifacts/milestones/2026-05-30-prod100-contest-retrospective.md` with the
+  exact points and category result.
 
 ## Status & next steps (historical notes, updated 2026-05-26 morning state)
 

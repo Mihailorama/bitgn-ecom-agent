@@ -17,6 +17,15 @@ previous codex-only milestone remains `46/47` with `codex:gpt-5.3-codex` at
 `PARALLEL=6`, commit `e4a2d41`, tag
 `bench-ecom1-dev-v47-46of47-20260526`.
 
+Production contest checkpoint: `bitgn/ecom1-prod` expanded the benchmark to 100
+trials and hid scores until run close/evaluation. Two 100/100 submitted runs are
+recorded in `artifacts/milestones/2026-05-30-prod100-contest-retrospective.md`:
+R9 (`run-22RyBLkxE4jAAJKgXGUsJ6WW7`, Accuracy) and R6
+(`run-22Rxi4mh3BZQYwepCzSHUnGxD`, submitted as Open Weights but run with Codex
+Spark, so treat the category as likely invalid). Public pages still showed
+`pending_eval` and score `-` at documentation time, so the last score-known
+accepted milestone remains the dev53 `53.00/53` run above.
+
 ## Why this scores well
 
 ECOM grades reliability, **policy compliance**, **security posture**, grounding,
@@ -55,6 +64,7 @@ every provider.
 | Context | `MODEL_ID` | Auth | Why |
 |---|---|---|---|
 | **Leaderboard attempts** | mixed `claude:opus` + `codex:gpt-5.3-codex-spark` | local Claude/Codex CLIs over OAuth | current best saved dev53 leaderboard profile |
+| Prod100 emergency profile | `codex:gpt-5.3-codex` / `codex:gpt-5.3-codex-spark` | local Codex CLI over ChatGPT OAuth | used during the 2026-05-30 prod contest; score pending, Spark quota-sensitive |
 | Codex-only baseline | `codex:gpt-5.3-codex` | local `codex` CLI over ChatGPT OAuth | previous strongest single-profile baseline |
 | Regression canary | `claude:sonnet` | local `claude` CLI over OAuth | cheaper validation, but lower current score |
 | Gemini CLI comparison | `agy` | local Antigravity CLI over Google AI Pro OAuth | available, but currently slower and less stable |
@@ -109,7 +119,7 @@ The key ties a run to your account so its score shows on
 | `BITGN_API_KEY` | _(empty)_ | required for official ECOM runs (<https://bitgn.com/me>) |
 | `MODEL_ID` | `gpt-5.5` | provider/model (see table above) |
 | `OPENAI_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` | _(empty)_ | provider credential for the chosen `MODEL_ID` |
-| `BENCH_ID` / `BENCHMARK_ID` | `bitgn/ecom1-dev` | benchmark id |
+| `BENCH_ID` / `BENCHMARK_ID` | `bitgn/ecom1-prod` in current prod-contest runner code | benchmark id; set explicitly for dev rehearsals |
 | `MAX_STEPS` | `40` | per-trial action budget |
 | `MAX_TOKENS` | `16384` | max completion tokens per LLM step |
 | `CLAUDE_CLI_TIMEOUT` | `300` | per-step timeout for the Claude OAuth CLI (seconds) |

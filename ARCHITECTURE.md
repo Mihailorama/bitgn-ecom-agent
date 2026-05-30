@@ -21,6 +21,40 @@ As of 2026-05-29, the current saved leaderboard milestone is:
 The operational target is leaderboard points, not perfect-task count. Perfect
 count remains useful triage, but fractional task scores count toward the goal.
 
+## Production Contest Checkpoint
+
+The 2026-05-30 production contest used `bitgn/ecom1-prod` with 100 blind trials.
+The last score-known accepted baseline remains the dev53 `53.00/53` milestone
+above because submitted prod runs were still `pending_eval` when documented.
+
+Submitted prod runs:
+
+- R9 / Accuracy: `run-22RyBLkxE4jAAJKgXGUsJ6WW7`, logs
+  `artifacts/sweeps/2026-05-30-prod100-all-codex53-r9-emergency-fastpaths/`.
+  Local result proxy: 100/100 summaries, 2 local internals (`t039`, `t047`), no
+  security miss, no model quota error. Public page: 100 trials done, 0 trial
+  errors, `147 min 23 sec`, score `-`, `pending_eval`.
+- R6 / Open Weights nomination: `run-22Rxi4mh3BZQYwepCzSHUnGxD`, logs
+  `artifacts/sweeps/2026-05-30-prod100-all-spark-r6-nosubmit/`. This was
+  Codex Spark, not an open-weights model, so the category should be treated as a
+  submission mistake. Local result proxy: 100/100 summaries, 2 local internals
+  (`t056`, `t059`), no security miss. Public page: 100 trials done, 0 trial
+  errors, `99 min 16 sec`, score `-`, `pending_eval`.
+
+Architecture deltas that matter after prod:
+
+- `BENCHMARK_ID` default now targets prod in the current runner code; set it
+  explicitly when rehearsing on dev.
+- SQL/ODBC outage is not fatal by itself. First SQL failure should switch the
+  task to `/proc` JSON plus `/docs` rules where possible.
+- Run close is separate from trial submission. `NO_SUBMIT=1` protects
+  `SubmitRun`, but the current per-trial loop still submits fallback
+  `OUTCOME_ERR_INTERNAL` on LLM timeout. That must be fixed before the next
+  contest: retry while the trial is open, or deliberately leave the trial open.
+- Category submission is a control-plane concern and needs explicit metadata:
+  model family, route manifest, intended category, and a guard that prevents
+  Codex/Spark runs from being nominated as Open Weights.
+
 ## Previous Codex Milestone
 
 As of 2026-05-26, the previous codex-only scoring milestone was:
@@ -92,6 +126,10 @@ Key properties:
 - Full sweeps append to `RESULTS.md`; partial sweeps only write logs.
 - Platform-reported time is not the same as local wall time. Use local wall time
   for iteration speed, but trust BitGN platform time for leaderboard speed.
+- In blind prod, local `sweep_report.json` is not enough for the final score if
+  `NO_SUBMIT=1` or `SubmitRun` is delayed. Always persist the run id, poll the
+  public/authenticated run page after close, and record the exact score once it
+  appears.
 
 ## Mixed Runner
 
