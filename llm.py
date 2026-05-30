@@ -168,7 +168,7 @@ def _claude_cli_parse(
     if not claude_bin:
         raise LLMError(
             "claude CLI not found on PATH; install Claude Code or set MODEL_ID to "
-            "an API model (e.g. gpt-5.5 or gemini/gemini-3.5-flash)"
+            "an explicit API model (e.g. openai/gpt-5.5 or gemini/gemini-3.5-flash)"
         )
 
     model = model_id.split(":", 1)[1] if ":" in model_id else model_id
@@ -330,7 +330,8 @@ def _codex_cli_parse(
     if not codex_bin:
         raise LLMError(
             "codex CLI not found on PATH; install codex (npm i -g @openai/codex) "
-            "or set MODEL_ID to an API model (e.g. gpt-5.5 or gemini/gemini-3.5-flash)"
+            "or set MODEL_ID to an explicit API model "
+            "(e.g. openai/gpt-5.5 or gemini/gemini-3.5-flash)"
         )
 
     model = model_id.split(":", 1)[1] if ":" in model_id else model_id

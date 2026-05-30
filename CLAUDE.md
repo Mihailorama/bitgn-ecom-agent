@@ -34,20 +34,26 @@ Pre-sweep gate the project uses: `uv run python -m py_compile agent.py && uv run
 
 ## MODEL_ID routing (the central config knob)
 
-`MODEL_ID` selects the provider via prefix dispatch in `llm.py:_provider`:
+`MODEL_ID` selects the model and, by explicit prefix, the backend in
+`llm.py:_provider`. Default is CLI, not API.
 
 - `claude:opus` / `claude:sonnet` / bare `opus` / `sonnet` / `haiku` →
   **local `claude` CLI over OAuth** (no API key, no metering, rate-limit-fragile
   past `PARALLEL=8`). The cheap regression canary.
 - `codex:gpt-5.3-codex` / `codex:...` → **local `codex` CLI over ChatGPT OAuth**
   (no API key). Current primary run model — see "Model decision" below.
+- Bare OpenAI-family names such as `gpt-5.5` / `gpt-5.3-codex-spark` →
+  **local `codex` CLI over ChatGPT OAuth** by default. Use this for
+  baseline-comparable Codex CLI runs.
 - `gemini-cli:gemini-2.5-flash` / `pro` → local `gemini` CLI over Google AI Pro
   OAuth (Code Assist tier, no key). OAuth tier caps at the 2.5 family; the
   Google free-tier OAuth shuts down 2026-06-18 → migrate to `agy`.
 - `agy` / `antigravity` → local `agy` (Antigravity CLI) over the same Google AI
   Pro OAuth. Successor to `gemini-cli`; auto-selects the tier's model (Gemini
   3.5 Flash on AI Pro), so any tag after the colon is informational.
-- `gpt-5.5`, `openai/...` → OpenAI via LiteLLM (`OPENAI_API_KEY`).
+- `openai/gpt-5.5` / `openai/...` → OpenAI via LiteLLM (`OPENAI_API_KEY`).
+  This API path must be requested explicitly at launch; it is never the default
+  for bare `gpt-*` model names.
 - `gemini/gemini-3.5-flash` / `pro` → Gemini via LiteLLM (`GEMINI_API_KEY`).
 - `anthropic/claude-...` → Anthropic API via LiteLLM (`ANTHROPIC_API_KEY`).
   Note: bare `claude-*` (without the `anthropic/` prefix) routes to the OAuth
