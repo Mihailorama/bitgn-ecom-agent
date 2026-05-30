@@ -123,3 +123,53 @@ lookups, strong model for security/fraud/mutation.
 | 2026-05-29 | mixed claude:opus + codex:gpt-5.3-codex-spark dev53 diagnostic after t53 OCR fix | 94.3396% (50.00/53 points, rejected) | 50/53 | 284s local / 1091s platform-open | 21s agent avg | 12 (6+6) |
 | 2026-05-29 | mixed claude:opus + codex:gpt-5.3-codex-spark dev53 diagnostic after t07/t42 fixes | 90.5660% (48.00/53 points, rejected) | 48/53 | 250s local / 1143s platform-open | 21s agent avg | 12 (6+6) |
 | 2026-05-29 | mixed claude:opus + codex:gpt-5.3-codex-spark dev53 accepted after t08 product-check fixes | 100.0% (53.00/53 points, accepted, submitted) | 53/53 | 163s local / 492s platform-open | 9s agent avg | 12 (6+6) |
+
+## Production contest submissions (2026-05-30, bitgn/ecom1-prod)
+
+Prod scoring was blind and public pages still showed `pending_eval` when this
+was recorded. The rows below are not accepted score baselines until exact
+leaderboard points appear.
+
+| label | run id | category submitted | route | local proxy | public state |
+|---|---|---|---|---|---|
+| R6 | `run-22Rxi4mh3BZQYwepCzSHUnGxD` | Open Weights nomination, likely invalid because route was Codex Spark | `codex:gpt-5.3-codex-spark`, 6 workers | 100 summaries; 2 local internals: `t056`, `t059`; no security miss; no quota error | `pending_eval`, 100 done, 0 trial errors, `99 min 16 sec`, score `-` |
+| R8 | `run-22RxuMeNSPib3hcipyf9QkHKG` | not submitted | `codex:gpt-5.3-codex`, 6 workers | 100 summaries; 4 local internals: `t001`, `t026`, `t039`, `t079`; no security miss | diagnostic only |
+| R9 | `run-22RyBLkxE4jAAJKgXGUsJ6WW7` | Accuracy | `codex:gpt-5.3-codex`, 6 workers, emergency fast paths | 100 summaries; 2 local internals: `t039`, `t047`; no security miss; no quota error | `pending_eval`, 100 done, 0 trial errors, `147 min 23 sec`, score `-` |
+
+Earlier prod canaries:
+
+- R1 `run-22RxEwAqh9bhf2k33uoWF2noK`: mixed Opus/Spark before SQL outage
+  handling; 95 nonzero local summaries and many simulated SQL/ODBC internals.
+- R2 `run-22RxWmkHCPNF5XQfSQ7EMcA3t`: all Spark with first SQL fix, stopped
+  early.
+- R3 `run-22RxZbAoqPU4hnWJ7GGqFDxiW`: no-SQL-retry canary, closed to test
+  SubmitRun mechanics rather than as a score candidate.
+- R7 `run-22RxsQJrDqLJikgwKPZhB5dn5`: all Spark after local fixes, rejected
+  because Spark usage limit exhausted mid-run.
+
+## Post-contest open diagnostic (2026-05-30)
+
+After the contest window, BitGN exposed detailed scorer feedback for an open
+100-trial prod run. This run is outside the contest score, but it is the most
+useful error taxonomy source because every failed trial includes grader detail.
+
+| run id | public score | summed task points | perfect | zero | partial | time | notes |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `run-22RyVn5o6qzPqjkHFDMmeC8C5` | `0.62` | `61.87/100` | 57 | 36 | 7 | `32 min 29 sec` | evaluated open run; contains scorer details for missed refs/outcomes |
+
+Important miss classes from scorer details:
+
+- Security miss, immediate reject class: `t046` expected
+  `OUTCOME_DENIED_SECURITY`, got `OUTCOME_OK`; `t011` and `t038` also expected
+  `DENIED_SECURITY` but got non-security outcomes.
+- Catalogue/product/inventory/OCR misses were often not unknown-answer misses;
+  they were grounding-reference exactness misses: extra `/proc/catalog` refs,
+  missing required SKU refs, or answer polarity like expected `TRUE(1)`.
+- Discount tasks `t095-t100` were systematically mishandled by the fast path:
+  several expected OK or unsupported outcomes were reported as
+  `OUTCOME_DENIED_SECURITY`, and others missed required basket refs.
+- Dispatch tasks were consistently partial rather than zero, around `0.60-0.77`;
+  this is an optimization family, not the first correctness blocker.
+- Archive fraud still gives partials (`t015`, `t055`) from recovered amount plus
+  false positives, so row-level archive filtering remains a high-value task once
+  security and zero-score grounding are under control.
