@@ -304,6 +304,7 @@ def test_red_prod_sql_outage_is_not_auto_preflight_blocker():
     assert not sql_calls, "prod run must not auto-open /bin/sql before task-specific plan"
     assert "ODBC Driver 18" in agent.system_prompt
     assert "not an internal failure" in agent.system_prompt
+    assert "/bin/jq" in agent.system_prompt
     print("red: prod simulated ODBC SQL outage is not an auto-preflight blocker")
 
 
