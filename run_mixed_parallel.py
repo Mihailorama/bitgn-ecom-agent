@@ -53,13 +53,14 @@ from harness_scoring import merge_submit_scores, submit_score_available
 
 BITGN_URL = os.getenv("BITGN_HOST") or os.getenv("BENCHMARK_HOST") or "https://api.bitgn.com"
 BITGN_API_KEY = os.getenv("BITGN_API_KEY") or ""
-BENCH_ID = os.getenv("BENCH_ID") or os.getenv("BENCHMARK_ID") or "bitgn/ecom1-dev"
+BENCH_ID = os.getenv("BENCH_ID") or os.getenv("BENCHMARK_ID") or "bitgn/ecom1-prod"
 CLAUDE_MODEL_ID = os.getenv("CLAUDE_MODEL_ID", "claude:sonnet")
 CODEX_MODEL_ID = os.getenv("CODEX_MODEL_ID", "codex:gpt-5.3-codex")
 MIXED_PARALLEL = int(os.getenv("MIXED_PARALLEL", "12"))
 MIXED_CLAUDE_LIMIT = int(os.getenv("MIXED_CLAUDE_LIMIT", "6"))
 MIXED_CODEX_LIMIT = int(os.getenv("MIXED_CODEX_LIMIT", "6"))
 LOG_DIR = os.getenv("SWEEP_LOG_DIR", "/tmp/mixed_sweep_logs")
+NO_SUBMIT = os.getenv("NO_SUBMIT") == "1"
 LEADERBOARD_BEST_POINTS = float(os.getenv("LEADERBOARD_BEST_POINTS", "50.0"))
 LEADERBOARD_BEST_MAX_POINTS = int(os.getenv("LEADERBOARD_BEST_MAX_POINTS", "50"))
 _BEST_SECONDS_RAW = os.getenv("LEADERBOARD_BEST_SECONDS", "3603")
@@ -359,7 +360,11 @@ def main() -> None:
     os.makedirs(LOG_DIR, exist_ok=True)
 
     client = HarnessServiceClientSync(BITGN_URL)
-    print("Connecting to BitGN:", _retry(lambda: client.status(StatusRequest())).status)
+    print("Connecting to BitGN...", flush=True)
+    if os.getenv("SKIP_STATUS") == "1":
+        print("Status: skipped by SKIP_STATUS=1", flush=True)
+    else:
+        print("Status:", _retry(lambda: client.status(StatusRequest())).status, flush=True)
     bench = _retry(lambda: client.get_benchmark(GetBenchmarkRequest(benchmark_id=BENCH_ID)))
     print(
         f"{EvalPolicy.Name(bench.policy)} {bench.benchmark_id}: {len(bench.tasks)} tasks "
@@ -388,6 +393,8 @@ def main() -> None:
             api_key=BITGN_API_KEY,
         )
     )
+    print(f"RUN STARTED: run_id={run.run_id}", flush=True)
+    Path(LOG_DIR, "run_id.txt").write_text(run.run_id + "\n", encoding="utf-8")
 
     manager = mp.Manager()
     semaphores = {
@@ -428,12 +435,15 @@ def main() -> None:
                     flush=True,
                 )
     finally:
-        try:
-            submit_result = _retry(
-                lambda: client.submit_run(SubmitRunRequest(run_id=run.run_id, force=True))
-            )
-        except ConnectError as exc:
-            submit_error = f"submit_run: {exc.code} {exc.message}"
+        if NO_SUBMIT:
+            submit_error = "submit skipped by NO_SUBMIT=1"
+        else:
+            try:
+                submit_result = _retry(
+                    lambda: client.submit_run(SubmitRunRequest(run_id=run.run_id, force=True))
+                )
+            except ConnectError as exc:
+                submit_error = f"submit_run: {exc.code} {exc.message}"
     wall = time.time() - wall0
     if submit_result is not None:
         results = merge_submit_scores(results, submit_result, task_filter=set(task_filter))
@@ -510,13 +520,21 @@ def main() -> None:
     }
     print(format_gate_summary(report))
     should_submit, submit_reason = should_submit_leaderboard(report, task_filter)
-    if should_submit:
+    leaderboard_eligible = should_submit and submit_result is not None and not submit_error
+    if submit_error:
+        leaderboard_reason = f"blocked: run close failed ({submit_error})"
+        print(f"leaderboard gate: blocked ({leaderboard_reason}) run_id={run.run_id}")
+    elif leaderboard_eligible:
+        leaderboard_reason = submit_reason
         print(f"leaderboard gate: eligible after run close ({submit_reason}) run_id={run.run_id}")
     else:
+        leaderboard_reason = submit_reason
         print(f"leaderboard gate: rejected after run close ({submit_reason}) run_id={run.run_id}")
     report["leaderboard_submit"] = {
-        "eligible": should_submit,
-        "reason": submit_reason,
+        "eligible": leaderboard_eligible,
+        "diagnostic_eligible": should_submit,
+        "reason": leaderboard_reason,
+        "diagnostic_reason": submit_reason,
         "run_id": run.run_id,
         "submitted": submit_result is not None,
         "submit_error": submit_error,

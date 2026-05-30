@@ -28,11 +28,12 @@ BITGN_URL = (
     or "https://api.bitgn.com"
 )
 BITGN_API_KEY = os.getenv("BITGN_API_KEY") or ""
-BENCH_ID = os.getenv("BENCH_ID") or os.getenv("BENCHMARK_ID") or "bitgn/ecom1-dev"
+BENCH_ID = os.getenv("BENCH_ID") or os.getenv("BENCHMARK_ID") or "bitgn/ecom1-prod"
 # Neutral default. Override per context (provider routing lives in llm.py):
 #   tests      -> MODEL_ID=claude:opus            (Claude OAuth via claude CLI, no key)
 #   challenge  -> MODEL_ID=gemini/gemini-3.5-flash (fast) or gemini/gemini-3.5-pro
 MODEL_ID = os.getenv("MODEL_ID") or "gpt-5.5"
+NO_SUBMIT = os.getenv("NO_SUBMIT") == "1"
 
 CLI_RED = "\x1B[31m"
 CLI_GREEN = "\x1B[32m"
@@ -47,7 +48,11 @@ def main() -> None:
 
     try:
         client = HarnessServiceClientSync(BITGN_URL)
-        print("Connecting to BitGN", client.status(StatusRequest()))
+        print("Connecting to BitGN...", flush=True)
+        if os.getenv("SKIP_STATUS") == "1":
+            print("Status: skipped by SKIP_STATUS=1", flush=True)
+        else:
+            print("Status:", client.status(StatusRequest()), flush=True)
         res = client.get_benchmark(GetBenchmarkRequest(benchmark_id=BENCH_ID))
         print(
             f"{EvalPolicy.Name(res.policy)} benchmark: {res.benchmark_id} "
@@ -62,6 +67,7 @@ def main() -> None:
                 api_key=BITGN_API_KEY,
             )
         )
+        print(f"RUN STARTED: run_id={run.run_id}", flush=True)
 
         try:
             for trial_id in run.trial_ids:
@@ -91,7 +97,10 @@ def main() -> None:
                 else:
                     print(f"\n{CLI_BLUE}Score: not available{CLI_CLR}\n")
         finally:
-            submit_result = client.submit_run(SubmitRunRequest(run_id=run.run_id, force=True))
+            if NO_SUBMIT:
+                print("RUN CLOSE SKIPPED: NO_SUBMIT=1")
+            else:
+                submit_result = client.submit_run(SubmitRunRequest(run_id=run.run_id, force=True))
 
     except ConnectError as exc:
         print(f"{exc.code}: {exc.message}")

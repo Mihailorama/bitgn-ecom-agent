@@ -39,10 +39,11 @@ from harness_scoring import merge_submit_scores
 
 BITGN_URL = os.getenv("BITGN_HOST") or os.getenv("BENCHMARK_HOST") or "https://api.bitgn.com"
 BITGN_API_KEY = os.getenv("BITGN_API_KEY") or ""
-BENCH_ID = os.getenv("BENCH_ID") or os.getenv("BENCHMARK_ID") or "bitgn/ecom1-dev"
+BENCH_ID = os.getenv("BENCH_ID") or os.getenv("BENCHMARK_ID") or "bitgn/ecom1-prod"
 MODEL_ID = os.getenv("MODEL_ID") or "gpt-5.5"
 PARALLEL = int(os.getenv("PARALLEL", "6"))
 LOG_DIR = os.getenv("SWEEP_LOG_DIR", "/tmp/sweep_logs")
+NO_SUBMIT = os.getenv("NO_SUBMIT") == "1"
 MIN_ACCEPTED_POINTS = float(os.getenv("MIN_ACCEPTED_POINTS", os.getenv("MIN_ACCEPTED_SOLVED", "48.9905")))
 MIN_ACCEPTED_PCT = float(os.getenv("MIN_ACCEPTED_PCT", "97"))
 
@@ -117,7 +118,11 @@ def main() -> None:
     os.makedirs(LOG_DIR, exist_ok=True)
 
     client = HarnessServiceClientSync(BITGN_URL)
-    print("Connecting to BitGN:", _retry(lambda: client.status(StatusRequest())).status)
+    print("Connecting to BitGN...", flush=True)
+    if os.getenv("SKIP_STATUS") == "1":
+        print("Status: skipped by SKIP_STATUS=1", flush=True)
+    else:
+        print("Status:", _retry(lambda: client.status(StatusRequest())).status, flush=True)
     bench = _retry(lambda: client.get_benchmark(GetBenchmarkRequest(benchmark_id=BENCH_ID)))
     print(
         f"{EvalPolicy.Name(bench.policy)} {bench.benchmark_id}: {len(bench.tasks)} tasks "
@@ -131,6 +136,9 @@ def main() -> None:
             api_key=BITGN_API_KEY,
         )
     )
+    print(f"RUN STARTED: run_id={run.run_id}", flush=True)
+    with open(os.path.join(LOG_DIR, "run_id.txt"), "w", encoding="utf-8") as fh:
+        fh.write(run.run_id + "\n")
 
     results = []
     submit_result = None
@@ -150,12 +158,15 @@ def main() -> None:
                 tag = f"{score:.2f}" if isinstance(score, (int, float)) else (err or "n/a")
                 print(f"[done] {task_id}: {tag} ({secs:.0f}s)", flush=True)
     finally:
-        try:
-            submit_result = _retry(
-                lambda: client.submit_run(SubmitRunRequest(run_id=run.run_id, force=True))
-            )
-        except ConnectError as exc:
-            submit_error = f"submit_run: {exc.code} {exc.message}"
+        if NO_SUBMIT:
+            submit_error = "submit skipped by NO_SUBMIT=1"
+        else:
+            try:
+                submit_result = _retry(
+                    lambda: client.submit_run(SubmitRunRequest(run_id=run.run_id, force=True))
+                )
+            except ConnectError as exc:
+                submit_error = f"submit_run: {exc.code} {exc.message}"
     wall = time.time() - wall0
     if submit_result is not None:
         results = merge_submit_scores(results, submit_result, task_filter=set(task_filter))
@@ -163,6 +174,8 @@ def main() -> None:
     print("\n==== SUMMARY ====")
     if submit_error:
         print(f"RUN CLOSE ERROR: {submit_error}")
+    elif submit_result is not None:
+        print(f"RUN CLOSED: run_id={run.run_id}")
     scored, times = [], []
     for task_id, score, detail, err, secs in sorted(results):
         times.append(secs)

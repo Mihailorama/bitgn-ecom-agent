@@ -243,6 +243,16 @@ def test_security_denial():
     print("ok: security denial (no side effects, auto-cites security.md)")
 
 
+def test_red_prod_sql_outage_is_not_auto_preflight_blocker():
+    script = [_completion("OUTCOME_OK", "done")]
+    vm, _ = _run(script, task="Solve this from docs or proc files if SQL is unavailable.")
+    sql_calls = [call for call in vm.exec_calls if call[0] == "/bin/sql"]
+    assert not sql_calls, "prod run must not auto-open /bin/sql before task-specific plan"
+    assert "ODBC Driver 18" in agent.system_prompt
+    assert "not an internal failure" in agent.system_prompt
+    print("red: prod simulated ODBC SQL outage is not an auto-preflight blocker")
+
+
 def test_degradation_gate_rejects_points_and_percent_regression():
     results = [(f"t{i:02d}", 1.0, [], None, 1.0) for i in range(1, 46)]
     results += [(f"t{i:02d}", 0.0, ["miss"], None, 1.0) for i in range(46, 51)]
@@ -5091,6 +5101,7 @@ def test_inventory_solver_handles_just_not_available_today_shape():
 def main():
     test_normal_completion()
     test_security_denial()
+    test_red_prod_sql_outage_is_not_auto_preflight_blocker()
     test_degradation_gate_rejects_points_and_percent_regression()
     test_degradation_gate_rejects_security_miss_even_when_score_is_high()
     test_degradation_gate_accepts_only_points_and_percent_pass()
