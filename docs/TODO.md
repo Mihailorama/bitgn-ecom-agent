@@ -80,12 +80,14 @@ Actionable loose ends found during sessions. Newest first.
   - Also: raise `CLAUDE_CLI_TIMEOUT` to 300-360s for prod, and inspect the t007 transcript
     for a loop / oversized transcript driving the >240s step.
 
-- **[P2][format] Yes/no answers emitted as "FALSE(0)"/"TRUE(1)" instead of `<NO>`/`<YES>`.**
-  - **What:** prod t002, t003 (instruction literally "Yes/no question"), t006 answered
-    `FALSE(0)` / `TRUE(1)`. If the grader expects the `<YES>`/`<NO>` token these are
-    format-zero misses. Pending score confirmation from the batch eval.
-  - **Proposed fix:** extend `_required_format`/`_enforce_format_inplace` to coerce
-    yes/no-format tasks to `<YES>`/`<NO>` (take polarity from the model, never synthesize).
+- **[P2][format] DONE — Yes/no answers emitted as "FALSE(0)"/"TRUE(1)" instead of `<NO>`/`<YES>`.**
+  - **Fix landed:** `_normalize_boolean_verdict()` rewrites a leading `TRUE(1)`/`FALSE(0)`
+    literal to `<YES>`/`<NO>` (polarity from the model, trailing detail preserved), applied
+    universally in `_enforce_format_inplace`. `_required_format` yes/no detection broadened
+    to the "yes/no" / "yes or no" phrasing with a real `_coerce_yesno` (re-prompts when the
+    model stated no parseable verdict — never synthesizes polarity). Bare `TRUE`/`FALSE`
+    left untouched (could be a brand word). Live prod probe: t002/t003/t006 now submit
+    `<YES>`/`<NO>`. Unit + smoke green. Full-sweep validation still pending.
 
 - **[bug][windows] `claude_cli` backend dies on first LLM step: "The command line is too long."**
   - **What:** `MODEL_ID=claude:sonnet` / `claude:opus` (the OAuth-CLI regression canary)
