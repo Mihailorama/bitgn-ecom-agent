@@ -604,6 +604,13 @@ def test_codex_cli_config_args_uses_env_reasoning_and_verbosity():
     print("red: codex CLI config args use env reasoning and verbosity")
 
 
+def test_openai_api_requires_explicit_prefix_bare_gpt_defaults_to_codex_cli():
+    assert llm._provider("gpt-5.5") == "codex_cli"
+    assert llm._provider("openai/gpt-5.5") == "litellm"
+    assert llm._provider("codex:gpt-5.3-codex") == "codex_cli"
+    print("red: bare OpenAI model names default to CLI; openai/* uses API")
+
+
 def test_submit_batch_scores_override_unscored_end_trial_rows():
     submit_result = SimpleNamespace(
         score_available=True,
@@ -658,6 +665,56 @@ def test_retry_delay_uses_resource_exhausted_wait_seconds():
     other = SimpleNamespace(code="unavailable", message="transient")
     assert harness_retry.retry_delay_for_connect_error(other, 3.0) == 3.0
     print("ok: resource exhausted retry delay uses wait seconds")
+
+
+def test_score_feedback_parses_run_and_trial_details():
+    import score_feedback
+
+    run_html = """
+    <h1>bitgn/ecom1-prod · open · 100 trials</h1>
+    <span class="badge badge--success">evaluated</span>
+    <div class="meta__label">Run ID</div>
+    <div class="meta__value meta__value--mono"><span class="mono">run-test</span></div>
+    <div class="stat__label">Trials Done</div><div class="stat__value">2</div>
+    <div class="stat__label">Total Trial Time</div><div class="stat__value">32 min 29 sec</div>
+    <div class="stat__label">Score</div><div class="stat__value">0.62</div>
+    <table><tbody>
+    <tr>
+      <td><div><a href="https://api.bitgn.com/vm/vm-test-1">t001</a></div></td>
+      <td><div class="task-text" title="Need SKU.">Need SKU.</div></td>
+      <td class="table__cell--status"><span class="badge badge--success">done</span></td>
+      <td class="table__cell--numeric">33.6s</td>
+      <td class="table__cell--numeric">17</td>
+      <td class="table__cell--numeric">0.00</td>
+    </tr>
+    <tr>
+      <td><div><a href="https://api.bitgn.com/vm/vm-test-2">t002</a></div></td>
+      <td><div class="task-text" title="Known good.">Known good.</div></td>
+      <td class="table__cell--status"><span class="badge badge--success">done</span></td>
+      <td class="table__cell--numeric">1.0s</td>
+      <td class="table__cell--numeric">8</td>
+      <td class="table__cell--numeric">1.00</td>
+    </tr>
+    </tbody></table>
+    """
+    trial_html = """
+    <div class="log-entry"><span class="ansi-red">[ ERR  ]</span> AI agent score 0.00
+      <span class="ansi-muted">        </span> answer refs for family "/proc/catalog" mismatch:
+      missing [], extra [/proc/catalog/Aircraft/PT-CMP-AIR-CA240-24.json]</div>
+    """
+    parsed = score_feedback.parse_run_html(run_html, "https://eu.bitgn.com/runs/run-test")
+    assert parsed["run_id"] == "run-test"
+    assert parsed["state"] == "evaluated"
+    assert parsed["stats"]["score"] == "0.62"
+    assert len(parsed["trials"]) == 2
+    assert parsed["summary"]["perfect"] == 1
+    assert parsed["summary"]["zero"] == 1
+
+    detail = score_feedback.parse_trial_log_html(trial_html)
+    assert detail["score"] == 0.0
+    assert detail["detail"].startswith('answer refs for family "/proc/catalog" mismatch')
+    assert detail["classification"] == "ref_mismatch"
+    print("red: score feedback parses run rows and trial scorer details")
 
 
 def test_connect_error_recovery():
@@ -5114,9 +5171,11 @@ def main():
     test_mixed_runner_submits_only_accepted_full_sweeps()
     test_mixed_runner_submit_gate_uses_two_decimal_points()
     test_codex_cli_config_args_uses_env_reasoning_and_verbosity()
+    test_openai_api_requires_explicit_prefix_bare_gpt_defaults_to_codex_cli()
     test_submit_batch_scores_override_unscored_end_trial_rows()
     test_submit_batch_scores_keep_old_end_trial_scores_when_unavailable()
     test_retry_delay_uses_resource_exhausted_wait_seconds()
+    test_score_feedback_parses_run_and_trial_details()
     test_connect_error_recovery()
     test_sql_path_extraction()
     test_format_enforcement()

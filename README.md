@@ -64,19 +64,21 @@ every provider.
 | Context | `MODEL_ID` | Auth | Why |
 |---|---|---|---|
 | **Leaderboard attempts** | mixed `claude:opus` + `codex:gpt-5.3-codex-spark` | local Claude/Codex CLIs over OAuth | current best saved dev53 leaderboard profile |
+| Fast API sweeps | `openai/gpt-5.5` | `OPENAI_API_KEY` | fastest current diagnostic path; API use must be explicit |
 | Prod100 emergency profile | `codex:gpt-5.3-codex` / `codex:gpt-5.3-codex-spark` | local Codex CLI over ChatGPT OAuth | used during the 2026-05-30 prod contest; score pending, Spark quota-sensitive |
 | Codex-only baseline | `codex:gpt-5.3-codex` | local `codex` CLI over ChatGPT OAuth | previous strongest single-profile baseline |
 | Regression canary | `claude:sonnet` | local `claude` CLI over OAuth | cheaper validation, but lower current score |
 | Gemini CLI comparison | `agy` | local Antigravity CLI over Google AI Pro OAuth | available, but currently slower and less stable |
-| API fallback | `gpt-5.5` / `openai/...` | `OPENAI_API_KEY` | LiteLLM-backed OpenAI path |
+| API fallback | `openai/...` | `OPENAI_API_KEY` | LiteLLM-backed OpenAI path |
 | API fallback | `gemini/gemini-3.5-flash` / `pro` | `GEMINI_API_KEY` | LiteLLM-backed Gemini path |
 | API fallback | `anthropic/claude-...` | `ANTHROPIC_API_KEY` | Claude over the metered API |
 
 Bare Claude family names (`opus`, `sonnet`, `claude-opus-4-6`, `claude:opus`)
 route to the **OAuth CLI**; the `anthropic/` prefix routes to the metered API.
-`codex:*` routes to the local Codex CLI. `agy` routes to Antigravity CLI; any
-model suffix after `agy:` is informational because the CLI selects the Pro-tier
-Gemini model.
+Bare OpenAI-family names like `gpt-5.5`, plus `codex:*`, route to the local
+Codex CLI by default. Use `openai/<model>` only when you explicitly want the
+OpenAI API key path. `agy` routes to Antigravity CLI; any model suffix after
+`agy:` is informational because the CLI selects the Pro-tier Gemini model.
 
 ## Setup
 
@@ -107,6 +109,15 @@ The key ties a run to your account so its score shows on
 - Subset: `uv run python main.py t01 t04`
 - Via Make: `make run` / `make task TASKS="t01 t04"`
 - Parallel sweep: `PARALLEL=6 MODEL_ID=codex:gpt-5.3-codex uv run python run_parallel.py`
+- Fast OpenAI API diagnostic sweep:
+  `OPENAI_API_KEY=... MODEL_ID=openai/gpt-5.5 PARALLEL=20 uv run python run_parallel.py`
+  (use for speed, not as a codex-CLI-comparable baseline).
+- Codex CLI validation sweep:
+  `MODEL_ID=gpt-5.5 PARALLEL=6 uv run python run_parallel.py` or
+  `MODEL_ID=codex:gpt-5.3-codex PARALLEL=6 uv run python run_parallel.py`
+  (use for current baseline-comparable tests).
+- Public run scorer feedback:
+  `uv run python score_feedback.py https://eu.bitgn.com/runs/<run-id> --out-dir artifacts/sweeps/<run-label>/feedback`
 - Backend portfolio comparison:
   `uv run python portfolio_runner.py --out-dir artifacts/portfolio/<label>`
   runs codex, sonnet, and agy in parallel with isolated logs and disables
@@ -137,6 +148,8 @@ The key ties a run to your account so its score shows on
   for full sweeps unless `NO_RESULTS_APPEND=1`.
 - `portfolio_runner.py` - comparison orchestrator for codex / sonnet / agy with
   separate per-profile logs and JSON/Markdown summaries.
+- `score_feedback.py` - stdlib public-run scraper for evaluated/open BitGN run
+  pages and trial scorer details.
 - `smoke_test.py` - offline loop test (`make test`): stubs the SDK + the LLM so
   discovery, tool dispatch, error recovery, denial, and completion run without keys.
 - `BENCHMARK_NOTES.md` - the ECOM1 task taxonomy the system prompt is tuned against.

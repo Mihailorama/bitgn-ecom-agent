@@ -37,6 +37,20 @@ Run `run-22RyVn5o6qzPqjkHFDMmeC8C5`, `gpt-5.3-codex` API, PARALLEL=20, submitted
   (t006), and the t022-t029 / t061-t067 / t095-t100 bands (likely whole task families — fraud / logistics /
   new prod families). Classify by instruction+tools, write RED cases, fix task-local per BENCHMARK_NOTES.
 
+- **[NEXT] Use `score_feedback.py` for evaluated/open run feedback.** The public run page plus
+  trial logs expose scorer details after evaluation even when harness `score_detail` is empty.
+  Command:
+  `uv run python score_feedback.py https://eu.bitgn.com/runs/<run-id> --out-dir artifacts/sweeps/<run-label>/feedback`.
+  This should be wired into runner post-processing once a run leaves `pending_eval`.
+
+- **[model routing] Use OpenAI API for speed, Codex CLI for comparable validation.**
+  Fast diagnostic path:
+  `OPENAI_API_KEY=... MODEL_ID=openai/gpt-5.5 PARALLEL=20 uv run python run_parallel.py`.
+  Baseline-comparable path:
+  `MODEL_ID=gpt-5.5 PARALLEL=6 uv run python run_parallel.py` or
+  `MODEL_ID=codex:gpt-5.3-codex PARALLEL=6 uv run python run_parallel.py`.
+  API use must be explicit; default is CLI.
+
 ## Open
 
 - **[P0][security][prod] Checkout mutation runs BEFORE record-backed ownership verification (cross-customer leak).**

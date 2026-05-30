@@ -4,7 +4,8 @@ One entry point - `parse_step(model_id, messages, schema)` - returns a validated
 instance of the given Pydantic schema (the agent's `NextStep`). Provider is
 chosen from `model_id`:
 
-- `gpt-5.5`, `openai/...`            -> OpenAI (LiteLLM), structured outputs
+- `gpt-5.5`                          -> local `codex` CLI by default
+- `openai/...`                       -> OpenAI API (LiteLLM), structured outputs
 - `gemini/gemini-3.5-flash` | `pro`  -> Google Gemini (LiteLLM), fast - use in the challenge
 - `anthropic/claude-...`             -> Anthropic API (LiteLLM), needs ANTHROPIC_API_KEY
 - `claude:opus` | `opus` | `sonnet`  -> local `claude` CLI over OAuth (no API key) - use in tests
@@ -18,8 +19,8 @@ chosen from `model_id`:
                                          exposes Gemini 3.5 Flash on the AI Pro tier
                                          (model is auto-selected by tier, no --model flag)
 
-Tests default to Claude OAuth (no metered key); the challenge defaults to Gemini
-3.5 for speed. The neutral default model is `gpt-5.5`.
+Bare OpenAI-family model names default to the local Codex CLI. Use the explicit
+`openai/...` prefix only when you want the metered OpenAI API path.
 """
 
 import json
@@ -45,7 +46,13 @@ class LLMError(RuntimeError):
 
 def _provider(model_id: str) -> str:
     low = model_id.lower()
+    if low.startswith("openai/"):
+        return "litellm"
     if low.startswith(("codex:", "codex-cli:")):
+        return "codex_cli"
+    if low.startswith(("gpt-", "o1", "o3", "o4")):
+        # Bare OpenAI-family names are CLI by default. API use must be explicit
+        # via `openai/<model>` so benchmark baselines do not silently switch.
         return "codex_cli"
     if low.startswith(("gemini-cli:", "gemini_cli:")):
         return "gemini_cli"

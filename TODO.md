@@ -10,6 +10,9 @@
 - Add a scorer-detail scraper for public run pages and trial logs. It must
   persist per-task score, expected/got outcome, missing refs, extra refs, and
   amount mismatch text into a machine-readable report.
+- DONE in `score_feedback.py`: stdlib parser for public evaluated/open run
+  pages and non-perfect trial logs, with JSON/Markdown output. Next step is to
+  wire it into runner post-processing when a run becomes evaluated.
 - Fix category submission metadata before any future leaderboard attempt:
   persist intended category, model family, route manifest, and reject mismatches
   such as Codex/Spark submitted as Open Weights.
@@ -64,6 +67,11 @@
 
 ## P1 - Model Routing
 
+- Keep two explicit execution tracks:
+  `OPENAI_API_KEY=... MODEL_ID=openai/gpt-5.5` for fast API diagnostics, and
+  bare OpenAI-family names like `MODEL_ID=gpt-5.5` or explicit
+  `MODEL_ID=codex:gpt-5.3-codex` for current baseline-comparable Codex CLI
+  tests. API use must be explicit; default is CLI.
 - Keep Spark as a speed route only when quota is known available. Add a canary
   that stops Spark routing immediately after the first quota error.
 - Keep ordinary `codex:gpt-5.3-codex` as the safer fallback for post-quota full
