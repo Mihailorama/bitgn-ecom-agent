@@ -70,6 +70,10 @@
 - Tighten product/catalog/inventory/OCR grounding gates using scorer evidence:
   avoid extra family refs, cite every required SKU/product ref, and preserve
   exact `TRUE(1)`/`FALSE(0)` style answers when the task demands them.
+- DONE: yes/no formatting now defers to `/AGENTS.MD` tokens and the OCR receipt
+  price solver handles `within EUR N.NN` wording plus `1/0` workspaces; this
+  targets expected-answer failures like `t080` and reduces LLM `<YES>`/`TRUE(1)`
+  mismatch risk.
 
 ## P1 - Model Routing
 

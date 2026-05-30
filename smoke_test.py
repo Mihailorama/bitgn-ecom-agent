@@ -865,6 +865,12 @@ def test_format_enforcement():
     print("ok: format detection + safe coercion + conservative re-prompt")
 
 
+def test_red_system_prompt_defers_yesno_format_to_agents_md():
+    assert "For yes/no questions, follow `/AGENTS.MD`" in agent.system_prompt
+    assert "may be `<YES>/<NO>`, `TRUE(1)/FALSE(0)`, or `1/0`" in agent.system_prompt
+    print("red: system prompt defers yes/no format to AGENTS.MD")
+
+
 def test_red_t53_ocr_receipt_legacy_sku_matches_current_catalogue_price():
     vm = FakeVM()
     vm.list_outputs["/uploads"] = [
@@ -911,6 +917,40 @@ Total (exkl. MwSt)       EUR  2323,45
     assert "/uploads/receipt_ocr_NKErggUK.txt" in fn.grounding_refs
     assert "/proc/catalog/Sonax/AUT-3GTNEW7.json" in fn.grounding_refs
     print("red: t53 OCR receipt legacy SKU matches current catalogue price")
+
+
+def test_red_receipt_price_uses_workspace_yesno_format():
+    vm = FakeVM()
+    vm.read_outputs["/AGENTS.MD"] = (
+        "# ECOM1 Production Workspace\n"
+        "For yes/no answers, answer exactly `1` or `0`.\n"
+    )
+    vm.list_outputs["/uploads"] = [
+        SimpleNamespace(name="receipt_ocr_prod.txt", kind=_Enum.NODE_KIND_FILE),
+    ]
+    vm.read_outputs["/uploads/receipt_ocr_prod.txt"] = """
+ 1 Sonax Workshop Xtreme     90,50
+   Art.Nr. AUT-3GTNI5W7
+
+Total (exkl. MwSt)       EUR  90,50
+""".strip()
+    vm.sql_outputs["WHERE product_sku IN"] = (
+        "product_sku,record_path,product_name,price_cents,price_currency\n"
+        "AUT-3GTNI5W7,/proc/catalog/Sonax/AUT-3GTNI5W7.json,Sonax Workshop Xtreme Automotive Cleaner,9050,EUR\n"
+    )
+
+    fn = agent._try_deterministic_completion(
+        vm,
+        "Look at the old receipt in /uploads/receipt_ocr_prod.txt. "
+        "If I bought the exact same line items today from the same PowerTools branch, "
+        "would the current catalogue subtotal excluding VAT stay within EUR 3.00 "
+        "of the old receipt subtotal excluding VAT? Answer yes/no only.",
+    )
+
+    assert fn is not None
+    assert fn.outcome == "OUTCOME_OK"
+    assert fn.message == "1"
+    print("red: receipt price check uses workspace yes/no format")
 
 
 def test_red_t53_ocr_receipt_single_token_legacy_match_uses_exact_price():
@@ -5261,7 +5301,9 @@ def main():
     test_connect_error_recovery()
     test_sql_path_extraction()
     test_format_enforcement()
+    test_red_system_prompt_defers_yesno_format_to_agents_md()
     test_red_t53_ocr_receipt_legacy_sku_matches_current_catalogue_price()
+    test_red_receipt_price_uses_workspace_yesno_format()
     test_red_t53_ocr_receipt_single_token_legacy_match_uses_exact_price()
     test_red_t51_ocr_receipt_table_format_uses_subtotal_and_replacement_prices()
     test_red_t51_ocr_receipt_unique_price_fallback_handles_unreadable_description()

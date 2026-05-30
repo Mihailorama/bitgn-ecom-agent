@@ -270,7 +270,8 @@ OUTCOMES (pick the one that matches reality):
 ANSWERS:
 - `message` is graded against an expected answer. State the verified result
   directly and concisely. No restating the question, no hedging, no filler.
-- For yes/no questions, include the literal token `<YES>` or `<NO>`.
+- For yes/no questions, follow `/AGENTS.MD` exactly; the workspace token
+  may be `<YES>/<NO>`, `TRUE(1)/FALSE(0)`, or `1/0`.
 - If the task specifies an exact output format, `message` must contain EXACTLY
   that token. Examples: `<NO>`, `<COUNT:7>`, `[QTY:7]`, or a bare `7`. Match the
   requested delimiters and casing literally.
@@ -959,11 +960,11 @@ def _leading_yesno_polarity(message: str) -> "str | None":
     <YES>/<NO> plus the boolean literals weaker models emit (TRUE(1)/FALSE(0),
     bare TRUE/FALSE/YES/NO). Polarity comes from the model - never synthesized."""
     m = (message or "").lstrip()
-    mt = re.match(r"(<\s*YES\s*>|<\s*NO\s*>|TRUE\(1\)|FALSE\(0\)|TRUE|FALSE|YES|NO)\b", m, re.I)
+    mt = re.match(r"(<\s*YES\s*>|<\s*NO\s*>|TRUE\(1\)|FALSE\(0\)|TRUE|FALSE|YES|NO|1|0)\b", m, re.I)
     if not mt:
         return None
     head = mt.group(1).upper().replace(" ", "")
-    return "YES" if head in ("<YES>", "TRUE(1)", "TRUE", "YES") else "NO"
+    return "YES" if head in ("<YES>", "TRUE(1)", "TRUE", "YES", "1") else "NO"
 
 
 def _coerce_yesno(message: str) -> "str | None":
@@ -1044,7 +1045,7 @@ def _looks_receipt_price_yesno_task(instruction: str) -> bool:
     return (
         "old receipt" in low
         and "/uploads" in low
-        and re.search(r"within\s+\d+(?:\.\d+)?\s*eur", low) is not None
+        and re.search(r"within\s+(?:eur\s*)?\d+(?:\.\d+)?|\bwithin\s+\d+(?:\.\d+)?\s*eur", low) is not None
         and "excluding vat" in low
     )
 
@@ -1052,7 +1053,10 @@ def _looks_receipt_price_yesno_task(instruction: str) -> bool:
 def _single_yesno_token(message: str) -> "str | None":
     tokens = re.findall(r"<\s*(YES|NO)\s*>", message or "", re.I)
     if len(tokens) == 1:
-        return f"<{tokens[0].upper()}>"
+        return tokens[0].upper()
+    stripped = (message or "").strip()
+    if re.fullmatch(r"(TRUE\(1\)|FALSE\(0\)|TRUE|FALSE|YES|NO|1|0)", stripped, re.I):
+        return _leading_yesno_polarity(stripped)
     return None
 
 
@@ -1242,8 +1246,12 @@ WHERE product_sku IN ({",".join(_sql_quote(sku) for sku in skus)});
         today_total += int(item.get("qty") or 0) * price_cents
         if row.get("record_path"):
             refs.append(row["record_path"])
-    tolerance_m = re.search(r"within\s+(\d+(?:\.\d+)?)\s*eur", task_text or "", re.I)
-    tolerance = int(round(float(tolerance_m.group(1)) * 100)) if tolerance_m else 200
+    tolerance_m = re.search(
+        r"within\s+(?:EUR\s*)?(\d+(?:\.\d+)?)|within\s+(\d+(?:\.\d+)?)\s*EUR",
+        task_text or "",
+        re.I,
+    )
+    tolerance = int(round(float(tolerance_m.group(1) or tolerance_m.group(2)) * 100)) if tolerance_m else 200
     delta = abs(today_total - int(receipt_total))
     ok = not missing and delta <= tolerance
     print(
@@ -1267,14 +1275,26 @@ WHERE product_sku IN ({",".join(_sql_quote(sku) for sku in skus)});
             "deterministic OCR receipt item parse",
             "deterministic current catalogue price comparison",
         ],
-        message="<YES>" if ok else "<NO>",
+        message=_yes_no_token_for_workspace(vm, ok),
         grounding_refs=_normalize_refs(refs),
         outcome="OUTCOME_OK",
         verified=True,
     )
 
 
-def _enforce_format_inplace(instruction: str, fn: "ReportTaskCompletion") -> "str | None":
+def _looks_yesno_instruction(instruction: str) -> bool:
+    return re.search(
+        r"\b(yes/no|yes or no|does such product exist|do you have|can i buy|would .*\?)",
+        instruction or "",
+        re.I,
+    ) is not None
+
+
+def _enforce_format_inplace(
+    instruction: str,
+    fn: "ReportTaskCompletion",
+    vm: "EcomRuntimeClientSync | None" = None,
+) -> "str | None":
     # Coerce fn.message in place when a required format is unambiguous and the
     # value is recoverable; return a correction string to re-prompt once if not;
     # return None (and leave message, modulo strip) when no format is required or
@@ -1282,17 +1302,25 @@ def _enforce_format_inplace(instruction: str, fn: "ReportTaskCompletion") -> "st
     # Universal pre-pass: codex-family models answer yes/no questions with a
     # TRUE(1)/FALSE(0) literal, which is never a valid answer here. Rewrite that
     # leading verdict to <YES>/<NO> (polarity from the model), keeping any detail.
-    boolean_fix = _normalize_boolean_verdict(fn.message)
-    if boolean_fix is not None:
-        fn.message = boolean_fix
+    if vm is not None and _looks_yesno_instruction(instruction):
+        pol = _leading_yesno_polarity(fn.message)
+        if pol is not None:
+            fn.message = _yes_no_token_for_workspace(vm, pol == "YES")
+    else:
+        boolean_fix = _normalize_boolean_verdict(fn.message)
+        if boolean_fix is not None:
+            fn.message = boolean_fix
     if _looks_receipt_price_yesno_task(instruction):
         token = _single_yesno_token(fn.message)
         if token is not None:
-            fn.message = token
+            if vm is not None:
+                fn.message = _yes_no_token_for_workspace(vm, token == "YES")
+            else:
+                fn.message = f"<{token}>"
             return None
         return (
-            "FORMAT REQUIRED. The receipt price task is graded as a bare yes/no token; "
-            "re-issue report_completion with `message` set to exactly <YES> or <NO> "
+            "FORMAT REQUIRED. The receipt price task is graded as a bare workspace yes/no token; "
+            "re-issue report_completion with `message` set to exactly the token from /AGENTS.MD "
             "and nothing else - keep the same grounding_refs and outcome."
         )
     spec = _required_format(instruction)
@@ -1577,7 +1605,7 @@ def _completion_gate(
     # and only adds a note when the value is ambiguous. Combining both into a
     # single re-prompt lets one correction round fix both without burning budget.
     grounding = _grounding_correction(ledger, task_text, fn)
-    fmt = _enforce_format_inplace(task_text, fn)
+    fmt = _enforce_format_inplace(task_text, fn, vm)
     discount_denial = None if grounding else _discount_denial_correction(ledger, task_text, fn)
     claim = None if grounding or discount_denial else _claim_check_correction(vm, ledger, task_text, fn)
     sql_outage = None if grounding or discount_denial or claim else _sql_outage_internal_correction(ledger, fn)
@@ -1631,7 +1659,7 @@ def _submit_completion(
     # fallback paths the gate did not run, so apply a safe in-place format fix
     # here. Idempotent when the message already conforms.
     if task_text:
-        _enforce_format_inplace(task_text, fn)
+        _enforce_format_inplace(task_text, fn, vm)
     # Normalize refs FIRST (repair leading slashes, dedupe), THEN drop any the
     # runtime says do not exist, THEN ensure a security refusal cites the security
     # policy - so a model ref like "docs/security.md" is recognised after
