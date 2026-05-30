@@ -413,6 +413,13 @@ the task list grows to around 100 tasks. The objective is leaderboard points and
 percentage, not just perfect-task count. A `0.80` partial is worth keeping while
 a security miss is a hard reject.
 
+Production-contest memo update (2026-05-30): treat the live contest as a fresh
+distribution, even when task ids look familiar. The organizer signaled variable
+runtime worlds, changed docs, prompt injection on any task, batch-only scoring
+after run close, stricter rate limits, new OCR tasks, and a new logistics
+simulation family. The runbook below optimizes points per platform run and
+elapsed minute, not isolated pass counts.
+
 ### Gates
 
 1. Keep a saved accepted baseline: points, max points, percent, platform time,
@@ -427,6 +434,9 @@ a security miss is a hard reject.
    not a new baseline.
 4. If any task says `expected outcome OUTCOME_DENIED_SECURITY, got OUTCOME_OK`,
    reject the run immediately and fix security before scoring work.
+5. During the live contest, record `CodeResourceExhausted`, `Retry-After`,
+   sleep time, and total platform runs. Repeated rate-limit hits reduce the
+   isolated-sampling budget for the rest of the contest.
 
 ### After Every Full Sweep
 
@@ -435,15 +445,28 @@ The agent should triage without waiting for a manual prompt:
 1. Parse `sweep_report.json`, not just stdout. Sort non-perfect tasks by point
    loss: `1.00 - score`.
 2. Split tasks into `security miss`, `full miss`, `partial`, `infra/timeout`,
-   and `format/grounding` buckets.
-3. If there are up to 10 non-perfect tasks, start 10 isolated runs for each in
-   unique `SWEEP_LOG_DIR`s. If there are more, sample the largest point-loss
-   tasks first, but never postpone security.
-4. Classify each sampled failure as stable bug, flaky model behavior, changed
+   `format/grounding`, `new/changed condition`, and `simulation partial`
+   buckets.
+3. Classify all live task families first, including old-looking `t01..t53`
+   tasks and new tasks. New/simple tasks are not low priority; they can be the
+   fastest point gains.
+4. Use quota-aware isolated sampling. Outside the contest, use the normal 10x
+   isolated cycle. During the contest:
+   - 1-2 isolated runs for an obvious local bug;
+   - 3-5 isolated runs for variant or flaky classification;
+   - 10 isolated runs only for a high-value unclear miss when rate-limit budget
+     and remaining time justify it.
+5. If rate-limited, parse `Retry-After`, wait only when the expected point gain
+   is worth the contest time, and use the wait for local log analysis or RED-test
+   writing.
+6. Classify each sampled failure as stable bug, flaky model behavior, changed
    benchmark condition, missing ref, resolver overcount, false positive,
    amount/count mismatch, unsupported format, or infrastructure issue.
-5. Pick exactly one top-priority task family for a fix cycle. Full misses come
-   before partials unless a partial is the only thing blocking the percent gate.
+7. Pick exactly one top-priority task family for a fix cycle. Rank by expected
+   point gain per platform run and elapsed minute: security first, then cheap
+   full misses, new/simple family gaps, old-family regressions, expensive full
+   misses, high-value partials, and flaky old-looking tasks only if they block
+   acceptance.
 
 ### Fast Fix Cycle
 
@@ -460,7 +483,9 @@ For the selected task:
 5. Run:
    `rtk uv run python -m py_compile agent.py llm.py smoke_test.py` and
    `rtk uv run python smoke_test.py`.
-6. Run at least 10 fresh isolated samples for the task with unique log dirs.
+6. Run quota-aware isolated samples for the task with unique log dirs. Use 10
+   only when the live contest budget supports it; otherwise prefer 1-5 plus a
+   quick full-sweep confirmation.
 7. Run a related-family subset. Examples: inventory `t13 t14 t15 t16 t45`;
    fraud/archive `t38 t39 t40 t48`; catalogue/reporting `t12 t49`.
 8. Run one full guarded sweep. Accept only through the gates above.
@@ -474,11 +499,14 @@ accepted baseline.
 
 Use the first full sweep as the source of truth, then compress everything else:
 
-1. First 0-20 minutes: full guarded sweep, parse report, security grep.
-2. Next 20-50 minutes: automatic isolated sampling for non-perfect tasks.
-3. Next 50-100 minutes: one RED test and one task-local fix.
-4. Next 100-130 minutes: local gates, 10 isolated samples, related subset.
-5. Final 130-180 minutes: full guarded sweep and submit only through the
+1. First 0-25 minutes: full guarded sweep, close the run, parse batch report,
+   security grep, and rate-limit summary.
+2. Next 25-45 minutes: classify live families and run quota-aware isolated
+   samples only for the highest-ROI misses.
+3. Next 45-100 minutes: one RED test and one task-local fix.
+4. Next 100-135 minutes: local gates, minimal isolated confirmation, related
+   subset only if it is cheap.
+5. Final 135-180 minutes: full guarded sweep and submit only through the
    leaderboard guard.
 
 Do not spend tournament time polishing abstractions, cleaning historical logs,

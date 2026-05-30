@@ -797,6 +797,28 @@ the current accepted dev53 leaderboard profile. Keep `codex:gpt-5.5` as the
 previous v50 strong profile, `codex:gpt-5.3-codex` as the historical codex-only
 baseline, and `claude:sonnet` as the cheap regression canary.
 
+**2026-05-30 production-contest memo.**
+- Organizer memo before the live contest changes the tournament operating
+  assumptions, not the accepted dev53 baseline.
+- The live contour is expected to be materially different from dev53: around
+  `100` tasks, changed wording in old-looking tasks, runtime world variations,
+  and new OCR/logistics/simulation families.
+- Scores are issued as a batch only after the run is closed. Full sweeps must
+  reach `SubmitRun`; an unclosed run is not useful evidence.
+- Rate limits are now a first-class constraint. Treat the public guidance
+  (`~15` normal LLM-agent runs per 30 minutes, plus explicit
+  `CodeResourceExhausted` / `Retry-After` responses) as a budget signal. During
+  the contest, do not run automatic 10x isolated samples for every miss.
+- Prompt injection is no longer isolated to security tasks. Any task can carry
+  an irrelevant injection suffix; security triage must run across every task
+  family.
+- Production docs are variable by world. Do not rely on dev constants for
+  discounts, trivia, docs filenames, or policy values. Re-read `/AGENTS.md`,
+  `/docs`, `/proc` JSON, and relevant `/bin` tools in each live trial as needed.
+- A new supply-chain/logistics family may be simulation-scored and may not have
+  a perfect deterministic target. Treat stable partials there as optimization
+  evidence, not automatically as resolver bugs.
+
 **Parallel envelope (2026-05-25).**
 - `PARALLEL=6`: best quality envelope; observed `100.0% (44/44)` at `202s` wall.
 - `PARALLEL=8`: faster, but quality dipped (`93.2%`, `41/44`, `200s` wall).
@@ -808,12 +830,15 @@ baseline, and `claude:sonnet` as the cheap regression canary.
 **TODO (in priority order):**
 0. Hard SDLC rule for every new scoring fix: isolate by task before touching
    behavior. If a task scores below `1.00`, run that task alone enough times
-   (normally 10 serial seeds) to classify stable vs variant failure patterns,
-   save the logs, and write RED tests from those logs. The first production
-   change must be task-local; broad resolver/prompt changes are not allowed
-   unless promoted by evidence from multiple tasks and accepted as a separate
-   architecture cycle. A targeted/subset pass is only diagnostic; acceptance
-   still requires the full sweep not to reduce leaderboard points.
+   to classify stable vs variant failure patterns, save the logs, and write RED
+   tests from those logs. Outside the live contest this normally means 10 serial
+   seeds; during the live contest use quota-aware sampling: 1-2 isolated runs
+   for an obvious local bug, 3-5 for variant/flaky classification, and 10 only
+   for a high-value unclear miss when rate-limit budget justifies it. The first
+   production change must be task-local; broad resolver/prompt changes are not
+   allowed unless promoted by evidence from multiple tasks and accepted as a
+   separate architecture cycle. A targeted/subset pass is only diagnostic;
+   acceptance still requires the full sweep not to reduce leaderboard points.
 1. Preserve the accepted leaderboard baseline: `53.00/53` points from
    `artifacts/sweeps/2026-05-29-dev53-mixed-opus-spark-r9-t08-postfix11/`. The
    previous `50.00/50` milestone at
@@ -883,6 +908,13 @@ baseline, and `claude:sonnet` as the cheap regression canary.
 17. Runtime reliability note: this host intermittently hits `OSError(23, Too many open files in system)`
    during aggressive parallel probes (`PARALLEL>=7`, and occasionally startup bursts).
    Treat `PARALLEL=6` as the practical stability cap for leaderboard attempts.
+18. Contest-start runbook: first live full sweep is for classification as well
+   as scoring. Do not assume `t01..t53` retain dev semantics, and do not put
+   new tasks after old regressions by default. Rank all live misses by expected
+   point gain per platform run and elapsed minute: security first, then cheap
+   full misses, new/simple family gaps, old-family regressions, expensive full
+   misses, high-value partials, and flaky old-looking tasks only if they block
+   an accepted score.
 
 **Validate every change** with >=2 sonnet sweeps (or a >=5pp move); watch category
 pass-rates, not just the headline; grep summaries for `expected outcome
