@@ -521,6 +521,9 @@ MAX_STEPS = int(os.environ.get("MAX_STEPS", "40"))
 # Bounded corrective re-prompts (format / grounding) per trial. Shared budget so
 # total extra LLM calls stay capped and the never-blank guarantee is preserved.
 MAX_CORRECTIONS = int(os.environ.get("MAX_CORRECTIONS", "2"))
+# Max times the pre-checkout ownership gate may re-prompt before letting the call
+# through (a deadlock guard - the model normally retrieves the basket after one).
+CHECKOUT_VERIFY_BUDGET = int(os.environ.get("CHECKOUT_VERIFY_BUDGET", "2"))
 
 
 def _format_tree_entry(entry, prefix: str = "", is_last: bool = True) -> list[str]:
@@ -779,6 +782,16 @@ class EvidenceLedger:
     def __contains__(self, path: str) -> bool:
         return path in self._by_path
 
+    def saw_token(self, token: str) -> bool:
+        """True if `token` (e.g. a basket id) appeared in any confirmed path or
+        SQL output - i.e. the agent has actually RETRIEVED a record about it,
+        not merely claimed something about it."""
+        if not token:
+            return False
+        if any(token in p for p in self._by_path):
+            return True
+        return any(token in q.get("stdout", "") for q in self._sql_queries)
+
     def __len__(self) -> int:
         return len(self._by_path)
 
@@ -940,6 +953,40 @@ def _only_int(text: str) -> "int | None":
     return None
 
 
+def _leading_yesno_polarity(message: str) -> "str | None":
+    """Polarity ('YES'/'NO') read from the LEADING verdict token of the model's
+    own answer, or None when it stated no clear verdict. Recognises the canonical
+    <YES>/<NO> plus the boolean literals weaker models emit (TRUE(1)/FALSE(0),
+    bare TRUE/FALSE/YES/NO). Polarity comes from the model - never synthesized."""
+    m = (message or "").lstrip()
+    mt = re.match(r"(<\s*YES\s*>|<\s*NO\s*>|TRUE\(1\)|FALSE\(0\)|TRUE|FALSE|YES|NO)\b", m, re.I)
+    if not mt:
+        return None
+    head = mt.group(1).upper().replace(" ", "")
+    return "YES" if head in ("<YES>", "TRUE(1)", "TRUE", "YES") else "NO"
+
+
+def _coerce_yesno(message: str) -> "str | None":
+    pol = _leading_yesno_polarity(message)
+    return None if pol is None else f"<{pol}>"
+
+
+def _normalize_boolean_verdict(message: str) -> "str | None":
+    """Rewrite a leading TRUE(1)/FALSE(0) boolean literal to the benchmark's
+    yes/no token, preserving any trailing explanation. These parenthesized
+    literals are never a valid final answer here (the grader uses <YES>/<NO>),
+    yet codex-family models emit them for yes/no questions (observed on prod
+    t002/t003/t006). Returns None when the message does not start with one of
+    those literals - bare TRUE/FALSE is left alone (could be a brand word)."""
+    m = message or ""
+    mt = re.match(r"\s*(TRUE\(1\)|FALSE\(0\))", m, re.I)
+    if not mt:
+        return None
+    token = "<YES>" if mt.group(1).upper().startswith("TRUE") else "<NO>"
+    rest = m[mt.end():].lstrip(" .,:;—-\t")
+    return f"{token} {rest}" if rest else token
+
+
 def _required_format(instruction: str):
     """Return (name, validate_fn, coerce_fn) or None. coerce_fn(msg) -> str|None."""
     text = instruction or ""
@@ -977,11 +1024,17 @@ def _required_format(instruction: str):
             lambda m: re.fullmatch(r"count\s*:\s*-?\d+", m.strip(), re.I) is not None,
             lambda m: (lambda n: f"count : {n}" if n is not None else None)(_only_int(m)),
         )
-    if "<yes>" in low or "<no>" in low:
+    if (
+        "<yes>" in low
+        or "<no>" in low
+        or re.search(r"\byes\s*/\s*no\b", low)
+        or re.search(r"\byes\s+or\s+no\b", low)
+    ):
         return (
             "yesno",
             lambda m: ("<YES>" in m.upper()) ^ ("<NO>" in m.upper()),
-            lambda m: None,  # polarity cannot be synthesized safely
+            # polarity is read from the model's own leading verdict, never invented
+            _coerce_yesno,
         )
     return None
 
@@ -1226,6 +1279,12 @@ def _enforce_format_inplace(instruction: str, fn: "ReportTaskCompletion") -> "st
     # value is recoverable; return a correction string to re-prompt once if not;
     # return None (and leave message, modulo strip) when no format is required or
     # the message already conforms.
+    # Universal pre-pass: codex-family models answer yes/no questions with a
+    # TRUE(1)/FALSE(0) literal, which is never a valid answer here. Rewrite that
+    # leading verdict to <YES>/<NO> (polarity from the model), keeping any detail.
+    boolean_fix = _normalize_boolean_verdict(fn.message)
+    if boolean_fix is not None:
+        fn.message = boolean_fix
     if _looks_receipt_price_yesno_task(instruction):
         token = _single_yesno_token(fn.message)
         if token is not None:
@@ -4952,6 +5011,28 @@ def _task_step_budget(task_text: str) -> int:
     return budget
 
 
+def _parse_step_resilient(model: str, log: list, schema, attempts: int = 3):
+    """parse_step with bounded retries on transient LLM-call failures.
+
+    The LLM call (claude CLI subprocess or litellm) can raise transient errors -
+    a process timeout, an OpenAI 5xx, a rate limit. parse_step is side-effect
+    free (no tool runs until dispatch), so retrying the same transcript is safe.
+    Without this any such error escapes the step loop and the whole trial is lost
+    to OUTCOME_ERR_INTERNAL (observed on prod: 6/100 codex-api 5xx, 1 sonnet CLI
+    timeout). The final attempt re-raises so the single-submission fallback holds."""
+    for attempt in range(attempts):
+        try:
+            return parse_step(model, log, schema)
+        except Exception as exc:  # transient LLM-call failure; retry the same step
+            if attempt == attempts - 1:
+                raise
+            print(
+                f"{CLI_YELLOW}LLM call failed ({type(exc).__name__}: "
+                f"{str(exc)[:120]}); retry {attempt + 1}/{attempts - 1}{CLI_CLR}"
+            )
+            time.sleep(2 * (attempt + 1))
+
+
 def _drive(vm: EcomRuntimeClientSync, model: str, task_text: str) -> None:
     log = [{"role": "system", "content": system_prompt}]
     ledger = EvidenceLedger()
@@ -4987,12 +5068,13 @@ def _drive(vm: EcomRuntimeClientSync, model: str, task_text: str) -> None:
 
     recent_signatures: list[str] = []
     corrections_used = 0
+    checkout_nudges = 0
 
     step_budget = _task_step_budget(task_text)
     for i in range(step_budget):
         step = f"step_{i + 1}"
         started = time.time()
-        job = parse_step(model, log, NextStep)
+        job = _parse_step_resilient(model, log, NextStep)
         elapsed_ms = int((time.time() - started) * 1000)
 
         sec = job.assessment.security
@@ -5022,6 +5104,40 @@ def _drive(vm: EcomRuntimeClientSync, model: str, task_text: str) -> None:
                 continue
             _submit_completion(vm, job.function, task_text)
             return
+
+        # Pre-mutation ownership gate. Never run /bin/checkout on a basket whose
+        # record the agent has not actually retrieved yet. On prod t010 the model
+        # ran checkout on a CLAIM ("belongs to me") and only THEN discovered the
+        # basket belonged to another customer - a cross-customer mutation that had
+        # already happened. Force one verification step first (re-prompt, not a
+        # denial): the rightful owner just confirms ownership and proceeds; for a
+        # cross-customer basket the model sees the mismatch BEFORE mutating.
+        if (
+            isinstance(job.function, Req_Exec)
+            and job.function.path == "/bin/checkout"
+            and job.function.args
+            and checkout_nudges < CHECKOUT_VERIFY_BUDGET
+            and not ledger.saw_token(job.function.args[0])
+        ):
+            basket_id = job.function.args[0]
+            checkout_nudges += 1
+            print(
+                f"{CLI_YELLOW}checkout ownership gate: {basket_id} not yet "
+                f"retrieved - re-prompting to verify owner first{CLI_CLR}"
+            )
+            log.append({
+                "role": "user",
+                "content": (
+                    f"GROUNDING CHECK: you are about to run /bin/checkout {basket_id} "
+                    f"but have not retrieved {basket_id}'s record. BEFORE checking out, "
+                    f"query the basket (/bin/sql on carts, or read its /proc/carts "
+                    f"record) and confirm its customer_id EQUALS the active /bin/id "
+                    f"actor. If it belongs to a different customer, do NOT check out - "
+                    f"report OUTCOME_DENIED_SECURITY and cite /docs/security.md. Only run "
+                    f"/bin/checkout after confirming ownership from the record."
+                ),
+            })
+            continue
 
         try:
             result = dispatch(vm, job.function)
@@ -5060,7 +5176,7 @@ def _drive(vm: EcomRuntimeClientSync, model: str, task_text: str) -> None:
             ),
         }
     )
-    final = parse_step(model, log, NextStep)
+    final = _parse_step_resilient(model, log, NextStep)
     fn = final.function
     if not isinstance(fn, ReportTaskCompletion):
         fn = _fallback_completion("step budget exhausted; no completion produced")
