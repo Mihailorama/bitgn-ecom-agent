@@ -1040,6 +1040,27 @@ def test_red_prod_catalogue_price_count_ignores_unspecified_property_clause():
     print("red: prod catalogue price count ignores unspecified property clause")
 
 
+def test_red_prod_company_lore_legal_trading_date_from_docs_search():
+    vm = FakeVM()
+    vm.search_outputs["legal trading start date"] = [
+        (
+            "/docs/company-lore.md",
+            "PowerTools legal trading start date: 2002-04-03",
+        )
+    ]
+
+    fn = agent._try_deterministic_completion(
+        vm,
+        "Find this company lore fact for PowerTools: What was PowerTools' "
+        "legal trading start date? YYYY-MM-DD Answer only with the detail.",
+    )
+
+    assert fn is not None, "company lore date lookups should use docs search before LLM"
+    assert fn.message == "2002-04-03"
+    assert fn.grounding_refs == ["/docs/company-lore.md"]
+    print("red: prod company lore legal trading date comes from docs search")
+
+
 def test_red_t53_ocr_receipt_single_token_legacy_match_uses_exact_price():
     vm = FakeVM()
     vm.list_outputs["/uploads"] = [
@@ -5467,6 +5488,7 @@ def main():
     test_red_prod_sku_lookup_excludes_named_plain_variant_from_ambiguity_refs()
     test_red_prod_catalogue_price_count_returns_number_without_catalog_refs()
     test_red_prod_catalogue_price_count_ignores_unspecified_property_clause()
+    test_red_prod_company_lore_legal_trading_date_from_docs_search()
     test_red_t53_ocr_receipt_single_token_legacy_match_uses_exact_price()
     test_red_t51_ocr_receipt_table_format_uses_subtotal_and_replacement_prices()
     test_red_t51_ocr_receipt_unique_price_fallback_handles_unreadable_description()

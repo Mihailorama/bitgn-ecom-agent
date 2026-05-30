@@ -3165,6 +3165,63 @@ def _try_catalogue_price_count(vm: EcomRuntimeClientSync, task_text: str) -> "Re
     )
 
 
+def _company_lore_date_topic(task_text: str) -> str:
+    low = (task_text or "").lower()
+    if "powertools" not in low or "yyyy-mm-dd" not in low:
+        return ""
+    if "legal trading start date" in low:
+        return "legal trading start date"
+    if "first public opening date" in low:
+        return "first public opening date"
+    if "choose the company name" in low or "company name" in low:
+        return "company name"
+    return ""
+
+
+def _try_company_lore_date(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    topic = _company_lore_date_topic(task_text)
+    if not topic:
+        return None
+    patterns = [topic]
+    if topic.endswith(" date"):
+        patterns.append(topic[:-5])
+    seen = set()
+    for pattern in patterns:
+        try:
+            result = dispatch(vm, Req_Search(tool="search", root="/docs", pattern=pattern, limit=20))
+        except Exception:
+            continue
+        for match in getattr(result, "matches", []) or []:
+            path = str(getattr(match, "path", "") or "")
+            if not path.startswith("/docs/") or path in seen:
+                continue
+            seen.add(path)
+            line = str(getattr(match, "line_text", "") or "")
+            date = re.search(r"\b\d{4}-\d{2}-\d{2}\b", line)
+            if date is None:
+                try:
+                    body = getattr(dispatch(vm, Req_Read(tool="read", path=path)), "content", "")
+                except Exception:
+                    body = ""
+                topic_tokens = [t for t in _norm_word(topic).split() if len(t) > 2]
+                for candidate in str(body).splitlines():
+                    hay = _norm_word(candidate)
+                    if all(t in hay for t in topic_tokens):
+                        date = re.search(r"\b\d{4}-\d{2}-\d{2}\b", candidate)
+                        if date is not None:
+                            break
+            if date is not None:
+                return ReportTaskCompletion(
+                    tool="report_completion",
+                    completed_steps_laconic=["deterministic company lore docs search"],
+                    message=date.group(0),
+                    grounding_refs=[path],
+                    outcome="OUTCOME_OK",
+                    verified=True,
+                )
+    return None
+
+
 def _try_simple_catalogue_lookup(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
     text = task_text or ""
     low = text.lower()
@@ -5486,6 +5543,7 @@ def _try_deterministic_completion(vm: EcomRuntimeClientSync, task_text: str) -> 
         _try_latest_basket_add,
         _try_sku_lookup_exclusion,
         _try_catalogue_price_count,
+        _try_company_lore_date,
         _try_simple_catalogue_lookup,
         _try_product_check,
         _try_catalogue_freeform_check,
