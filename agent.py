@@ -3335,6 +3335,202 @@ WHERE store_id={_sql_quote(store_id)}
     return {}
 
 
+def _parse_stock_yesno_request(task_text: str) -> "tuple[int, str, str, str] | None":
+    m = re.search(
+        r"\bDo you have\s+(\d+)\s+of\s+['\"](.+?)['\"]\s*"
+        r"(?:\(\s*but\s+not\s+([A-Z0-9-]+)\s*\)\s*)?"
+        r"in stock in\s+(.+?)\?",
+        task_text or "",
+        re.I | re.S,
+    )
+    if not m:
+        return None
+    return int(m.group(1)), re.sub(r"\s+", " ", m.group(2)).strip(), (m.group(3) or "").strip(), m.group(4).strip()
+
+
+def _stock_desc_query_tokens(desc: str) -> "list[str]":
+    cleaned = re.sub(
+        r"\b(?:accessory bundle inclusion|case inclusion|ak battery level|battery level)\s+"
+        r"(?:was\s+)?(?:not\s+)?(?:specified|provided)\b",
+        " ",
+        desc or "",
+        flags=re.I,
+    )
+    cleaned = re.sub(r"\bnot\s+(?:the\s+)?(?!provided\b|specified\b).+?(?=$|[.;,])", " ", cleaned, flags=re.I)
+    stop = {
+        "a", "an", "and", "at", "battery", "but", "do", "does", "for", "has",
+        "have", "in", "inclusion", "is", "it", "level", "not", "of", "provided",
+        "specified", "the", "was", "were", "with",
+    }
+    out = []
+    for token in _norm_word(cleaned).split():
+        if len(token) <= 1 or token in stop:
+            continue
+        out.append(token)
+        unit = re.match(r"^(\d+)(?:l|litre|liter|mm|cm|ah|v|w)$", token)
+        if unit:
+            out.append(unit.group(1))
+    return list(dict.fromkeys(out))
+
+
+def _stock_negative_token_groups(desc: str) -> "list[list[str]]":
+    groups: "list[list[str]]" = []
+    for m in re.finditer(r"\bnot\s+(?:the\s+)?(.+?)(?=$|[.;,])", desc or "", re.I):
+        phrase = m.group(1).strip()
+        if re.search(r"\b(provided|specified)\b", phrase, re.I):
+            continue
+        tokens = [
+            t for t in _norm_word(phrase).split()
+            if t not in {"a", "an", "and", "the"}
+        ]
+        if tokens:
+            groups.append(tokens)
+    return groups
+
+
+def _stock_product_rows(vm: EcomRuntimeClientSync, desc: str) -> "list[dict]":
+    tokens = _stock_desc_query_tokens(desc)
+    if not tokens:
+        return []
+    like_terms = []
+    for token in tokens[:8]:
+        q = _sql_quote(token)
+        like_terms.append(
+            "("
+            f"lower(product_sku) LIKE '%' || lower({q}) || '%' "
+            f"OR lower(brand) LIKE '%' || lower({q}) || '%' "
+            f"OR lower(series) LIKE '%' || lower({q}) || '%' "
+            f"OR lower(model) LIKE '%' || lower({q}) || '%' "
+            f"OR lower(product_name) LIKE '%' || lower({q}) || '%' "
+            f"OR lower(properties) LIKE '%' || lower({q}) || '%'"
+            ")"
+        )
+    current_where = " OR ".join(like_terms)
+    legacy_where = current_where.replace("product_sku", "sku").replace("product_name", "name")
+    queries = [
+        f"""
+SELECT product_sku AS sku, record_path AS path, brand, series, model, product_name AS name, properties
+FROM product_variants
+WHERE {current_where}
+ORDER BY product_sku;
+""",
+        f"""
+SELECT sku, path, brand, series, model, name, properties
+FROM products
+WHERE {legacy_where}
+ORDER BY sku;
+""",
+    ]
+    for q in queries:
+        rows = _csv_dicts(_exec_sql_stdout(vm, q))
+        if rows:
+            return rows
+    return []
+
+
+def _stock_product_hay(row: dict) -> str:
+    return " ".join(str(row.get(k, "")) for k in ("sku", "brand", "series", "model", "name", "properties"))
+
+
+def _stock_product_score(row: dict, tokens: "list[str]") -> int:
+    hay = _stock_product_hay(row)
+    words = set(_norm_word(hay).split())
+    compact = _norm_compact(hay)
+    score = 0
+    for token in tokens:
+        token_compact = _norm_compact(token)
+        if token in words or (token_compact and token_compact in compact):
+            score += 1
+    return score
+
+
+def _stock_product_is_excluded(row: dict, excluded_sku: str, negative_groups: "list[list[str]]") -> bool:
+    sku = str(row.get("sku", "")).upper()
+    if excluded_sku and sku == excluded_sku.upper():
+        return True
+    compact = _norm_compact(_stock_product_hay(row))
+    for group in negative_groups:
+        if group and all(_norm_compact(token) in compact for token in group):
+            return True
+    return False
+
+
+def _try_stock_yesno(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    parsed = _parse_stock_yesno_request(task_text)
+    if not parsed:
+        return None
+    qty, desc, excluded_sku, store_phrase = parsed
+    store = _find_store(vm, store_phrase)
+    if not store:
+        return None
+    if not _store_is_open(store):
+        return ReportTaskCompletion(
+            tool="report_completion",
+            completed_steps_laconic=["deterministic stock yes/no skipped closed store"],
+            message=_yes_no_token_for_workspace(vm, False),
+            grounding_refs=[store["path"]],
+            outcome="OUTCOME_OK",
+            verified=True,
+        )
+    tokens = _stock_desc_query_tokens(desc)
+    rows = _stock_product_rows(vm, desc)
+    scored = [
+        (_stock_product_score(row, tokens), row)
+        for row in rows
+    ]
+    scored = [(score, row) for score, row in scored if score >= 2]
+    if not scored:
+        return None
+    scored.sort(key=lambda item: (-item[0], str(item[1].get("sku", ""))))
+    best_score = scored[0][0]
+    pool = [row for score, row in scored if score >= max(2, best_score - 1)]
+    negative_groups = _stock_negative_token_groups(desc)
+    candidates = [
+        row for row in pool
+        if not _stock_product_is_excluded(row, excluded_sku, negative_groups)
+    ]
+    if not candidates:
+        return ReportTaskCompletion(
+            tool="report_completion",
+            completed_steps_laconic=["deterministic stock yes/no found only excluded variants"],
+            message=_yes_no_token_for_workspace(vm, False),
+            grounding_refs=[store["path"]],
+            outcome="OUTCOME_OK",
+            verified=True,
+        )
+    skus = [row.get("sku", "") for row in candidates if row.get("sku")]
+    avail_by_sku = _inventory_availability_by_sku(vm, store["id"], skus)
+    available = [
+        row for row in candidates
+        if row.get("sku") and avail_by_sku.get(row["sku"], 0) >= qty
+    ]
+    if not available:
+        return ReportTaskCompletion(
+            tool="report_completion",
+            completed_steps_laconic=["deterministic stock yes/no checked selected variants"],
+            message=_yes_no_token_for_workspace(vm, False),
+            grounding_refs=[store["path"]],
+            outcome="OUTCOME_OK",
+            verified=True,
+        )
+    chosen = sorted(
+        available,
+        key=lambda row: (
+            -_stock_product_score(row, tokens),
+            -avail_by_sku.get(row.get("sku", ""), 0),
+            row.get("sku", ""),
+        ),
+    )[0]
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["deterministic stock yes/no via catalogue and store inventory"],
+        message=_yes_no_token_for_workspace(vm, True),
+        grounding_refs=_normalize_refs([store["path"], chosen.get("path", "")]),
+        outcome="OUTCOME_OK",
+        verified=True,
+    )
+
+
 def _city_availability_by_sku(vm: EcomRuntimeClientSync, city: str, skus: "list[str]") -> "dict[str, int]":
     if not skus:
         return {}
@@ -5177,6 +5373,7 @@ def _try_deterministic_completion(vm: EcomRuntimeClientSync, task_text: str) -> 
         _try_product_check,
         _try_catalogue_freeform_check,
         _try_quote_table,
+        _try_stock_yesno,
         _try_inventory_count,
         _try_city_inventory,
         _try_checkout_explicit_exception_guard,

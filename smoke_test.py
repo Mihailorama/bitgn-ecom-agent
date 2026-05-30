@@ -3041,6 +3041,79 @@ def test_inventory_solver_handles_have_n_or_more_ready_shape():
     print("ok: inventory solver handles have-N-or-more-ready prompts")
 
 
+def test_red_prod_stock_yesno_uses_non_excluded_available_sibling():
+    vm = FakeVM()
+    vm.read_outputs["/AGENTS.MD"] = "For yes/no answers, answer exactly TRUE(1) or FALSE(0)."
+    vm.sql_outputs[
+        "SELECT store_id AS id, record_path AS path, store_name AS name, city, is_open FROM stores ORDER BY store_id;"
+    ] = (
+        "id,path,name,city,is_open\n"
+        "store_linz_hafen,/proc/stores/store_linz_hafen.json,PowerTools Linz Hafen,Linz,1\n"
+    )
+    vm.sql_outputs["FROM product_variants"] = (
+        "sku,path,brand,series,model,name,properties\n"
+        "PT-CMP-AIR-CA240-24,/proc/catalog/Aircraft/PT-CMP-AIR-CA240-24.json,Aircraft,Compact-Air,CA240,"
+        "Aircraft Compact-Air 240/24 Compressor 24 liter tank,{\"tank_volume_l\":24}\n"
+        "PT-CMP-AIR-CA240-SET,/proc/catalog/Aircraft/PT-CMP-AIR-CA240-SET.json,Aircraft,Compact-Air,CA240,"
+        "Aircraft Compact-Air 240/24 Compressor accessory bundle set,{\"tank_volume_l\":24,\"accessory_bundle\":\"yes\"}\n"
+    )
+    vm.sql_outputs["FROM store_inventory"] = (
+        "sku,available_today\n"
+        "PT-CMP-AIR-CA240-24,2\n"
+        "PT-CMP-AIR-CA240-SET,12\n"
+    )
+    task = (
+        "Do you have 2 of 'Aircraft Compact-Air 240/24. Accessory bundle inclusion was not specified.' "
+        "(but not PT-CMP-AIR-CA240-SET) in stock in linz hafen tools place?"
+    )
+
+    fn = agent._try_deterministic_completion(vm, task)
+
+    assert fn is not None, "prod stock yes/no should not fall through to LLM for explicit excluded SKU prompts"
+    assert fn.message == "TRUE(1)"
+    assert fn.outcome == "OUTCOME_OK"
+    assert fn.grounding_refs == [
+        "/proc/stores/store_linz_hafen.json",
+        "/proc/catalog/Aircraft/PT-CMP-AIR-CA240-24.json",
+    ]
+    print("red: prod stock yes/no uses non-excluded available sibling")
+
+
+def test_red_prod_stock_yesno_does_not_cite_excluded_negative_variants():
+    vm = FakeVM()
+    vm.read_outputs["/AGENTS.MD"] = "For yes/no answers, answer exactly TRUE(1) or FALSE(0)."
+    vm.sql_outputs[
+        "SELECT store_id AS id, record_path AS path, store_name AS name, city, is_open FROM stores ORDER BY store_id;"
+    ] = (
+        "id,path,name,city,is_open\n"
+        "store_vienna_favoriten,/proc/stores/store_vienna_favoriten.json,PowerTools Favoriten,Vienna,1\n"
+    )
+    vm.sql_outputs["FROM product_variants"] = (
+        "sku,path,brand,series,model,name,properties\n"
+        "PT-MOW-STI-RMA235-AK20,/proc/catalog/Stihl/PT-MOW-STI-RMA235-AK20.json,Stihl,RMA,RMA 235,"
+        "Stihl RMA 235 AK20 set mower,{\"kit_contents\":\"AK20 set\"}\n"
+        "PT-MOW-STI-RMA235-BODY,/proc/catalog/Stihl/PT-MOW-STI-RMA235-BODY.json,Stihl,RMA,RMA 235,"
+        "Stihl RMA 235 body mower,{\"kit_contents\":\"body only\"}\n"
+    )
+    vm.sql_outputs["FROM store_inventory"] = (
+        "sku,available_today\n"
+        "PT-MOW-STI-RMA235-AK20,30\n"
+        "PT-MOW-STI-RMA235-BODY,30\n"
+    )
+    task = (
+        "Do you have 26 of 'stihl rma 235 not the ak20 set' "
+        "(but not PT-MOW-STI-RMA235-BODY) in stock in PowerTools at Favoriten?"
+    )
+
+    fn = agent._try_deterministic_completion(vm, task)
+
+    assert fn is not None
+    assert fn.message == "FALSE(0)"
+    assert fn.outcome == "OUTCOME_OK"
+    assert fn.grounding_refs == ["/proc/stores/store_vienna_favoriten.json"]
+    print("red: prod stock yes/no does not cite excluded negative variants")
+
+
 def test_red_dev53_inventory_solver_reads_current_schema_tables():
     vm = FakeVM()
     vm.sql_outputs[
@@ -5414,6 +5487,8 @@ def main():
     test_inventory_solver_handles_fewer_than_items_available_in_shape()
     test_inventory_solver_handles_count_products_fewer_units_from_list_shape()
     test_inventory_solver_handles_have_n_or_more_ready_shape()
+    test_red_prod_stock_yesno_uses_non_excluded_available_sibling()
+    test_red_prod_stock_yesno_does_not_cite_excluded_negative_variants()
     test_red_dev53_inventory_solver_reads_current_schema_tables()
     test_red_dev53_product_check_names_base_sku_when_extra_claim_absent()
     test_red_dev53_product_check_cites_all_base_candidates_when_extra_claim_absent()
