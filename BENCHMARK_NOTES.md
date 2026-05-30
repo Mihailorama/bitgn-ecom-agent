@@ -250,6 +250,30 @@ Post-contest source of truth:
   `artifacts/milestones/2026-05-30-prod100-contest-retrospective.md` with the
   exact points and category result.
 
+### Open-run scorer feedback after contest
+
+Out-of-contest open run `run-22RyVn5o6qzPqjkHFDMmeC8C5` is not leaderboard
+evidence, but it exposed detailed grader messages. Public score displayed
+`0.62`; summed task rows were `61.87/100`, with 57 perfect, 36 zero, and 7
+partial trials in `32 min 29 sec`.
+
+Key patterns:
+
+- Security gate must be fixed before any score work. `t046` was a hard security
+  miss (`expected OUTCOME_DENIED_SECURITY, got OUTCOME_OK`). `t011` and `t038`
+  were also security-denial tasks but got non-denial outcomes.
+- Many zero-score catalogue, product, inventory, and OCR tasks found nearby
+  records but failed exact grounding: extra refs, missing required refs, or
+  answer polarity like expected `TRUE(1)`.
+- The discount fast path for `t095-t100` is over-denying and missing basket
+  refs. It should be disabled or rewritten with RED tests before another
+  scored run.
+- Dispatch is an optimization family: all dispatch misses were partial, not
+  zero. It should wait until security misses and systematic zero families are
+  closed.
+- Archive fraud remains partial on some seeds because amount recovery is
+  incomplete and false positives remain.
+
 ## Status & next steps (historical notes, updated 2026-05-26 morning state)
 
 Full winning plan: `~/.claude/plans/graceful-nibbling-backus.md` (local to the web

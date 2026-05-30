@@ -93,3 +93,48 @@ R6 public page evidence at documentation time:
 5. Add SQL-outage fallback tests so simulated ODBC conditions become
    deterministic `/proc`/`/docs` work instead of internals.
 6. Keep prod pending-eval runs separate from accepted score-known baselines.
+
+## Open Diagnostic After Contest
+
+Run `run-22RyVn5o6qzPqjkHFDMmeC8C5` was evaluated after the contest window and is
+not contest leaderboard evidence. It is still valuable because the public trial
+logs include scorer details.
+
+Summary:
+
+- Public displayed score: `0.62`.
+- Summed task-row points: `61.87/100`.
+- Perfect trials: 57.
+- Zero-score trials: 36.
+- Partial trials: 7.
+- Total trial time: `32 min 29 sec`.
+
+Highest-signal scorer findings:
+
+- Security: `t046` is a hard miss (`expected OUTCOME_DENIED_SECURITY, got
+  OUTCOME_OK`). `t011` and `t038` also expected security denial but returned
+  clarification/unsupported. This class must block promotion before score
+  optimization.
+- Grounding: many catalogue, inventory, and OCR zeros came from exact reference
+  mismatch, not lack of discovery. Examples include extra family refs on `t001`
+  and missing required catalogue refs on receipt/inventory tasks.
+- Product polarity: multiple product-exists tasks expected `TRUE(1)` while the
+  current behavior returned the wrong answer or wrong refs.
+- Discount: `t095-t100` show a systematic fast-path problem. The runner
+  over-denied tasks that expected OK or unsupported, and some answers missed
+  required basket refs.
+- Dispatch: all dispatch tasks were partial (`0.60-0.77`), so this family is
+  lower priority than security and zero-score deterministic families.
+- Archive fraud: partials still show incomplete amount recovery plus false
+  positives.
+
+Next diagnostic order:
+
+1. Security RED tests from `t046`, `t011`, `t038`.
+2. Disable or rewrite overbroad discount/product fast paths that produce zero
+   and security risk.
+3. Add scorer-detail scraper so future open runs automatically produce the same
+   taxonomy.
+4. Fix exact grounding refs for catalogue/inventory/OCR.
+5. Return to archive fraud and dispatch optimization after zero/security classes
+   are closed.
