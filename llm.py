@@ -92,6 +92,7 @@ def _litellm_parse(
             messages=msgs,
             response_format=schema,
             max_tokens=max_tokens,
+            num_retries=2,  # ride out transient 5xx / RateLimit / Timeout server-side
         )
         content = resp.choices[0].message.content
         try:
@@ -117,10 +118,46 @@ def _litellm_parse(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_claude_bin() -> "str | None":
+    """Locate the claude executable, preferring the native binary on Windows.
+
+    npm installs a `claude.CMD` shim that re-launches the real `claude.exe`
+    through cmd.exe, whose command-line limit is 8191 chars - far below our
+    ~27 KB `--append-system-prompt` payload, so every call dies with "The
+    command line is too long." When the shim is what's on PATH, resolve the
+    native `.exe` behind it so subprocess uses CreateProcess (32767-char limit).
+    """
+    direct = shutil.which("claude.exe")
+    if direct:
+        return direct
+    shim = shutil.which("claude") or shutil.which("claude.cmd")
+    if not shim or os.name != "nt":
+        return shim
+    shim_dir = os.path.dirname(shim)
+    # npm shim convention: <dir>\node_modules\@anthropic-ai\claude-code\bin\claude.exe
+    cand = os.path.join(
+        shim_dir, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe"
+    )
+    if os.path.isfile(cand):
+        return cand
+    # fallback: pull a *.exe path out of the .CMD shim and resolve %dp0%/%~dp0%
+    try:
+        text = open(shim, "r", encoding="utf-8", errors="ignore").read()
+    except OSError:
+        return shim
+    for token in text.replace('"', " ").split():
+        if token.lower().endswith("claude.exe"):
+            resolved = token.replace("%~dp0", shim_dir).replace("%dp0%", shim_dir)
+            resolved = resolved.replace("\\\\", "\\")
+            if os.path.isfile(resolved):
+                return resolved
+    return shim
+
+
 def _claude_cli_parse(
     model_id: str, messages: List[Message], schema: Type[T], max_tokens: int
 ) -> T:
-    claude_bin = shutil.which("claude") or shutil.which("claude.cmd")
+    claude_bin = _resolve_claude_bin()
     if not claude_bin:
         raise LLMError(
             "claude CLI not found on PATH; install Claude Code or set MODEL_ID to "
@@ -150,21 +187,26 @@ def _claude_cli_parse(
             prompt + f"\n\n[SYSTEM]\nPrevious reply was invalid JSON: {last_err}. "
             "Return ONLY the corrected JSON object."
         )
-        result = subprocess.run(
-            [
-                claude_bin, "-p",
-                "--model", model,
-                "--output-format", "text",
-                "--allowedTools", "",
-                "--append-system-prompt", system_prompt,
-            ],
-            input=stdin,
-            capture_output=True,
-            text=True,
-            cwd="/tmp",  # run away from any host CLAUDE.md
-            timeout=int(os.environ.get("CLAUDE_CLI_TIMEOUT", "300")),
-            encoding="utf-8",
-        )
+        try:
+            result = subprocess.run(
+                [
+                    claude_bin, "-p",
+                    "--model", model,
+                    "--output-format", "text",
+                    "--allowedTools", "",
+                    "--append-system-prompt", system_prompt,
+                ],
+                input=stdin,
+                capture_output=True,
+                text=True,
+                cwd=tempfile.gettempdir(),  # run away from any host CLAUDE.md
+                timeout=int(os.environ.get("CLAUDE_CLI_TIMEOUT", "300")),
+                encoding="utf-8",
+            )
+        except subprocess.TimeoutExpired as exc:
+            # Surface as a typed transient so the agent-level retry can recover
+            # instead of crashing the whole trial into OUTCOME_ERR_INTERNAL.
+            raise LLMError(f"claude CLI timed out after {exc.timeout}s") from exc
         if result.returncode != 0:
             raise LLMError(f"claude CLI failed (rc={result.returncode}): {result.stderr.strip()[:300]}")
         try:
