@@ -964,6 +964,94 @@ Total (exkl. MwSt)       EUR  90,50
     print("red: receipt price check uses workspace yes/no format")
 
 
+def test_red_prod_receipt_exact_basket_stock_cites_branch_and_products():
+    vm = FakeVM()
+    vm.read_outputs["/AGENTS.MD"] = "For yes/no answers, answer exactly TRUE(1) or FALSE(0)."
+    receipt_path = "/uploads/NZGFUYMw_receipt_ocr.txt"
+    vm.read_outputs[receipt_path] = """
+PowerTools Graz Eggenberg
+ 1 PT-BLA-BOS-EXPWOOD-160 Bosch Expert Wood 160 blade 19,99
+ 2 PT-GRD-BOS-GWS1400-125 Bosch GWS 1400 125 grinder 99,99
+
+Total (exkl. MwSt)       EUR  219,97
+""".strip()
+    vm.sql_outputs[
+        "SELECT store_id AS id, record_path AS path, store_name AS name, city, is_open FROM stores ORDER BY store_id;"
+    ] = (
+        "id,path,name,city,is_open\n"
+        "store_graz_eggenberg,/proc/stores/store_graz_eggenberg.json,PowerTools Graz Eggenberg,Graz,1\n"
+    )
+    vm.sql_outputs["SELECT product_sku AS sku, record_path AS path FROM product_variants"] = (
+        "sku,path\n"
+        "PT-BLA-BOS-EXPWOOD-160,/proc/catalog/Bosch Professional/PT-BLA-BOS-EXPWOOD-160.json\n"
+        "PT-GRD-BOS-GWS1400-125,/proc/catalog/Bosch Professional/PT-GRD-BOS-GWS1400-125.json\n"
+    )
+    vm.sql_outputs["SELECT * FROM store_inventory"] = (
+        "product_sku,available_today_quantity\n"
+        "PT-BLA-BOS-EXPWOOD-160,1\n"
+        "PT-GRD-BOS-GWS1400-125,3\n"
+    )
+
+    fn = agent._try_deterministic_completion(
+        vm,
+        "Look at the uploaded OCR receipt /uploads/NZGFUYMw_receipt_ocr.txt. "
+        "Can I buy this exact basket today from the same branch? Answer as a yes/no only.",
+    )
+
+    assert fn is not None, "receipt exact-basket stock checks should be deterministic"
+    assert fn.message == "TRUE(1)"
+    assert fn.grounding_refs == [
+        receipt_path,
+        "/proc/stores/store_graz_eggenberg.json",
+        "/proc/catalog/Bosch Professional/PT-BLA-BOS-EXPWOOD-160.json",
+        "/proc/catalog/Bosch Professional/PT-GRD-BOS-GWS1400-125.json",
+    ]
+    print("red: prod receipt exact basket stock cites branch and products")
+
+
+def test_red_prod_receipt_exact_basket_stock_false_when_line_short():
+    vm = FakeVM()
+    vm.read_outputs["/AGENTS.MD"] = "For yes/no answers, answer exactly TRUE(1) or FALSE(0)."
+    receipt_path = "/uploads/SMKjwnNs_receipt_ocr.txt"
+    vm.read_outputs[receipt_path] = """
+PowerTools Vienna Meidling
+ 2 PT-GRD-MET-W18-125-4AH Metabo grinder kit 199,99
+ 1 PT-GRD-MET-W18-125-FLAT Metabo flat head grinder 149,99
+""".strip()
+    vm.sql_outputs[
+        "SELECT store_id AS id, record_path AS path, store_name AS name, city, is_open FROM stores ORDER BY store_id;"
+    ] = (
+        "id,path,name,city,is_open\n"
+        "store_vienna_meidling,/proc/stores/store_vienna_meidling.json,PowerTools Vienna Meidling,Vienna,1\n"
+    )
+    vm.sql_outputs["SELECT product_sku AS sku, record_path AS path FROM product_variants"] = (
+        "sku,path\n"
+        "PT-GRD-MET-W18-125-4AH,/proc/catalog/Metabo/PT-GRD-MET-W18-125-4AH.json\n"
+        "PT-GRD-MET-W18-125-FLAT,/proc/catalog/Metabo/PT-GRD-MET-W18-125-FLAT.json\n"
+    )
+    vm.sql_outputs["SELECT * FROM store_inventory"] = (
+        "product_sku,available_today_quantity\n"
+        "PT-GRD-MET-W18-125-4AH,1\n"
+        "PT-GRD-MET-W18-125-FLAT,1\n"
+    )
+
+    fn = agent._try_deterministic_completion(
+        vm,
+        "Look at the uploaded OCR receipt /uploads/SMKjwnNs_receipt_ocr.txt. "
+        "Can I buy this exact basket today from the same branch? Answer as a yes/no only.",
+    )
+
+    assert fn is not None
+    assert fn.message == "FALSE(0)"
+    assert fn.grounding_refs == [
+        receipt_path,
+        "/proc/stores/store_vienna_meidling.json",
+        "/proc/catalog/Metabo/PT-GRD-MET-W18-125-4AH.json",
+        "/proc/catalog/Metabo/PT-GRD-MET-W18-125-FLAT.json",
+    ]
+    print("red: prod receipt exact basket stock returns false when a line is short")
+
+
 def test_red_prod_sku_lookup_excludes_named_plain_variant_from_ambiguity_refs():
     vm = FakeVM()
     paths = [
@@ -5564,6 +5652,8 @@ def main():
     test_red_system_prompt_defers_yesno_format_to_agents_md()
     test_red_t53_ocr_receipt_legacy_sku_matches_current_catalogue_price()
     test_red_receipt_price_uses_workspace_yesno_format()
+    test_red_prod_receipt_exact_basket_stock_cites_branch_and_products()
+    test_red_prod_receipt_exact_basket_stock_false_when_line_short()
     test_red_prod_sku_lookup_excludes_named_plain_variant_from_ambiguity_refs()
     test_red_prod_catalogue_price_count_returns_number_without_catalog_refs()
     test_red_prod_catalogue_price_count_ignores_unspecified_property_clause()

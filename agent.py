@@ -1160,6 +1160,84 @@ def _receipt_upload_paths(vm: EcomRuntimeClientSync) -> "list[str]":
     return sorted(paths, key=lambda p: ("receipt" not in p.lower(), p))
 
 
+def _receipt_paths_for_task(vm: EcomRuntimeClientSync, task_text: str) -> "list[str]":
+    explicit = re.findall(r"/uploads/[A-Za-z0-9_.-]+\.txt", task_text or "")
+    if explicit:
+        return list(dict.fromkeys(explicit))
+    return _receipt_upload_paths(vm)
+
+
+def _looks_receipt_exact_basket_stock_task(task_text: str) -> bool:
+    low = (task_text or "").lower()
+    if "receipt" not in low:
+        return False
+    if "current catalogue subtotal" in low or "old receipt subtotal" in low:
+        return False
+    return (
+        ("can i buy" in low or "buy the same basket" in low)
+        and ("same branch" in low or "same store" in low)
+    )
+
+
+def _receipt_store_phrase(body: str) -> str:
+    for line in (body or "").splitlines():
+        text = re.sub(r"\s+", " ", line).strip(" .")
+        if not text:
+            continue
+        low = text.lower()
+        if re.search(r"\b[A-Z]{2,}(?:-[A-Z0-9]+){2,}\b", text):
+            continue
+        if "powertools" in low or low.startswith(("store:", "branch:", "filiale:")):
+            return re.sub(r"^(?:store|branch|filiale)\s*[:#-]\s*", "", text, flags=re.I)
+    return ""
+
+
+def _try_receipt_exact_basket_stock_check(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    if not _looks_receipt_exact_basket_stock_task(task_text):
+        return None
+    receipt_paths = _receipt_paths_for_task(vm, task_text)
+    if not receipt_paths:
+        return None
+    receipt_path = receipt_paths[0]
+    body = getattr(dispatch(vm, Req_Read(tool="read", path=receipt_path)), "content", "")
+    items, _receipt_total = _receipt_items(body)
+    sku_qty: "dict[str, int]" = {}
+    for item in items:
+        sku = str(item.get("sku") or "").upper()
+        qty = int(item.get("qty") or 0)
+        if sku and qty > 0:
+            sku_qty[sku] = sku_qty.get(sku, 0) + qty
+    if not sku_qty:
+        return None
+    store_phrase = _receipt_store_phrase(body)
+    if not store_phrase:
+        return None
+    store = _find_store(vm, store_phrase)
+    if not store:
+        return None
+    skus = list(sku_qty)
+    paths_by_sku = _explicit_sku_product_paths(vm, skus)
+    if not paths_by_sku:
+        return None
+    inv_by_sku = _explicit_sku_inventory_rows(vm, store["id"], skus)
+    ok = _store_is_open(store)
+    for sku, qty in sku_qty.items():
+        row = inv_by_sku.get(sku, {})
+        available = _inventory_row_available(row) if row else 0
+        available = 0 if available is None else available
+        if available < qty:
+            ok = False
+    refs = [receipt_path, store["path"]] + [paths_by_sku.get(sku, "") for sku in skus]
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["deterministic OCR receipt exact-basket stock check"],
+        message=_yes_no_token_for_workspace(vm, ok),
+        grounding_refs=_normalize_refs(refs),
+        outcome="OUTCOME_OK",
+        verified=True,
+    )
+
+
 def _best_receipt_price_candidate(vm: EcomRuntimeClientSync, item: dict[str, object]) -> "dict[str, str] | None":
     unit_cents = int(item.get("unit_cents") or 0)
     if unit_cents <= 0:
@@ -5701,6 +5779,7 @@ def _try_security_injection_guard(vm: EcomRuntimeClientSync, task_text: str) -> 
 def _try_deterministic_completion(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
     for solver in (
         _try_security_injection_guard,
+        _try_receipt_exact_basket_stock_check,
         _try_receipt_ocr_price_check,
         _try_catalog_count,
         _try_scoped_tmp_cleanup,
