@@ -3920,6 +3920,14 @@ def _crosslist_parse_specs(spec_text: str) -> "dict[str, str]":
     return specs
 
 
+def _crosslist_clean_ocr_line(line: str) -> str:
+    text = re.sub(r"\s+", " ", line or "").strip()
+    text = re.sub(r"\bOCR SOURCE:.*$", "", text, flags=re.I).strip()
+    text = re.sub(r"\b(?:OCR REVIEW|SCANNED|ARCHIVE COPY)\b.*$", "", text, flags=re.I).strip()
+    text = re.sub(r"^[^A-Za-z0-9]+", "", text).strip()
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def _crosslist_parse_ocr(body: str) -> "tuple[str, list[dict]] | None":
     branch = ""
     branch_match = re.search(r"PowerTools target branch:\s*(PowerTools[^\n\r]+)", body or "", re.I)
@@ -3927,14 +3935,16 @@ def _crosslist_parse_ocr(body: str) -> "tuple[str, list[dict]] | None":
         branch = re.sub(r"\s+", " ", branch_match.group(1)).strip()
     rows: "list[dict]" = []
     current: "dict | None" = None
+    in_specs = False
     for raw in (body or "").splitlines():
-        line = re.sub(r"\s+", " ", raw.strip())
+        line = _crosslist_clean_ocr_line(raw)
         if not line:
             continue
-        m = re.match(r"^(\d+)\s+(\d+)\s+([A-Z0-9][A-Z0-9-]{2,})\s+(.+)$", line)
+        m = re.search(r"\b(\d{1,3})\s+(\d{1,3})\s+([A-Z0-9][A-Z0-9-]{2,})\s+(.+)$", line)
         if m:
             if current:
                 rows.append(current)
+            in_specs = False
             current = {
                 "line_no": int(m.group(1)),
                 "qty": int(m.group(2)),
@@ -3945,11 +3955,19 @@ def _crosslist_parse_ocr(body: str) -> "tuple[str, list[dict]] | None":
             continue
         if not current:
             continue
-        if re.match(r"^(?:specs?|SPECS?):", line):
-            current["spec_text"] = (current.get("spec_text", "") + " " + line).strip()
+        spec_m = re.search(r"\bspecs?:\s*(.*)$", line, re.I)
+        if spec_m:
+            current["spec_text"] = (current.get("spec_text", "") + " specs: " + spec_m.group(1)).strip()
+            in_specs = True
             continue
         if re.match(r"^(?:note|memo|total|ocr source|[-_=:. ]+)", line, re.I):
+            if not re.match(r"^[-_=:. ]+$", line):
+                in_specs = False
             continue
+        if in_specs and "=" in line:
+            current["spec_text"] = (current.get("spec_text", "") + " " + line).strip()
+            continue
+        in_specs = False
         current["description"] = (current.get("description", "") + " " + line).strip()
     if current:
         rows.append(current)
@@ -3992,9 +4010,15 @@ def _crosslist_prop_matches(props: "dict[str, tuple[str, str]]", key: str, expec
     return _norm_compact(text) == exp_norm
 
 
-def _crosslist_catalog_candidates(vm: EcomRuntimeClientSync, desc: str) -> "list[tuple[str, dict]]":
+def _crosslist_catalog_candidates(
+    vm: EcomRuntimeClientSync, desc: str, specs: "dict[str, str] | None" = None
+) -> "list[tuple[str, dict]]":
     phrases = [desc]
-    tokens = [t for t in _norm_word(desc).split() if len(t) > 2 and t not in {"the", "and", "with", "kit"}]
+    tokens = [
+        t
+        for t in _norm_word(desc).split()
+        if (len(t) > 2 or t.isdigit()) and t not in {"the", "and", "with", "kit"}
+    ]
     if len(tokens) >= 3:
         phrases.append(" ".join(tokens[:4]))
     if tokens:
@@ -4009,14 +4033,32 @@ def _crosslist_catalog_candidates(vm: EcomRuntimeClientSync, desc: str) -> "list
     if not out:
         return []
     desc_tokens = set(tokens)
+    spec_items = specs or {}
     scored = []
     for path, data in out:
         hay = set(_json_product_hay(data).split())
-        score = len(desc_tokens & hay)
-        scored.append((score, path, data))
-    scored.sort(key=lambda item: (-item[0], item[1]))
-    best = scored[0][0]
-    return [(path, data) for score, path, data in scored if score == best and score > 0] or out[:1]
+        desc_score = len(desc_tokens & hay)
+        props = _props_from_raw_properties(data.get("properties") or data.get("props") or {})
+        spec_matches = 0
+        spec_misses = 0
+        for key, value in spec_items.items():
+            if _crosslist_prop_matches(props, key, value):
+                spec_matches += 1
+            else:
+                spec_misses += 1
+        score = spec_matches * 10 - spec_misses * 6
+        if spec_items and spec_matches == len(spec_items):
+            score += 25
+        scored.append((desc_score, score, spec_matches, spec_misses, path, data))
+    max_desc = max(item[0] for item in scored)
+    pool = [item for item in scored if item[0] == max_desc] if max_desc > 0 else scored
+    pool.sort(key=lambda item: (-item[1], -item[2], item[3], item[4]))
+    best_desc, best_score = pool[0][0], pool[0][1]
+    return [
+        (path, data)
+        for desc_score, score, _matches, _misses, path, data in pool
+        if desc_score == best_desc and score == best_score and (desc_score > 0 or score > 0)
+    ] or out[:1]
 
 
 def _try_purchase_request_crosslist(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
@@ -4041,16 +4083,25 @@ def _try_purchase_request_crosslist(vm: EcomRuntimeClientSync, task_text: str) -
         "line_no\tcompetitor_code\trequested_description\trequested_qty\tbranch_id\tbranch_open\t"
         "match_status\tmatched_sku\tmatched_product_name\tavailable_today\tfulfillable_qty\tshort_qty\treason"
     ]
+    diag_rows = []
     for row in rows:
         qty = int(row.get("qty") or 0)
-        candidates = _crosslist_catalog_candidates(vm, row.get("description", ""))
+        specs = row.get("specs", {})
+        candidates = _crosslist_catalog_candidates(vm, row.get("description", ""), specs)
         chosen = candidates[0] if candidates else None
         path, product = chosen if chosen else ("", {})
         product_name = str(product.get("name") or product.get("product_name") or row.get("description", ""))
-        specs = row.get("specs", {})
         props = _props_from_raw_properties(product.get("properties") or product.get("props") or {})
         match = bool(product) and all(_crosslist_prop_matches(props, key, value) for key, value in specs.items())
         if not match:
+            diag_rows.append({
+                "line": row.get("line_no"),
+                "status": "property_mismatch",
+                "desc": row.get("description", ""),
+                "candidate": path,
+                "sku": product.get("sku", ""),
+                "specs": specs,
+            })
             tsv.append(
                 f"{row.get('line_no')}\t{row.get('code')}\t{product_name}\t{qty}\t{branch_id}\t"
                 f"{str(branch_open).lower()}\tproperty_mismatch\t\t\t0\t0\t{qty}\t"
@@ -4074,7 +4125,25 @@ def _try_purchase_request_crosslist(vm: EcomRuntimeClientSync, task_text: str) -
             f"{str(branch_open).lower()}\texact\t{sku}\t{product_name}\t{available}\t"
             f"{fulfillable}\t{short}\t{reason}"
         )
-    dispatch(vm, Req_Write(tool="write", path=export_path, content="\n".join(tsv) + "\n"))
+        diag_rows.append({
+            "line": row.get("line_no"),
+            "status": "exact",
+            "desc": row.get("description", ""),
+            "candidate": path,
+            "sku": sku,
+            "available": available,
+            "fulfillable": fulfillable,
+        })
+    content = "\n".join(tsv) + "\n"
+    print("CROSSLIST_DIAG " + json.dumps({
+        "upload": upload_path,
+        "export": export_path,
+        "branch": branch_phrase,
+        "store": store,
+        "rows": diag_rows,
+        "tsv": content,
+    }, sort_keys=True))
+    dispatch(vm, Req_Write(tool="write", path=export_path, content=content))
     return ReportTaskCompletion(
         tool="report_completion",
         completed_steps_laconic=["deterministic purchase-request crosslist TSV"],

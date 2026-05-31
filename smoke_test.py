@@ -5782,6 +5782,360 @@ specs: battery platform=Makita LXT 18V; cut depth 90 mm=57; kit=2x5.0Ah batterie
     print("red: prod purchase request crosslist writes exact policy TSV")
 
 
+def test_red_prod_crosslist_parses_multiline_specs_without_polluting_description():
+    parsed = agent._crosslist_parse_ocr("""
+PowerTools target branch: PowerTools Innsbruck Mitte
+3    2     CMP-PCZARF         Karcher K4 Power Control pressure
+                              washer
+  .................................
+      specs: accessory set=standard; detergent system=plug and clean;
+  .........................
+             hose m=8; power w=1800
+4    1     CMP-JFBDTE         BOSCH PROFESSIONAL GEX 125-1 AE
+                              dust-control bundle
+      specs: dust extraction=vacuum adapter; power source=corded; sander
+             type=random orbit; speed control=true
+""")
+
+    assert parsed is not None
+    _branch, rows = parsed
+    assert rows[0]["description"] == "Karcher K4 Power Control pressure washer"
+    assert rows[0]["specs"] == {
+        "accessory_set": "standard",
+        "detergent_system": "plug and clean",
+        "hose_m": "8",
+        "power_w": "1800",
+    }
+    assert rows[1]["description"] == "BOSCH PROFESSIONAL GEX 125-1 AE dust-control bundle"
+    assert rows[1]["specs"] == {
+        "dust_extraction": "vacuum adapter",
+        "power_source": "corded",
+        "sander_type": "random orbit",
+        "speed_control": "true",
+    }
+    print("red: prod crosslist parses OCR multiline specs without description pollution")
+
+
+def test_red_prod_crosslist_uses_specs_to_choose_same_family_candidate():
+    import json as _json
+    vm = FakeVM()
+    upload = "/uploads/prod_competitor_purchase_request_ocr.txt"
+    export = "/exports/crosslist-test.tsv"
+    store_path = "/proc/locations/Innsbruck/store-innsbruck-mitte.json"
+    home_path = "/proc/catalog/Karcher/PT-WASH-KAR-K4-HOME.json"
+    pc_path = "/proc/catalog/Karcher/PT-WASH-KAR-K4-PC.json"
+    vm.read_outputs[upload] = """
+PowerTools target branch: PowerTools Innsbruck Mitte
+3    2     CMP-PCZARF         Karcher K4 Power Control pressure
+                              washer
+      specs: accessory set=standard; detergent system=plug and clean;
+             hose m=8; power w=1800
+"""
+    vm.find_outputs["store-*.json"] = [store_path]
+    vm.read_outputs[store_path] = _json.dumps({
+        "id": "store-innsbruck-mitte",
+        "name": "PowerTools Innsbruck Mitte",
+        "city": "Innsbruck",
+        "is_open": True,
+        "inventory": [
+            {"sku": "PT-WASH-KAR-K4-HOME", "on_hand": 9, "reserved": 0},
+            {"sku": "PT-WASH-KAR-K4-PC", "on_hand": 7, "reserved": 0},
+        ],
+    })
+    vm.search_outputs["Karcher K4 Power Control pressure washer"] = [
+        (home_path, "Karcher K4 Power Control Home pressure washer"),
+        (pc_path, "Karcher K4 Power Control pressure washer"),
+    ]
+    vm.search_outputs["Karcher K4 Power Control pressure washer hose m=8; power w=1800"] = [
+        (home_path, "Karcher K4 Power Control Home pressure washer"),
+        (pc_path, "Karcher K4 Power Control pressure washer"),
+    ]
+    vm.read_outputs[home_path] = _json.dumps({
+        "sku": "PT-WASH-KAR-K4-HOME",
+        "name": "Karcher K4 Power Control Home pressure washer",
+        "properties": {
+            "accessory_set": "home cleaning kit",
+            "detergent_system": "plug and clean",
+            "hose_m": 8,
+            "power_w": 1800,
+        },
+    })
+    vm.read_outputs[pc_path] = _json.dumps({
+        "sku": "PT-WASH-KAR-K4-PC",
+        "name": "Karcher K4 Power Control pressure washer",
+        "properties": {
+            "accessory_set": "standard",
+            "detergent_system": "plug and clean",
+            "hose_m": 8,
+            "power_w": 1800,
+        },
+    })
+    task = (
+        f"Read the uploaded competitor purchase request OCR at {upload} and create a TSV "
+        f"crosslist report at {export}. Return only the report path and cite the upload OCR path "
+        "as a grounding ref."
+    )
+
+    fn = agent._try_purchase_request_crosslist(vm, task)
+
+    expected = (
+        "line_no\tcompetitor_code\trequested_description\trequested_qty\tbranch_id\tbranch_open\t"
+        "match_status\tmatched_sku\tmatched_product_name\tavailable_today\tfulfillable_qty\tshort_qty\treason\n"
+        "3\tCMP-PCZARF\tKarcher K4 Power Control pressure washer\t2\tstore-innsbruck-mitte\ttrue\t"
+        "exact\tPT-WASH-KAR-K4-PC\tKarcher K4 Power Control pressure washer\t7\t2\t0\t"
+        "exact property match; requested quantity available today\n"
+    )
+    assert fn is not None
+    assert vm.write_contents.get(export) == expected
+    print("red: prod crosslist uses specs to choose same-family candidate")
+
+
+def test_red_prod_crosslist_description_numeric_variant_breaks_spec_tie():
+    import json as _json
+    vm = FakeVM()
+    upload = "/uploads/prod_competitor_purchase_request_ocr.txt"
+    export = "/exports/crosslist-test.tsv"
+    store_path = "/proc/locations/Salzburg/store-salzburg-nord.json"
+    ten_path = "/proc/catalog/Bosch Professional/PT-BIT-BOS-CYL9-10.json"
+    fifteen_path = "/proc/catalog/Bosch Professional/PT-BIT-BOS-CYL9-15.json"
+    vm.read_outputs[upload] = """
+PowerTools target branch: PowerTools Salzburg Nord
+3    3     CMP-8F37RG         Bosch CYL-9 MultiConstruction
+                              drill bit set 15-piece
+      specs: cobalt=false; length class=standard; material
+             target=multi-material; shank type=cylindrical
+"""
+    vm.find_outputs["store-*.json"] = [store_path]
+    vm.read_outputs[store_path] = _json.dumps({
+        "id": "store-salzburg-nord",
+        "name": "PowerTools Salzburg Nord",
+        "city": "Salzburg",
+        "is_open": True,
+        "inventory": [
+            {"sku": "PT-BIT-BOS-CYL9-10", "on_hand": 4, "reserved": 2},
+            {"sku": "PT-BIT-BOS-CYL9-15", "on_hand": 5, "reserved": 1},
+        ],
+    })
+    vm.search_outputs["Bosch CYL-9 MultiConstruction drill bit set 15-piece"] = [
+        (ten_path, "Bosch CYL-9 MultiConstruction drill bit set 10-piece"),
+        (fifteen_path, "Bosch CYL-9 MultiConstruction drill bit set 15-piece"),
+    ]
+    vm.read_outputs[ten_path] = _json.dumps({
+        "sku": "PT-BIT-BOS-CYL9-10",
+        "name": "Bosch CYL-9 MultiConstruction drill bit set 10-piece",
+        "properties": {
+            "cobalt": False,
+            "length_class": "standard",
+            "material_target": "multi-material",
+            "piece_count": 10,
+            "shank_type": "cylindrical",
+        },
+    })
+    vm.read_outputs[fifteen_path] = _json.dumps({
+        "sku": "PT-BIT-BOS-CYL9-15",
+        "name": "Bosch CYL-9 MultiConstruction drill bit set 15-piece",
+        "properties": {
+            "cobalt": False,
+            "length_class": "standard",
+            "material_target": "multi-material",
+            "piece_count": 15,
+            "shank_type": "cylindrical",
+        },
+    })
+    task = (
+        f"Read the uploaded competitor purchase request OCR at {upload} and create a TSV "
+        f"crosslist report at {export}. Return only the report path and cite the upload OCR path "
+        "as a grounding ref."
+    )
+
+    fn = agent._try_purchase_request_crosslist(vm, task)
+
+    expected = (
+        "line_no\tcompetitor_code\trequested_description\trequested_qty\tbranch_id\tbranch_open\t"
+        "match_status\tmatched_sku\tmatched_product_name\tavailable_today\tfulfillable_qty\tshort_qty\treason\n"
+        "3\tCMP-8F37RG\tBosch CYL-9 MultiConstruction drill bit set 15-piece\t3\tstore-salzburg-nord\ttrue\t"
+        "exact\tPT-BIT-BOS-CYL9-15\tBosch CYL-9 MultiConstruction drill bit set 15-piece\t4\t3\t0\t"
+        "exact property match; requested quantity available today\n"
+    )
+    assert fn is not None
+    assert vm.write_contents.get(export) == expected
+    print("red: prod crosslist numeric description variant breaks spec tie")
+
+
+def test_red_prod_crosslist_drops_ocr_noise_before_candidate_search():
+    import json as _json
+    vm = FakeVM()
+    upload = "/uploads/prod_competitor_purchase_request_ocr.txt"
+    export = "/exports/crosslist-test.tsv"
+    store_path = "/proc/locations/Salzburg/store-salzburg-alpenstrasse.json"
+    wrong_path = "/proc/catalog/Bosch Professional/PT-GRD-BOS-GWS1400-125.json"
+    exact_path = "/proc/catalog/Bosch Professional/PT-SND-BOS-GEX125-CASE.json"
+    vm.read_outputs[upload] = """
+PowerTools target branch: PowerTools Salzburg Alpenstrasse
+2 6 CMP-SSFROK Bosch Professional GEX 125-1 AE
+sander case set
+SCANNED
+specs: dust extraction=microfilter box; kit=case and 25
+discs; power source=corded
+"""
+    vm.find_outputs["store-*.json"] = [store_path]
+    vm.read_outputs[store_path] = _json.dumps({
+        "id": "store-salzburg-alpenstrasse",
+        "name": "PowerTools Salzburg Alpenstrasse",
+        "city": "Salzburg",
+        "is_open": True,
+        "inventory": [
+            {"sku": "PT-GRD-BOS-GWS1400-125", "on_hand": 10, "reserved": 0},
+            {"sku": "PT-SND-BOS-GEX125-CASE", "on_hand": 8, "reserved": 1},
+        ],
+    })
+    vm.search_outputs["Bosch Professional GEX 125-1 AE sander case set SCANNED"] = [
+        (wrong_path, "Bosch Professional GWS 1400 angle grinder 125 mm"),
+    ]
+    vm.search_outputs["Bosch Professional GEX 125-1 AE sander case set"] = [
+        (wrong_path, "Bosch Professional GWS 1400 angle grinder 125 mm"),
+        (exact_path, "Bosch Professional GEX 125-1 AE sander case set"),
+    ]
+    vm.read_outputs[wrong_path] = _json.dumps({
+        "sku": "PT-GRD-BOS-GWS1400-125",
+        "name": "Bosch Professional GWS 1400 angle grinder 125 mm",
+        "properties": {
+            "disc_mm": 125,
+            "power_source": "corded",
+        },
+    })
+    vm.read_outputs[exact_path] = _json.dumps({
+        "sku": "PT-SND-BOS-GEX125-CASE",
+        "name": "Bosch Professional GEX 125-1 AE sander case set",
+        "properties": {
+            "dust_extraction": "microfilter box",
+            "kit": "case and 25 discs",
+            "power_source": "corded",
+        },
+    })
+    task = (
+        f"Read the uploaded competitor purchase request OCR at {upload} and create a TSV "
+        f"crosslist report at {export}. Return only the report path and cite the upload OCR path "
+        "as a grounding ref."
+    )
+
+    fn = agent._try_purchase_request_crosslist(vm, task)
+
+    expected = (
+        "line_no\tcompetitor_code\trequested_description\trequested_qty\tbranch_id\tbranch_open\t"
+        "match_status\tmatched_sku\tmatched_product_name\tavailable_today\tfulfillable_qty\tshort_qty\treason\n"
+        "2\tCMP-SSFROK\tBosch Professional GEX 125-1 AE sander case set\t6\tstore-salzburg-alpenstrasse\ttrue\t"
+        "exact\tPT-SND-BOS-GEX125-CASE\tBosch Professional GEX 125-1 AE sander case set\t7\t6\t0\t"
+        "exact property match; requested quantity available today\n"
+    )
+    assert fn is not None
+    assert vm.write_contents.get(export) == expected
+    print("red: prod crosslist drops OCR noise before candidate search")
+
+
+def test_red_prod_crosslist_parses_ascii_art_prefixed_row_and_specs():
+    parsed = agent._crosslist_parse_ocr("""
+PowerTools target branch: PowerTools Graz Center
+1 4 CMP-VQHQEJ Karcher K4 Power Control pipe
+cleaning set
+specs: accessory set=15m pipe cleaning hose; detergent
+system=plug and clean; flow l h=420; max bar=130; pump
+SCANNED
+MATERIAL=ALUMINIUM
+ARCHIVE COPY
+   .-''''-.  2 6 CMP-KOWYOC Bosch CYL-9 MultiConstruction drill
+  (  ..   )  bit set 12-piece
+   '-.__.-'   ..  specs: case type=robust case; length class=standard; material
+target=multi-material; piece count=12; shank type=round
+3 3 CMP-FEEL9X Uvex Pheos helmet visor
+kit
+""")
+
+    assert parsed is not None
+    _branch, rows = parsed
+    assert [row["line_no"] for row in rows] == [1, 2, 3]
+    assert rows[1]["description"] == "Bosch CYL-9 MultiConstruction drill bit set 12-piece"
+    assert rows[1]["specs"] == {
+        "case_type": "robust case",
+        "length_class": "standard",
+        "material_target": "multi-material",
+        "piece_count": "12",
+        "shank_type": "round",
+    }
+    print("red: prod crosslist parses ascii-art-prefixed row and specs")
+
+
+def test_red_prod_crosslist_description_product_wins_over_conflicting_specs():
+    import json as _json
+    vm = FakeVM()
+    upload = "/uploads/prod_competitor_purchase_request_ocr.txt"
+    export = "/exports/crosslist-test.tsv"
+    store_path = "/proc/locations/Innsbruck/store-innsbruck-mitte.json"
+    clear_path = "/proc/catalog/Uvex/PT-SAFE-UVEX-PHEOS-CLEAR.json"
+    helmet_path = "/proc/catalog/Uvex/PT-SAFE-UVEX-PHEOS-HELMET.json"
+    vm.read_outputs[upload] = """
+PowerTools target branch: PowerTools Innsbruck Mitte
+4 5 CMP-TBZCFH Uvex Pheos helmet visor
+kit
+specs: adjustable=true; anti fog=true; certification=EN166;
+protection type=eye; size=universal
+"""
+    vm.find_outputs["store-*.json"] = [store_path]
+    vm.read_outputs[store_path] = _json.dumps({
+        "id": "store-innsbruck-mitte",
+        "name": "PowerTools Innsbruck Mitte",
+        "city": "Innsbruck",
+        "is_open": True,
+        "inventory": [
+            {"sku": "PT-SAFE-UVEX-PHEOS-CLEAR", "on_hand": 7, "reserved": 1},
+            {"sku": "PT-SAFE-UVEX-PHEOS-HELMET", "on_hand": 4, "reserved": 0},
+        ],
+    })
+    vm.search_outputs["Uvex Pheos helmet visor kit"] = [
+        (clear_path, "Uvex Pheos clear safety glasses"),
+        (helmet_path, "Uvex Pheos helmet visor kit"),
+    ]
+    vm.read_outputs[clear_path] = _json.dumps({
+        "sku": "PT-SAFE-UVEX-PHEOS-CLEAR",
+        "name": "Uvex Pheos clear safety glasses",
+        "properties": {
+            "adjustable": True,
+            "anti_fog": True,
+            "certification": "EN166",
+            "protection_type": "eye",
+            "size": "universal",
+        },
+    })
+    vm.read_outputs[helmet_path] = _json.dumps({
+        "sku": "PT-SAFE-UVEX-PHEOS-HELMET",
+        "name": "Uvex Pheos helmet visor kit",
+        "properties": {
+            "adjustable": True,
+            "anti_fog": True,
+            "certification": "EN166",
+            "protection_type": "face",
+            "size": "helmet mounted",
+        },
+    })
+    task = (
+        f"Read the uploaded competitor purchase request OCR at {upload} and create a TSV "
+        f"crosslist report at {export}. Return only the report path and cite the upload OCR path "
+        "as a grounding ref."
+    )
+
+    fn = agent._try_purchase_request_crosslist(vm, task)
+
+    expected = (
+        "line_no\tcompetitor_code\trequested_description\trequested_qty\tbranch_id\tbranch_open\t"
+        "match_status\tmatched_sku\tmatched_product_name\tavailable_today\tfulfillable_qty\tshort_qty\treason\n"
+        "4\tCMP-TBZCFH\tUvex Pheos helmet visor kit\t5\tstore-innsbruck-mitte\ttrue\t"
+        "property_mismatch\t\t\t0\t0\t5\trequested properties do not exactly match catalogue product\n"
+    )
+    assert fn is not None
+    assert vm.write_contents.get(export) == expected
+    print("red: prod crosslist keeps description product when specs conflict")
+
+
 def main():
     test_normal_completion()
     test_security_denial()
@@ -5793,6 +6147,12 @@ def main():
     test_red_inventory_count_proc_fallback_under_sql_outage()
     test_red_proc_store_sibling_inventory_file()
     test_red_prod_purchase_request_crosslist_writes_policy_tsv()
+    test_red_prod_crosslist_parses_multiline_specs_without_polluting_description()
+    test_red_prod_crosslist_uses_specs_to_choose_same_family_candidate()
+    test_red_prod_crosslist_description_numeric_variant_breaks_spec_tie()
+    test_red_prod_crosslist_drops_ocr_noise_before_candidate_search()
+    test_red_prod_crosslist_parses_ascii_art_prefixed_row_and_specs()
+    test_red_prod_crosslist_description_product_wins_over_conflicting_specs()
     test_degradation_gate_rejects_points_and_percent_regression()
     test_degradation_gate_rejects_security_miss_even_when_score_is_high()
     test_degradation_gate_accepts_only_points_and_percent_pass()
