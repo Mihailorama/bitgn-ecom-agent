@@ -176,3 +176,4 @@ Important miss classes from scorer details:
 | 2026-05-31 18:41 | codex:gpt-5.3-codex | 72.7% | 68/100 | 2368s | 92s | 6 |
 | 2026-05-31 20:24 | codex:gpt-5.3-codex | 67.3% | 61/100 | 1188s | 66s | 6 |
 | 2026-05-31 21:30 | codex:gpt-5.3-codex | 77.5% | 70/100 | 794s | 44s | 6 |
+| 2026-05-31 21:59 | codex:gpt-5.3-codex | 75.8% | 71/100 | 1011s | 56s | 6 |

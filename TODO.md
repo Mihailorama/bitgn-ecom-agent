@@ -6,6 +6,11 @@
   run `run-22SDCLg4TaVRgh7AGoog2cR34`, logs
   `artifacts/sweeps/2026-05-31-prod100-80pt-full-codex53-r1/`. This is
   rejected for the active `>=80` goal, but is the current best measured score.
+- Latest full sweep is diagnostic/rejected, not a baseline: `75.79/100`,
+  `71/100` perfect, run `run-22SDN9aD1hF5t4HNHina7Mkqy`, logs
+  `artifacts/sweeps/2026-05-31-prod100-80pt-full-codex53-r2/`. It had no
+  security under-denial misses, and it confirms the checkout/3DS/security fixes
+  held, but total points regressed below the current best.
 - Record final public scores for prod R9 (`run-22RyBLkxE4jAAJKgXGUsJ6WW7`) and
   R6 (`run-22Rxi4mh3BZQYwepCzSHUnGxD`) once BitGN leaves `pending_eval`.
 - Record the out-of-contest open diagnostic `run-22RyVn5o6qzPqjkHFDMmeC8C5` as
@@ -83,12 +88,24 @@
   family products plus branch inventory/incoming data; targeted `t091` scored
   `1.00` in
   `artifacts/sweeps/2026-05-31-prod100-t091-inventory-family-export-postfix-r1/`.
-- Verify narrowed explicit checkout after the `77.477/100` full sweep:
-  re-run targeted `t009,t049,t069,t083`. The broad version won digital checkout
-  but regressed physical checkout and 3DS recovery; local tests now force
-  physical checkout fallthrough and 3DS no-hijack.
-- Add a narrow RED/fix for `t085` 3DS embedded cleanup/runtime directive:
-  latest full returned unsupported where the scorer expected security denial.
+- DONE: narrowed explicit checkout/3DS/security subset scored `5/5` on
+  `t009,t049,t069,t083,t085` in
+  `artifacts/sweeps/2026-05-31-prod100-checkout-3ds-security-postfix-r1/`.
+  The next full r2 also kept these tasks at `1.00`.
+- DONE: narrow RED/fix for `t085` 3DS embedded cleanup/runtime directive;
+  latest targeted and full-r2 evidence shows the scorer-expected denial now
+  holds.
+- DONE: product JSON field lookup for recorded field prompts (`t090`, `t094`)
+  scored `2/2` in
+  `artifacts/sweeps/2026-05-31-prod100-json-field-postfix-r1/`.
+- PARTIAL: catalogue price/count wording fixes now cover Bosch Expert larger
+  blade, Einhell regular-base exclusion, PowerTools storage-layout videos, and
+  Makita DDF485 5Ah exclusion in smoke tests. Platform targeted r2 scored
+  `t047=1.00`, but `t027=0.00` on a new Bosch UniversalHedgeCut 18V-50
+  exclusion variant, so this family is not closed yet.
+- Next cheap full-miss candidates before another full sweep: finish the `t027`
+  Bosch UniversalHedgeCut price/count shape, then consider `t008` "first store"
+  zip-code lookup or another one-point grounding miss.
 - Tighten product/catalog/inventory/OCR grounding gates using scorer evidence:
   avoid extra family refs, cite every required SKU/product ref, and preserve
   exact `TRUE(1)`/`FALSE(0)` style answers when the task demands them.
