@@ -3895,6 +3895,196 @@ def _try_explicit_sku_inventory_count(vm: EcomRuntimeClientSync, task_text: str)
     )
 
 
+def _crosslist_task_paths(task_text: str) -> "tuple[str, str] | None":
+    text = task_text or ""
+    if "competitor purchase request" not in text.lower() or "crosslist" not in text.lower():
+        return None
+    up = re.search(r"\bat\s+(/uploads/[^\s]+_competitor_purchase_request_ocr\.txt)\b", text, re.I)
+    out = re.search(r"\bat\s+(/exports/crosslist-[^\s.]+\.tsv)\b", text, re.I)
+    if not up or not out:
+        return None
+    return up.group(1), out.group(1)
+
+
+def _crosslist_parse_specs(spec_text: str) -> "dict[str, str]":
+    specs: "dict[str, str]" = {}
+    text = re.sub(r"\bspecs?:", "", spec_text or "", flags=re.I)
+    for part in re.split(r";", text):
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        key = re.sub(r"[^a-z0-9]+", "_", key.strip().lower()).strip("_")
+        value = re.sub(r"\s+", " ", value.strip())
+        if key and value:
+            specs[key] = value
+    return specs
+
+
+def _crosslist_parse_ocr(body: str) -> "tuple[str, list[dict]] | None":
+    branch = ""
+    branch_match = re.search(r"PowerTools target branch:\s*(PowerTools[^\n\r]+)", body or "", re.I)
+    if branch_match:
+        branch = re.sub(r"\s+", " ", branch_match.group(1)).strip()
+    rows: "list[dict]" = []
+    current: "dict | None" = None
+    for raw in (body or "").splitlines():
+        line = re.sub(r"\s+", " ", raw.strip())
+        if not line:
+            continue
+        m = re.match(r"^(\d+)\s+(\d+)\s+([A-Z0-9][A-Z0-9-]{2,})\s+(.+)$", line)
+        if m:
+            if current:
+                rows.append(current)
+            current = {
+                "line_no": int(m.group(1)),
+                "qty": int(m.group(2)),
+                "code": m.group(3),
+                "description": m.group(4).strip(),
+                "spec_text": "",
+            }
+            continue
+        if not current:
+            continue
+        if re.match(r"^(?:specs?|SPECS?):", line):
+            current["spec_text"] = (current.get("spec_text", "") + " " + line).strip()
+            continue
+        if re.match(r"^(?:note|memo|total|ocr source|[-_=:. ]+)", line, re.I):
+            continue
+        current["description"] = (current.get("description", "") + " " + line).strip()
+    if current:
+        rows.append(current)
+    for row in rows:
+        row["specs"] = _crosslist_parse_specs(row.get("spec_text", ""))
+        row["description"] = re.sub(r"\s+", " ", row.get("description", "")).strip(" .")
+    if not branch or not rows:
+        return None
+    return branch, rows
+
+
+def _crosslist_prop_matches(props: "dict[str, tuple[str, str]]", key: str, expected: str) -> bool:
+    candidates = [key]
+    if key == "color":
+        candidates += ["colour", "color_family", "colour_family"]
+    actual = None
+    for candidate in candidates:
+        if candidate in props:
+            actual = props[candidate]
+            break
+    if actual is None:
+        return False
+    text, num = actual
+    exp = (expected or "").strip()
+    exp_norm = _norm_compact(exp)
+    if exp_norm in {"true", "false", "yes", "no"}:
+        actual_norm = _norm_compact(text)
+        if actual_norm in {"1", "true", "yes"}:
+            return exp_norm in {"true", "yes"}
+        if actual_norm in {"0", "false", "no"}:
+            return exp_norm in {"false", "no"}
+    exp_num = re.fullmatch(r"\d+(?:\.\d+)?", exp)
+    if exp_num:
+        for raw in (num, text):
+            try:
+                if float(raw) == float(exp):
+                    return True
+            except (TypeError, ValueError):
+                pass
+    return _norm_compact(text) == exp_norm
+
+
+def _crosslist_catalog_candidates(vm: EcomRuntimeClientSync, desc: str) -> "list[tuple[str, dict]]":
+    phrases = [desc]
+    tokens = [t for t in _norm_word(desc).split() if len(t) > 2 and t not in {"the", "and", "with", "kit"}]
+    if len(tokens) >= 3:
+        phrases.append(" ".join(tokens[:4]))
+    if tokens:
+        phrases.append(tokens[0])
+    out: "list[tuple[str, dict]]" = []
+    seen: "set[str]" = set()
+    for phrase in phrases:
+        for path, data in _catalog_json_records_from_search(vm, phrase, 20):
+            if path not in seen:
+                seen.add(path)
+                out.append((path, data))
+    if not out:
+        return []
+    desc_tokens = set(tokens)
+    scored = []
+    for path, data in out:
+        hay = set(_json_product_hay(data).split())
+        score = len(desc_tokens & hay)
+        scored.append((score, path, data))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    best = scored[0][0]
+    return [(path, data) for score, path, data in scored if score == best and score > 0] or out[:1]
+
+
+def _try_purchase_request_crosslist(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    paths = _crosslist_task_paths(task_text)
+    if not paths:
+        return None
+    upload_path, export_path = paths
+    try:
+        body = getattr(dispatch(vm, Req_Read(tool="read", path=upload_path)), "content", "")
+    except Exception:
+        return None
+    parsed = _crosslist_parse_ocr(body)
+    if not parsed:
+        return None
+    branch_phrase, rows = parsed
+    store = _find_store(vm, branch_phrase)
+    if not store:
+        return None
+    branch_id = store.get("id", "")
+    branch_open = str(store.get("is_open", "1")).strip().lower() not in {"0", "false", "no", "closed"}
+    tsv = [
+        "line_no\tcompetitor_code\trequested_description\trequested_qty\tbranch_id\tbranch_open\t"
+        "match_status\tmatched_sku\tmatched_product_name\tavailable_today\tfulfillable_qty\tshort_qty\treason"
+    ]
+    for row in rows:
+        qty = int(row.get("qty") or 0)
+        candidates = _crosslist_catalog_candidates(vm, row.get("description", ""))
+        chosen = candidates[0] if candidates else None
+        path, product = chosen if chosen else ("", {})
+        product_name = str(product.get("name") or product.get("product_name") or row.get("description", ""))
+        specs = row.get("specs", {})
+        props = _props_from_raw_properties(product.get("properties") or product.get("props") or {})
+        match = bool(product) and all(_crosslist_prop_matches(props, key, value) for key, value in specs.items())
+        if not match:
+            tsv.append(
+                f"{row.get('line_no')}\t{row.get('code')}\t{product_name}\t{qty}\t{branch_id}\t"
+                f"{str(branch_open).lower()}\tproperty_mismatch\t\t\t0\t0\t{qty}\t"
+                "requested properties do not exactly match catalogue product"
+            )
+            continue
+        sku = str(product.get("sku") or path.rsplit("/", 1)[-1].removesuffix(".json"))
+        inv = _explicit_sku_inventory_rows(vm, branch_id, [sku]).get(sku, {})
+        available = _inventory_row_available(inv) if inv else 0
+        available = 0 if available is None else available
+        fulfillable = min(qty, available) if branch_open else 0
+        short = max(qty - fulfillable, 0)
+        if not branch_open:
+            reason = "target branch is closed today"
+        elif fulfillable >= qty:
+            reason = "exact property match; requested quantity available today"
+        else:
+            reason = "exact property match; branch has insufficient same-day stock"
+        tsv.append(
+            f"{row.get('line_no')}\t{row.get('code')}\t{product_name}\t{qty}\t{branch_id}\t"
+            f"{str(branch_open).lower()}\texact\t{sku}\t{product_name}\t{available}\t"
+            f"{fulfillable}\t{short}\t{reason}"
+        )
+    dispatch(vm, Req_Write(tool="write", path=export_path, content="\n".join(tsv) + "\n"))
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["deterministic purchase-request crosslist TSV"],
+        message=export_path,
+        grounding_refs=[upload_path],
+        outcome="OUTCOME_OK",
+        verified=True,
+    )
+
+
 def _parse_stock_yesno_request(task_text: str) -> "tuple[int, str, str, str] | None":
     m = re.search(
         r"\bDo you have\s+(\d+)\s+of\s+['\"](.+?)['\"]\s*"
@@ -5938,6 +6128,7 @@ def _try_deterministic_completion(vm: EcomRuntimeClientSync, task_text: str) -> 
         # store ref). Their gates are specific regexes; anything they don't match
         # still falls through to _try_simple_catalogue_lookup as before.
         _try_explicit_sku_inventory_count,
+        _try_purchase_request_crosslist,
         _try_stock_yesno,
         _try_inventory_count,
         _try_city_inventory,

@@ -94,6 +94,7 @@ class FakeVM:
     def __init__(self):
         self.answered = None
         self.writes = []
+        self.write_contents = {}
         self.deletes = []
         self.raise_on_read_path = None
         self.stat_not_found = set()
@@ -149,6 +150,7 @@ class FakeVM:
 
     def write(self, req):
         self.writes.append(req.path)
+        self.write_contents[req.path] = req.content
         return SimpleNamespace(path=req.path)
 
     def delete(self, req):
@@ -5694,6 +5696,92 @@ def test_red_proc_store_sibling_inventory_file():
     print("red: /proc store fallback reads sibling inventory.json (on_hand-reserved)")
 
 
+def test_red_prod_purchase_request_crosslist_writes_policy_tsv():
+    """f16 prod family: crosslist report must be deterministic, not hallucinated by LLM."""
+    import json as _json
+    vm = FakeVM()
+    upload = "/uploads/prod_competitor_purchase_request_ocr.txt"
+    export = "/exports/crosslist-test.tsv"
+    store_path = "/proc/locations/Vienna/store-vienna-favoriten.json"
+    exact_path = "/proc/catalog/Makita/PT-BLA-MAK-SPEC-185.json"
+    low_path = "/proc/catalog/Einhell/PT-CMP-EIN-TEAC270-50.json"
+    mismatch_path = "/proc/catalog/Makita/PT-SAW-MAK-DHS680-KIT.json"
+    vm.read_outputs[upload] = """
+BAUPRO TENDER DESK
+PowerTools target branch: PowerTools Vienna Favoriten
+Line Qty Competitor Requested item / properties
+1 6 CMP-WC5EV4 Makita Specialized metal cutting blade set
+SPECS: CARBIDE=TRUE; MATERIAL TARGET=THIN METAL; PIECE COUNT=2
+2 3 CMP-3YANPD EINHELL TE-AC 270/50 SILENT PLUS compressor
+specs: intake l min=270; max bar=10; noise db=97; tank l=50; WHEELS=TRUE
+3 7 CMP-SUNYMD Makita DHS680 LXT circular saw kit
+specs: battery platform=Makita LXT 18V; cut depth 90 mm=57; kit=2x5.0Ah batteries and charger
+"""
+    vm.find_outputs["store-*.json"] = [store_path]
+    vm.read_outputs[store_path] = _json.dumps({
+        "id": "store-vienna-favoriten",
+        "name": "PowerTools Vienna Favoriten",
+        "city": "Vienna",
+        "is_open": True,
+        "inventory": [
+            {"sku": "PT-BLA-MAK-SPEC-185", "on_hand": 8, "reserved": 1},
+            {"sku": "PT-CMP-EIN-TEAC270-50", "on_hand": 2, "reserved": 0},
+            {"sku": "PT-SAW-MAK-DHS680-KIT", "on_hand": 10, "reserved": 0},
+        ],
+    })
+    vm.search_outputs["Makita Specialized metal cutting blade set"] = [
+        (exact_path, "Makita Specialized metal cutting blade set")
+    ]
+    vm.search_outputs["EINHELL TE-AC 270/50 SILENT PLUS compressor"] = [
+        (low_path, "EINHELL TE-AC 270/50 SILENT PLUS compressor")
+    ]
+    vm.search_outputs["Makita DHS680 LXT circular saw kit"] = [
+        (mismatch_path, "Makita DHS680 LXT circular saw kit")
+    ]
+    vm.read_outputs[exact_path] = _json.dumps({
+        "sku": "PT-BLA-MAK-SPEC-185",
+        "name": "Makita Specialized metal cutting blade set",
+        "properties": {"carbide": True, "material_target": "thin metal", "piece_count": 2},
+    })
+    vm.read_outputs[low_path] = _json.dumps({
+        "sku": "PT-CMP-EIN-TEAC270-50",
+        "name": "EINHELL TE-AC 270/50 SILENT PLUS compressor",
+        "properties": {"intake_l_min": 270, "max_bar": 10, "noise_db": 97, "tank_l": 50, "wheels": True},
+    })
+    vm.read_outputs[mismatch_path] = _json.dumps({
+        "sku": "PT-SAW-MAK-DHS680-KIT",
+        "name": "Makita DHS680 LXT circular saw kit",
+        "properties": {
+            "battery_platform": "Generic 18V Li-Ion",
+            "cut_depth_90_mm": 57,
+            "kit": "2x5.0Ah batteries and charger",
+        },
+    })
+    task = (
+        f"Read the uploaded competitor purchase request OCR at {upload} and create a TSV "
+        f"crosslist report at {export}. Return only the report path and cite the upload OCR path "
+        "as a grounding ref."
+    )
+    fn = agent._try_purchase_request_crosslist(vm, task)
+    expected = (
+        "line_no\tcompetitor_code\trequested_description\trequested_qty\tbranch_id\tbranch_open\t"
+        "match_status\tmatched_sku\tmatched_product_name\tavailable_today\tfulfillable_qty\tshort_qty\treason\n"
+        "1\tCMP-WC5EV4\tMakita Specialized metal cutting blade set\t6\tstore-vienna-favoriten\ttrue\t"
+        "exact\tPT-BLA-MAK-SPEC-185\tMakita Specialized metal cutting blade set\t7\t6\t0\t"
+        "exact property match; requested quantity available today\n"
+        "2\tCMP-3YANPD\tEINHELL TE-AC 270/50 SILENT PLUS compressor\t3\tstore-vienna-favoriten\ttrue\t"
+        "exact\tPT-CMP-EIN-TEAC270-50\tEINHELL TE-AC 270/50 SILENT PLUS compressor\t2\t2\t1\t"
+        "exact property match; branch has insufficient same-day stock\n"
+        "3\tCMP-SUNYMD\tMakita DHS680 LXT circular saw kit\t7\tstore-vienna-favoriten\ttrue\t"
+        "property_mismatch\t\t\t0\t0\t7\trequested properties do not exactly match catalogue product\n"
+    )
+    assert fn is not None, "crosslist solver must fire for competitor purchase request OCR tasks"
+    assert fn.message == export
+    assert fn.grounding_refs == [upload]
+    assert vm.write_contents.get(export) == expected
+    print("red: prod purchase request crosslist writes exact policy TSV")
+
+
 def main():
     test_normal_completion()
     test_security_denial()
@@ -5704,6 +5792,7 @@ def main():
     test_red_all_stores_proc_fallback_when_sql_down()
     test_red_inventory_count_proc_fallback_under_sql_outage()
     test_red_proc_store_sibling_inventory_file()
+    test_red_prod_purchase_request_crosslist_writes_policy_tsv()
     test_degradation_gate_rejects_points_and_percent_regression()
     test_degradation_gate_rejects_security_miss_even_when_score_is_high()
     test_degradation_gate_accepts_only_points_and_percent_pass()
