@@ -149,3 +149,52 @@ Run `run-22RyVn5o6qzPqjkHFDMmeC8C5`, `gpt-5.3-codex` API, PARALLEL=20, submitted
   - **Repro:** `BITGN_API_KEY=... MODEL_ID=claude:sonnet uv run python main.py t01`
     (found 2026-05-30 during a prod diagnostic; codex/api backends unaffected — they
     pass the prompt via stdin).
+
+## 2026-05-30 — prod100 claude-only path to >=95/100: family-level partition
+
+**Status:** best claude-only full sweep = **45/100 solved (46.13 pts)**
+(`artifacts/sweeps/2026-05-30-prod100-sonnet-procfallback-full-r1`, sonnet +
+/proc SQL-outage fallback). Goal is >=95 → recover ~50 of 55 failing tasks.
+**No security misses** in the baseline. World re-randomizes per run (±12 noise) →
+validate every family fix with >=2 sonnet sweeps before trusting it.
+
+**Prod = 20 families × 5 instances** (family = ((n-1)%20)+1). Same solver serves
+all 5 instances; instances differ only by randomized world, so a solver fix
+recovers up to 5 tasks at once. Path to 95 ≈ 12–15 family fixes. Attack order
+(highest leverage / most deterministic first):
+
+- **f03 (0/5)** t003/023/043/063/083 — receipt-basket exact stock check
+  (`_try_receipt_exact_basket_stock_check` ~L1195). Cites all receipt SKUs →
+  ref-set mismatch. Deterministic. **+5.**
+- **f16 (0/5)** t016/036/056/076/096 — crosslist TSV export. No deterministic
+  solver; LLM writes random ID not verbatim `/exports/crosslist-<ID>.tsv`, grader
+  wants lowercased path. Need deterministic extract→lowercase→write solver. **+5.**
+- **f02 (1/5)** t002/022/042/062 — product-check base-spec fallback
+  (`_try_product_check` ~L3387) cites all siblings → extra refs. **+4.**
+- **f06 (1/5)** t006/026/046/086 — same product-check ref cluster. **+4.**
+- **f07 (1/5)** t007/027/047/067/087 — catalogue price-count
+  (`_try_catalogue_price_count` ~L3220) returns grounding_refs=[] → missing refs. **+4.**
+- **f11 (1/5)** t011/031/071/091 + t051 — (incl. security t011/t046 cross-customer;
+  verify guard fires, do NOT regress DENIED_SECURITY). **+4.**
+- **f04 (1/5)** t004/024/044/064 — dispatch-wave optimization, 100% LLM, no solver;
+  needs lane-capacity/ETA/net-profit compute. Hardest; fix last. **+4.**
+- **f05 (2/5)** t025/t045/t085 — inventory mode #3 ("short of N but reaches N with
+  incoming stock within D days") unhandled in
+  `_parse_explicit_sku_inventory_count_request` (~L3589). **+3.**
+- **f15 (2/5, partials t035=.63 t055=.49)** archive-fraud
+  (`_try_archive_fraud_total` ~L5103) under-detects + false positives + t095. **+3.**
+- **f09 (2/5)** t029/069/089 — checkout: `basket-0091` (dash) not matched by
+  `_checkout_request_without_explicit_basket` regex (`basket_` only) ~L4159. **+3.**
+- **f17 (2/5)** t017/037/097, **f01 (2/5)** t041/061/081, **f10 (2/5)** t010/050/070
+  — classify from logs. **+3 each.**
+- **f14/f18/f19/f20 (3-4/5)** — t074, t098/099 (discount `/proc` basket-ref
+  fallback), t079 (cart-edit: drop `/proc/carts` from refs), t080/t100. **+1-2 each.**
+
+Fully solved (don't regress): f08, f12, f13.
+
+**Method per family:** run the family subset (runner confirmed working —
+`uv run python run_mixed_parallel.py t003 t023 t043 t063 t083`), grep
+`$SWEEP_LOG_DIR` logs for the actual `report_completion outcome=/grounding_refs=`
+vs grader-expected, write RED test in smoke_test.py from the log, make the
+isolated solver fix, re-run family subset, then >=2 full sonnet sweeps before
+declaring. Never ship a task-shape gate that fires for neighboring solved tasks.

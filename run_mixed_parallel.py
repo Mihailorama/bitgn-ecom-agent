@@ -301,6 +301,8 @@ def _run_one(
         start_secs = time.time() - start0
         return (trial_id, None, None, f"start_trial: {exc.code} {exc.message}", start_secs, "", 0.0, 0.0)
 
+    if os.environ.get("FILTER_DEBUG"):
+        print(f"FILTER_DEBUG trial_id={trial_id} planned={planned_task_id!r} start_trial.task_id={trial.task_id!r} in_filter={trial.task_id in task_filter}", flush=True)
     if task_filter and trial.task_id not in task_filter:
         if reservation:
             reservation.release()
@@ -402,7 +404,18 @@ def main() -> None:
         "codex": manager.BoundedSemaphore(MIXED_CODEX_LIMIT),
     }
     benchmark_task_ids = {task.task_id for task in bench.tasks}
+    # Trials are provisioned asynchronously: get_run right after start_run can
+    # return 0 trials, which would silently run nothing. Poll until they appear.
     run_head = _retry(lambda: client.get_run(GetRunRequest(run_id=run.run_id)))
+    for _ in range(45):
+        if run_head.trials or run.trial_ids:
+            break
+        time.sleep(2.0)
+        run_head = _retry(lambda: client.get_run(GetRunRequest(run_id=run.run_id)))
+    print(
+        f"trials provisioned: get_run={len(run_head.trials)} start_run={len(run.trial_ids)}",
+        flush=True,
+    )
     trial_task_ids = {
         trial.trial_id: trial.task_id
         for trial in run_head.trials
@@ -410,6 +423,11 @@ def main() -> None:
     }
     if not trial_task_ids:
         trial_task_ids = {trial_id: trial_id for trial_id in run.trial_ids if trial_id in benchmark_task_ids}
+
+    # `run.trial_ids` from start_run is occasionally empty right after creation
+    # (trials provisioned async); `run_head.trials` from get_run is the reliable
+    # source. Prefer it so subset/filtered runs don't silently execute nothing.
+    trial_ids_to_run = [t.trial_id for t in run_head.trials if t.trial_id] or list(run.trial_ids)
 
     results = []
     submit_result = None
@@ -420,7 +438,7 @@ def main() -> None:
         with ProcessPoolExecutor(max_workers=MIXED_PARALLEL, mp_context=ctx) as pool:
             futures = {
                 pool.submit(run_one, tid, task_filter, semaphores, trial_task_ids): tid
-                for tid in run.trial_ids
+                for tid in trial_ids_to_run
             }
             for fut in as_completed(futures):
                 task_id, score, detail, err, secs, model_id, platform_secs, wait_secs = fut.result()
