@@ -173,3 +173,5 @@ Important miss classes from scorer details:
 - Archive fraud still gives partials (`t015`, `t055`) from recovered amount plus
   false positives, so row-level archive filtering remains a high-value task once
   security and zero-score grounding are under control.
+| 2026-05-31 18:41 | codex:gpt-5.3-codex | 72.7% | 68/100 | 2368s | 92s | 6 |
+| 2026-05-31 20:24 | codex:gpt-5.3-codex | 67.3% | 61/100 | 1188s | 66s | 6 |
