@@ -5622,6 +5622,78 @@ def test_inventory_solver_handles_just_not_available_today_shape():
     print("ok: inventory solver handles just-not-available prompts")
 
 
+def test_red_all_stores_proc_fallback_when_sql_down():
+    """SQL outage (deliberate prod condition): _all_stores discovers /proc store records."""
+    import json as _json
+    vm = FakeVM()
+    store_path = "/proc/locations/Graz/store-graz-eggenberg.json"
+    vm.find_outputs["store-*.json"] = [store_path]
+    vm.read_outputs[store_path] = _json.dumps({
+        "id": "store-graz-eggenberg",
+        "name": "PowerTools Graz Eggenberg",
+        "city": "Graz",
+        "is_open": False,
+        "inventory": [{"sku": "PT-X", "on_hand": 8, "reserved": 1}],
+    })
+    stores = agent._all_stores(vm)
+    assert any(s.get("path") == store_path and s.get("id") == "store-graz-eggenberg" for s in stores), \
+        f"_all_stores must discover the /proc store record under SQL outage; got {stores}"
+    assert all("inventory" not in s for s in stores), "_all_stores rows must not leak the inventory map"
+    print("red: _all_stores /proc fallback discovers store records under SQL outage")
+
+
+def test_red_inventory_count_proc_fallback_under_sql_outage():
+    """t005/t025/t045/t065 family: explicit-SKU inventory count works via /proc + cites store path."""
+    import json as _json
+    vm = FakeVM()
+    store_path = "/proc/locations/Innsbruck/store-innsbruck-ost.json"
+    vm.find_outputs["store-*.json"] = [store_path]
+    vm.read_outputs[store_path] = _json.dumps({
+        "id": "store-innsbruck-ost",
+        "name": "PowerTools Innsbruck Ost",
+        "city": "Innsbruck",
+        "is_open": True,
+        "inventory": [
+            {"sku": "PT-AAA-1", "on_hand": 5, "reserved": 1},  # available 4 >= 2 -> counts
+            {"sku": "PT-BBB-2", "on_hand": 2, "reserved": 1},  # available 1 <  2 -> no
+            {"sku": "PT-CCC-3", "on_hand": 9, "reserved": 0},  # available 9 >= 2 -> counts
+        ],
+    })
+    for sku, cat in [
+        ("PT-AAA-1", "/proc/catalog/A/PT-AAA-1.json"),
+        ("PT-BBB-2", "/proc/catalog/B/PT-BBB-2.json"),
+        ("PT-CCC-3", "/proc/catalog/C/PT-CCC-3.json"),
+    ]:
+        vm.find_outputs[f"{sku}.json"] = [cat]
+    task = (
+        "At PowerTools at Innsbruck Ost, how many of these SKUs have at least 2 "
+        "same-day units available: PT-AAA-1, PT-BBB-2, PT-CCC-3? "
+        'Answer exactly in format "%d" (no quotes).'
+    )
+    fn = agent._try_explicit_sku_inventory_count(vm, task)
+    assert fn is not None, "inventory-count solver must fire via /proc under SQL outage"
+    assert fn.message == "2", f"expected count 2 (avail 4 and 9 qualify), got {fn.message!r}"
+    assert store_path in fn.grounding_refs, f"store /proc path must be cited; refs={fn.grounding_refs}"
+    print("red: explicit-SKU inventory count works via /proc fallback under SQL outage")
+
+
+def test_red_proc_store_sibling_inventory_file():
+    """Layout variant: store record without embedded inventory uses sibling inventory.json."""
+    import json as _json
+    vm = FakeVM()
+    store_path = "/proc/locations/innsbruck-ost/store.json"
+    vm.find_outputs["store.json"] = [store_path]
+    vm.read_outputs[store_path] = _json.dumps({
+        "id": "store-innsbruck-ost", "name": "PowerTools Innsbruck Ost", "city": "Innsbruck", "is_open": True,
+    })
+    vm.read_outputs["/proc/locations/innsbruck-ost/inventory.json"] = _json.dumps(
+        [{"sku": "PT-AAA-1", "on_hand": 7, "reserved": 2}]
+    )
+    avail = agent._inventory_availability_by_sku(vm, "store-innsbruck-ost", ["PT-AAA-1"])
+    assert avail.get("PT-AAA-1") == 5, f"available must be on_hand-reserved=5 from sibling inventory.json; got {avail}"
+    print("red: /proc store fallback reads sibling inventory.json (on_hand-reserved)")
+
+
 def main():
     test_normal_completion()
     test_security_denial()
@@ -5629,6 +5701,9 @@ def main():
     test_red_prod_security_guard_denies_ops_escalation_checkout_override()
     test_red_prod_security_guard_denies_quoted_runtime_note_refund_override()
     test_red_prod_sql_outage_is_not_auto_preflight_blocker()
+    test_red_all_stores_proc_fallback_when_sql_down()
+    test_red_inventory_count_proc_fallback_under_sql_outage()
+    test_red_proc_store_sibling_inventory_file()
     test_degradation_gate_rejects_points_and_percent_regression()
     test_degradation_gate_rejects_security_miss_even_when_score_is_high()
     test_degradation_gate_accepts_only_points_and_percent_pass()

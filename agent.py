@@ -2630,6 +2630,108 @@ def _emit_inventory_diagnostics(
         print("INVENTORY_DIAG " + json.dumps(record, sort_keys=True))
 
 
+_PROC_STORE_CACHE_ATTR = "_proc_store_cache"
+
+
+def _coerce_int_or_none(value) -> "int | None":
+    if value is None or value == "":
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _store_inventory_map(data: dict, vm: EcomRuntimeClientSync, store_dir: str) -> "dict[str, dict]":
+    """{sku: {on_hand, reserved}} from an embedded `inventory` array or a sibling inventory.json.
+
+    Prod randomizes whether the store record carries inventory inline or in a
+    sibling file, so try both.
+    """
+    inv = data.get("inventory")
+    if not isinstance(inv, list):
+        inv = None
+    if inv is None and store_dir:
+        try:
+            body = getattr(dispatch(vm, Req_Read(tool="read", path=store_dir + "/inventory.json")), "content", "")
+            parsed = json.loads(body)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, list):
+            inv = parsed
+        elif isinstance(parsed, dict) and isinstance(parsed.get("inventory"), list):
+            inv = parsed["inventory"]
+    out: "dict[str, dict]" = {}
+    for item in inv or []:
+        if not isinstance(item, dict):
+            continue
+        sku = str(item.get("sku") or item.get("product_sku") or "")
+        if sku:
+            out[sku] = item
+    return out
+
+
+def _proc_store_records(vm: EcomRuntimeClientSync) -> "list[dict]":
+    """Discover store records under /proc when SQL is down (a deliberate prod condition).
+
+    Layout is randomized per trial (flat vs nested, /proc/locations vs /proc/stores,
+    varied id forms, inline vs sibling inventory), so scan broadly and keep records
+    that look like stores (carry is_open/city or an inventory array).
+    """
+    cache = getattr(vm, _PROC_STORE_CACHE_ATTR, None)
+    if cache is not None:
+        return cache
+    paths: "list[str]" = []
+    seen: "set[str]" = set()
+    for root in ("/proc/locations", "/proc/stores"):
+        for pat in ("store-*.json", "store.json", "*.json"):
+            try:
+                found = dispatch(vm, Req_Find(tool="find", root=root, name=pat, kind="files", limit=20))
+            except Exception:
+                continue
+            for p in getattr(found, "paths", []) or []:
+                if p not in seen and isinstance(p, str) and p.endswith(".json"):
+                    seen.add(p)
+                    paths.append(p)
+    records: "list[dict]" = []
+    for p in paths:
+        try:
+            body = getattr(dispatch(vm, Req_Read(tool="read", path=p)), "content", "")
+            data = json.loads(body)
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        if not (("is_open" in data) or ("city" in data) or isinstance(data.get("inventory"), list)):
+            continue
+        stem = p.rsplit("/", 1)[-1].removesuffix(".json")
+        store_dir = p.rsplit("/", 1)[0]
+        is_open_raw = data.get("is_open", True)
+        records.append({
+            "id": str(data.get("store_id") or data.get("id") or stem),
+            "path": p,
+            "name": str(data.get("name") or data.get("store_name") or ""),
+            "city": str(data.get("city") or ""),
+            "is_open": "0" if str(is_open_raw).strip().lower() in {"0", "false", "no", "closed"} else "1",
+            "inventory": _store_inventory_map(data, vm, store_dir),
+        })
+    try:
+        setattr(vm, _PROC_STORE_CACHE_ATTR, records)
+    except Exception:
+        pass
+    return records
+
+
+def _proc_store_by_id(vm: EcomRuntimeClientSync, store_id: str) -> "dict | None":
+    if not store_id:
+        return None
+    for rec in _proc_store_records(vm):
+        path = rec.get("path", "")
+        if rec.get("id") == store_id or path.endswith(f"/{store_id}.json") or f"/{store_id}/" in path:
+            return rec
+    return None
+
+
 def _all_stores(vm: EcomRuntimeClientSync) -> "list[dict[str, str]]":
     queries = [
         "SELECT store_id AS id, record_path AS path, store_name AS name, city, is_open FROM stores ORDER BY store_id;",
@@ -2639,7 +2741,8 @@ def _all_stores(vm: EcomRuntimeClientSync) -> "list[dict[str, str]]":
         rows = _csv_dicts(_exec_sql_stdout(vm, q))
         if rows:
             return rows
-    return []
+    # SQL outage is a deliberate prod task condition: fall back to /proc records.
+    return [{k: v for k, v in rec.items() if k != "inventory"} for rec in _proc_store_records(vm)]
 
 
 def _find_store(vm: EcomRuntimeClientSync, phrase: str) -> "dict[str, str] | None":
@@ -3583,6 +3686,18 @@ WHERE store_id={_sql_quote(store_id)}
         rows = _csv_dicts(_exec_sql_stdout(vm, q))
         if rows:
             return {r.get("sku", ""): int(r.get("available_today") or 0) for r in rows}
+    rec = _proc_store_by_id(vm, store_id)
+    if rec:
+        inv = rec.get("inventory", {})
+        out: "dict[str, int]" = {}
+        for sku in skus:
+            item = inv.get(sku)
+            if item:
+                oh = _coerce_int_or_none(item.get("on_hand")) or 0
+                rs = _coerce_int_or_none(item.get("reserved")) or 0
+                out[sku] = max(oh - rs, 0)
+        if out:
+            return out
     return {}
 
 
@@ -3636,6 +3751,18 @@ WHERE sku IN ({sku_list});
                 out[sku] = path
         if len(out) == len(skus):
             break
+    # /proc fallback for any SKU still unresolved (SQL outage): find its catalog json.
+    for sku in skus:
+        if sku in out:
+            continue
+        try:
+            found = dispatch(vm, Req_Find(tool="find", root="/proc/catalog", name=f"{sku}.json", kind="files", limit=5))
+        except Exception:
+            continue
+        for p in getattr(found, "paths", []) or []:
+            if isinstance(p, str) and p.startswith("/proc/catalog/") and p.endswith(f"/{sku}.json"):
+                out[sku] = p
+                break
     return out
 
 
@@ -3664,6 +3791,24 @@ WHERE store_id={_sql_quote(store_id)}
             sku = row.get("sku") or row.get("product_sku") or ""
             if sku:
                 out[sku] = row
+        if out:
+            return out
+    rec = _proc_store_by_id(vm, store_id)
+    if rec:
+        inv = rec.get("inventory", {})
+        out = {}
+        for sku in skus:
+            item = inv.get(sku)
+            if item:
+                oh = _coerce_int_or_none(item.get("on_hand")) or 0
+                rs = _coerce_int_or_none(item.get("reserved")) or 0
+                out[sku] = {
+                    "sku": sku,
+                    "available_today": str(max(oh - rs, 0)),
+                    "on_hand": str(oh),
+                    "physical_on_hand_quantity": str(oh),
+                    "reserved": str(rs),
+                }
         if out:
             return out
     return {}
@@ -5787,14 +5932,19 @@ def _try_deterministic_completion(vm: EcomRuntimeClientSync, task_text: str) -> 
         _try_sku_lookup_exclusion,
         _try_catalogue_price_count,
         _try_company_lore_date,
-        _try_simple_catalogue_lookup,
-        _try_product_check,
-        _try_catalogue_freeform_check,
-        _try_quote_table,
+        # Narrow inventory/stock solvers run BEFORE the generic catalogue lookup so
+        # the latter can't hijack "how many of these SKUs..." / "Do you have N of..."
+        # tasks (esp. under SQL outage, where it produced wrong answers missing the
+        # store ref). Their gates are specific regexes; anything they don't match
+        # still falls through to _try_simple_catalogue_lookup as before.
         _try_explicit_sku_inventory_count,
         _try_stock_yesno,
         _try_inventory_count,
         _try_city_inventory,
+        _try_simple_catalogue_lookup,
+        _try_product_check,
+        _try_catalogue_freeform_check,
+        _try_quote_table,
         _try_checkout_explicit_exception_guard,
         _try_checkout_clarification,
         _try_checkout_current_basket,
