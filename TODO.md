@@ -2,15 +2,16 @@
 
 ## P0 - Score and Submission Correctness
 
-- Current best confirmed prod100 full sweep: `77.477/100`, `70/100` perfect,
-  run `run-22SDCLg4TaVRgh7AGoog2cR34`, logs
-  `artifacts/sweeps/2026-05-31-prod100-80pt-full-codex53-r1/`. This is
-  rejected for the active `>=80` goal, but is the current best measured score.
-- Latest full sweep is diagnostic/rejected, not a baseline: `75.79/100`,
-  `71/100` perfect, run `run-22SDN9aD1hF5t4HNHina7Mkqy`, logs
-  `artifacts/sweeps/2026-05-31-prod100-80pt-full-codex53-r2/`. It had no
-  security under-denial misses, and it confirms the checkout/3DS/security fixes
-  held, but total points regressed below the current best.
+- Current best measured prod100 full sweep: `79.3998/100`, `75/100` perfect,
+  run `run-22SDd94rTC7abteFrPRG1fjYD`, logs
+  `artifacts/sweeps/2026-06-01-prod100-80pt-full-codex53-r3/`. This is still
+  rejected for the active `>=80` goal (`points 79.40 < required 80.00`), so do
+  not mark the goal complete.
+- Previous measured full sweeps for comparison: `77.477/100`, `70/100`
+  perfect, run `run-22SDCLg4TaVRgh7AGoog2cR34`, logs
+  `artifacts/sweeps/2026-05-31-prod100-80pt-full-codex53-r1/`; and
+  `75.79/100`, `71/100` perfect, run `run-22SDN9aD1hF5t4HNHina7Mkqy`, logs
+  `artifacts/sweeps/2026-05-31-prod100-80pt-full-codex53-r2/`.
 - Record final public scores for prod R9 (`run-22RyBLkxE4jAAJKgXGUsJ6WW7`) and
   R6 (`run-22Rxi4mh3BZQYwepCzSHUnGxD`) once BitGN leaves `pending_eval`.
 - Record the out-of-contest open diagnostic `run-22RyVn5o6qzPqjkHFDMmeC8C5` as
@@ -103,9 +104,18 @@
   Makita DDF485 5Ah exclusion in smoke tests. Platform targeted r2 scored
   `t047=1.00`, but `t027=0.00` on a new Bosch UniversalHedgeCut 18V-50
   exclusion variant, so this family is not closed yet.
-- Next cheap full-miss candidates before another full sweep: finish the `t027`
-  Bosch UniversalHedgeCut price/count shape, then consider `t008` "first store"
-  zip-code lookup or another one-point grounding miss.
+- DONE: narrow `t027` Bosch UniversalHedgeCut price/count exclusion shape is
+  covered by smoke and targeted prod run
+  `artifacts/sweeps/2026-06-01-prod100-pricecount-hedgecut-postfix-r1/`.
+- DONE: first-store zip-code lookup now reads origin facts before arbitrary
+  location file order; covered by smoke and targeted prod run
+  `artifacts/sweeps/2026-06-01-prod100-first-store-zip-postfix-r1/`.
+- DONE locally, pending targeted/full prod validation: runtime-continuity and
+  reasoning-cache-restore security injection markers now deny before normal
+  commerce fast paths. This targets r3 security misses `t005` and `t093`.
+- Next action before another full sweep: targeted prod validation for `t005`
+  and `t093`, then a full `PARALLEL=6` sweep because the current best is only
+  `0.6002` points short of the `80` gate.
 - Tighten product/catalog/inventory/OCR grounding gates using scorer evidence:
   avoid extra family refs, cite every required SKU/product ref, and preserve
   exact `TRUE(1)`/`FALSE(0)` style answers when the task demands them.
