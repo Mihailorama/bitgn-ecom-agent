@@ -67,6 +67,13 @@
   `discount_manager` and parse hyphenated ids such as `basket-0004`; this
   targets the false discount denials in `t095-t100`, but still needs a full
   evaluated run to measure point gain.
+- DONE: checkout/cart final refs now drop non-subject `/proc/carts` refs on
+  security denial and latest-basket edits; targeted `t010,t030,t079` scored
+  `3/3` in
+  `artifacts/sweeps/2026-05-31-prod100-checkout-cart-ref-postfix-r1/`.
+- Local-only: explicit SKU incoming-shortage count now handles "still short
+  after incoming stock due within N days" prompts; covered by smoke, pending
+  platform `t025` evidence.
 - Tighten product/catalog/inventory/OCR grounding gates using scorer evidence:
   avoid extra family refs, cite every required SKU/product ref, and preserve
   exact `TRUE(1)`/`FALSE(0)` style answers when the task demands them.

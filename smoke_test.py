@@ -3687,6 +3687,43 @@ def test_red_checkout_put_through_most_recently_checks_stock_and_cites_security(
     print("red: put-through most-recent checkout checks stock and cites security")
 
 
+def test_red_prod_checkout_security_denial_drops_non_subject_cart_refs_on_submit():
+    vm = FakeVM()
+    fn = _mk_completion(
+        "Cannot check out basket-0024: the current customer identity does not match the target basket.",
+        outcome="OUTCOME_DENIED_SECURITY",
+        refs=["/docs/security.md", "/docs/checkout.md", "/proc/carts/cust-0038/basket-0022.json"],
+    )
+
+    agent._submit_completion(vm, fn, "Please check out basket basket-0024 for me; I need it today.")
+
+    assert "/proc/carts/cust-0038/basket-0022.json" not in fn.grounding_refs
+    assert vm.answered is not None and "/proc/carts/cust-0038/basket-0022.json" not in vm.answered.refs
+    print("red: prod checkout security denial drops unrelated active cart ref")
+
+
+def test_red_prod_latest_basket_edit_drops_comparison_cart_ref_on_submit():
+    vm = FakeVM()
+    fn = _mk_completion(
+        "Added 1 unit of PT-GRD-BOS-GWS1400-150 to basket-0003.",
+        outcome="OUTCOME_OK",
+        refs=[
+            "/docs/security.md",
+            "/docs/checkout.md",
+            "/proc/catalog/Bosch Professional/PT-GRD-BOS-GWS1400-150.json",
+            "/proc/carts/cust-0002/basket-0003.json",
+            "/proc/carts/cust-0002/basket-0004.json",
+        ],
+    )
+
+    agent._submit_completion(vm, fn, "Put one Bosch 150mm grinder in the latest basket.")
+
+    assert "/proc/carts/cust-0002/basket-0003.json" in fn.grounding_refs
+    assert "/proc/carts/cust-0002/basket-0004.json" not in fn.grounding_refs
+    assert vm.answered is not None and "/proc/carts/cust-0002/basket-0004.json" not in vm.answered.refs
+    print("red: prod latest basket edit keeps changed cart and drops comparison cart")
+
+
 def test_red_checkout_explicit_exception_note_still_checks_stock():
     vm = FakeVM()
     vm.tool_outputs["/bin/id"] = "user: cust_071\nroles: customer\n"
@@ -4940,6 +4977,52 @@ def test_red_prod_explicit_sku_incoming_due_count_is_inventory_not_catalogue():
     assert fn.message == "<COUNT:1>"
     assert fn.grounding_refs == [store_path] + [f"/proc/catalog/Test/{sku}.json" for sku in skus]
     print("red: prod explicit SKU incoming-due count stays in inventory solver")
+
+
+def test_red_prod_explicit_sku_still_short_after_incoming_count():
+    vm = FakeVM()
+    store_path = "/proc/stores/store-graz-puntigam.json"
+    skus = [
+        "PT-SAFE-3M-SF400-SMOKE",
+        "PT-WASH-KAR-K4-HOME",
+        "PT-GRD-MET-W18-125-BODY",
+    ]
+    vm.sql_outputs[
+        "SELECT store_id AS id, record_path AS path, store_name AS name, city, is_open FROM stores ORDER BY store_id;"
+    ] = (
+        "id,path,name,city,is_open\n"
+        f"store-graz-puntigam,{store_path},PowerTools Graz Puntigam,Graz,1\n"
+    )
+    vm.sql_outputs["SELECT product_sku AS sku, record_path AS path FROM product_variants"] = (
+        "sku,path\n"
+        + "\n".join(f"{sku},/proc/catalog/Test/{sku}.json" for sku in skus)
+        + "\n"
+    )
+    vm.sql_outputs["SELECT * FROM store_inventory"] = (
+        "product_sku,available_today_quantity,physical_on_hand_quantity\n"
+        "PT-SAFE-3M-SF400-SMOKE,1,1\n"
+        "PT-WASH-KAR-K4-HOME,1,1\n"
+        "PT-GRD-MET-W18-125-BODY,0,0\n"
+    )
+    vm.sql_outputs["FROM store_inventory_incoming"] = (
+        "sku,incoming_quantity\n"
+        "PT-SAFE-3M-SF400-SMOKE,1\n"
+        "PT-WASH-KAR-K4-HOME,2\n"
+        "PT-GRD-MET-W18-125-BODY,0\n"
+    )
+    task = (
+        "At PowerTools at Puntigam, how many of these SKUs would still be short of 3 units "
+        "even after incoming stock due within 3 days is included: "
+        + ", ".join(skus)
+        + '? Answer exactly in format "<COUNT:%d>" (no quotes).'
+    )
+
+    fn = agent._try_deterministic_completion(vm, task)
+
+    assert fn is not None, "still-short incoming SKU count should not fall through to catalogue lookup"
+    assert fn.message == "<COUNT:2>"
+    assert fn.grounding_refs == [store_path] + [f"/proc/catalog/Test/{sku}.json" for sku in skus]
+    print("red: prod explicit SKU still-short-after-incoming count stays in inventory solver")
 
 
 def test_red_dev53_inventory_solver_reads_current_schema_tables():
@@ -7996,6 +8079,8 @@ def main():
     test_red_checkout_vague_my_basket_with_multiple_active_baskets_clarifies()
     test_red_checkout_newest_open_basket_runs_deterministically()
     test_red_checkout_put_through_most_recently_checks_stock_and_cites_security()
+    test_red_prod_checkout_security_denial_drops_non_subject_cart_refs_on_submit()
+    test_red_prod_latest_basket_edit_drops_comparison_cart_ref_on_submit()
     test_red_checkout_explicit_exception_note_still_checks_stock()
     test_red_refund_by_amount_current_schema_approved_return_is_unsupported()
     test_red_t43_refund_by_euro_symbol_amount_is_unsupported_not_llm()
@@ -8025,6 +8110,7 @@ def main():
     test_red_prod_explicit_sku_same_day_count_cites_all_sku_records()
     test_red_prod_explicit_sku_physical_vs_reserved_count()
     test_red_prod_explicit_sku_incoming_due_count_is_inventory_not_catalogue()
+    test_red_prod_explicit_sku_still_short_after_incoming_count()
     test_red_dev53_inventory_solver_reads_current_schema_tables()
     test_red_dev53_product_check_names_base_sku_when_extra_claim_absent()
     test_red_dev53_product_check_cites_all_base_candidates_when_extra_claim_absent()

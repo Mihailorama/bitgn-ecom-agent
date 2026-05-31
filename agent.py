@@ -1760,6 +1760,18 @@ def _submit_completion(
                 emp_path = _employee_record_path(vm, user)
                 if emp_path:
                     fn.grounding_refs.append(emp_path)
+    if task_text and not _looks_discount_task(task_text):
+        checkout_like = bool(re.search(r"\b(check\s*it\s*out|check\s*out|checkout|put\s+through)\b", task_text, re.I))
+        basket_edit_like = bool(re.search(r"\b(?:put|add)\s+one\b", task_text, re.I) and "basket" in task_text.lower())
+        if checkout_like and fn.outcome == "OUTCOME_DENIED_SECURITY":
+            fn.grounding_refs[:] = [ref for ref in fn.grounding_refs if not ref.startswith("/proc/carts/")]
+        elif basket_edit_like:
+            kept_ids = set(re.findall(r"\bbasket[-_][A-Za-z0-9]+\b", fn.message or ""))
+            if kept_ids:
+                fn.grounding_refs[:] = [
+                    ref for ref in fn.grounding_refs
+                    if not ref.startswith("/proc/carts/") or any(basket_id in ref for basket_id in kept_ids)
+                ]
 
     # The Answer RPC is the single most important call, and the connectrpc client
     # funnels every transport failure (timeout, 5xx, TLS blip) into ConnectError.
@@ -4208,6 +4220,18 @@ def _parse_explicit_sku_inventory_count_request(task_text: str) -> "tuple[str, i
             ),
         ),
         (
+            r"\bAt\s+(.+?),\s*how many of these SKUs would still be short of\s+(\d+)\s+"
+            r"units even after incoming stock due within\s+(\d+)\s+days is included:\s*(.+?)\?\s*Answer",
+            lambda m: (
+                "incoming_still_short",
+                int(m.group(2)),
+                int(m.group(2)),
+                int(m.group(3)),
+                m.group(1),
+                m.group(4),
+            ),
+        ),
+        (
             r"\bAt\s+(.+?),\s*how many of these SKUs have at least\s+(\d+)\s+"
             r"same-day units available:\s*(.+?)\?\s*Answer",
             lambda m: ("same_day_ge", int(m.group(2)), int(m.group(2)), 0, m.group(1), m.group(3)),
@@ -4440,7 +4464,11 @@ def _try_explicit_sku_inventory_count(vm: EcomRuntimeClientSync, task_text: str)
         return None
     paths_by_sku = _explicit_sku_product_paths(vm, skus)
     inv_by_sku = _explicit_sku_inventory_rows(vm, store["id"], skus)
-    incoming_by_sku = _incoming_inventory_by_sku(vm, store["id"], skus, incoming_days) if mode == "incoming_reaches" else {}
+    incoming_by_sku = (
+        _incoming_inventory_by_sku(vm, store["id"], skus, incoming_days)
+        if mode in {"incoming_reaches", "incoming_still_short"}
+        else {}
+    )
     count = 0
     for sku in skus:
         row = inv_by_sku.get(sku, {})
@@ -4452,6 +4480,10 @@ def _try_explicit_sku_inventory_count(vm: EcomRuntimeClientSync, task_text: str)
             continue
         if mode == "incoming_reaches":
             if available < physical_threshold and available + incoming_by_sku.get(sku, 0) >= available_threshold:
+                count += 1
+            continue
+        if mode == "incoming_still_short":
+            if available + incoming_by_sku.get(sku, 0) < available_threshold:
                 count += 1
             continue
         physical = _inventory_row_physical(row, available)
