@@ -2,6 +2,10 @@
 
 ## P0 - Score and Submission Correctness
 
+- Current best confirmed prod100 full sweep: `77.477/100`, `70/100` perfect,
+  run `run-22SDCLg4TaVRgh7AGoog2cR34`, logs
+  `artifacts/sweeps/2026-05-31-prod100-80pt-full-codex53-r1/`. This is
+  rejected for the active `>=80` goal, but is the current best measured score.
 - Record final public scores for prod R9 (`run-22RyBLkxE4jAAJKgXGUsJ6WW7`) and
   R6 (`run-22Rxi4mh3BZQYwepCzSHUnGxD`) once BitGN leaves `pending_eval`.
 - Record the out-of-contest open diagnostic `run-22RyVn5o6qzPqjkHFDMmeC8C5` as
@@ -72,8 +76,19 @@
   `3/3` in
   `artifacts/sweeps/2026-05-31-prod100-checkout-cart-ref-postfix-r1/`.
 - Local-only: explicit SKU incoming-shortage count now handles "still short
-  after incoming stock due within N days" prompts; covered by smoke, pending
-  platform `t025` evidence.
+  after incoming stock due within N days" prompts; covered by smoke and
+  targeted `t025` scored `1.00` in
+  `artifacts/sweeps/2026-05-31-prod100-t025-incoming-still-short-postfix-r1/`.
+- DONE: inventory-family CSV export writes exact requested CSV columns using
+  family products plus branch inventory/incoming data; targeted `t091` scored
+  `1.00` in
+  `artifacts/sweeps/2026-05-31-prod100-t091-inventory-family-export-postfix-r1/`.
+- Verify narrowed explicit checkout after the `77.477/100` full sweep:
+  re-run targeted `t009,t049,t069,t083`. The broad version won digital checkout
+  but regressed physical checkout and 3DS recovery; local tests now force
+  physical checkout fallthrough and 3DS no-hijack.
+- Add a narrow RED/fix for `t085` 3DS embedded cleanup/runtime directive:
+  latest full returned unsupported where the scorer expected security denial.
 - Tighten product/catalog/inventory/OCR grounding gates using scorer evidence:
   avoid extra family refs, cite every required SKU/product ref, and preserve
   exact `TRUE(1)`/`FALSE(0)` style answers when the task demands them.

@@ -4500,6 +4500,170 @@ def _try_explicit_sku_inventory_count(vm: EcomRuntimeClientSync, task_text: str)
     )
 
 
+def _parse_inventory_family_export_task(task_text: str) -> "tuple[str, str, str, list[str]] | None":
+    text = task_text or ""
+    if "inventory csv export" not in text.lower() or "family_id" not in text.lower():
+        return None
+    path_m = re.search(r"\bat\s+(/exports/inventory-family-[^\s`]+?\.csv)\b", text, re.I)
+    store_m = re.search(r"\bfor\s+(.+?)\.\s*Include\s+`?family_id`?", text, re.I | re.S)
+    family_m = re.search(r"`?family_id`?\s+`([^`]+)`", text, re.I)
+    cols_m = re.search(r"columns:\s*`([^`]+)`", text, re.I | re.S)
+    if not (path_m and store_m and family_m and cols_m):
+        return None
+    columns = [part.strip() for part in cols_m.group(1).split(",") if part.strip()]
+    if not columns or columns[0] != "SKU":
+        return None
+    if any(not re.fullmatch(r"\d{4}-\d{2}-\d{2}", col) for col in columns[1:]):
+        return None
+    return path_m.group(1), store_m.group(1).strip(), family_m.group(1).strip(), columns
+
+
+def _runtime_today(vm: EcomRuntimeClientSync, fallback: str = "") -> "_dt.date | None":
+    raw = _exec_tool_stdout(vm, "/bin/date", []).strip()
+    m = re.search(r"\d{4}-\d{2}-\d{2}", raw)
+    value = m.group(0) if m else fallback
+    try:
+        return _dt.date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _family_product_json_records(vm: EcomRuntimeClientSync, family_id: str) -> "list[tuple[str, dict]]":
+    out: "list[tuple[str, dict]]" = []
+    seen: "set[str]" = set()
+    for root in ("/proc/catalog", "/proc/products"):
+        try:
+            found = dispatch(vm, Req_Search(tool="search", root=root, pattern=family_id, limit=20))
+        except Exception:
+            continue
+        for match in getattr(found, "matches", []) or []:
+            path = getattr(match, "path", "")
+            if not path.endswith(".json") or path in seen:
+                continue
+            seen.add(path)
+            try:
+                body = getattr(dispatch(vm, Req_Read(tool="read", path=path)), "content", "")
+                data = json.loads(body)
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+            if str(data.get("family_id") or data.get("product_family_id") or "") != family_id:
+                continue
+            out.append((path, data))
+    return sorted(
+        out,
+        key=lambda item: str(item[1].get("sku") or item[1].get("product_sku") or item[0].rsplit("/", 1)[-1]),
+    )
+
+
+def _store_inventory_for_export(vm: EcomRuntimeClientSync, store: dict) -> "dict[str, dict]":
+    path = store.get("path", "")
+    if path:
+        try:
+            body = getattr(dispatch(vm, Req_Read(tool="read", path=path)), "content", "")
+            data = json.loads(body)
+        except Exception:
+            data = None
+        if isinstance(data, dict):
+            inv = _store_inventory_map(data, vm, path.rsplit("/", 1)[0])
+            if inv:
+                return inv
+    rec = _proc_store_by_id(vm, store.get("id", ""))
+    if rec and isinstance(rec.get("inventory"), dict):
+        return rec["inventory"]
+    return {}
+
+
+def _same_day_available_from_inventory_item(item: dict) -> int:
+    on_hand = _coerce_int_or_none(
+        item.get("on_hand")
+        or item.get("physical_on_hand_quantity")
+        or item.get("quantity_on_hand")
+        or item.get("stock_on_hand")
+    ) or 0
+    reserved = _coerce_int_or_none(
+        item.get("reserved")
+        or item.get("reserved_quantity")
+        or item.get("same_day_reserved_quantity")
+    ) or 0
+    return max(on_hand - reserved, 0)
+
+
+def _incoming_quantity_on_date(item: dict, target: _dt.date, today: _dt.date) -> int:
+    incoming = item.get("incoming")
+    if isinstance(incoming, str):
+        try:
+            incoming = json.loads(incoming)
+        except Exception:
+            incoming = None
+    if not isinstance(incoming, list):
+        incoming = [item]
+    days = (target - today).days
+    total = 0
+    for entry in incoming:
+        if not isinstance(entry, dict):
+            continue
+        arrival_days = _coerce_int_or_none(entry.get("arrival_in_days"))
+        if arrival_days is not None:
+            if arrival_days == days:
+                total += _coerce_int_or_none(entry.get("quantity")) or 0
+            continue
+        arrival_date = str(entry.get("arrival_date") or entry.get("date") or entry.get("due_date") or "")
+        if arrival_date[:10] == target.isoformat():
+            total += _coerce_int_or_none(entry.get("quantity")) or 0
+    return total
+
+
+def _try_inventory_family_export(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    parsed = _parse_inventory_family_export_task(task_text)
+    if not parsed:
+        return None
+    export_path, store_phrase, family_id, columns = parsed
+    store = _find_store(vm, store_phrase)
+    if not store:
+        return None
+    products = _family_product_json_records(vm, family_id)
+    if not products:
+        return None
+    inventory = _store_inventory_for_export(vm, store)
+    today = _runtime_today(vm, columns[1] if len(columns) > 1 else "")
+    if today is None:
+        return None
+
+    lines = [",".join(columns)]
+    for path, data in products:
+        sku = str(data.get("sku") or data.get("product_sku") or path.rsplit("/", 1)[-1].removesuffix(".json"))
+        item = inventory.get(sku, {})
+        row = [sku]
+        for col in columns[1:]:
+            target = _dt.date.fromisoformat(col)
+            if target == today:
+                value = _same_day_available_from_inventory_item(item)
+            else:
+                value = _incoming_quantity_on_date(item, target, today) if item else 0
+            row.append(str(value))
+        lines.append(",".join(row))
+    content = "\n".join(lines) + "\n"
+    dispatch(vm, Req_Write(tool="write", path=export_path, content=content))
+    dispatch(vm, Req_Stat(tool="stat", path=export_path))
+
+    refs = ["/AGENTS.MD", "/docs/availability-checks.md", store.get("path", "")]
+    refs += [path for path, _data in products]
+    refs.append(export_path)
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=[
+            "deterministic inventory family export",
+            "wrote and verified export file",
+        ],
+        message=export_path,
+        grounding_refs=_normalize_refs(refs),
+        outcome="OUTCOME_OK",
+        verified=True,
+    )
+
+
 def _crosslist_task_paths(task_text: str) -> "tuple[str, str] | None":
     text = task_text or ""
     if "competitor purchase request" not in text.lower() or "crosslist" not in text.lower():
@@ -5264,6 +5428,108 @@ WHERE b.id={_sql_quote(basket_id)};
         if rows:
             return rows[0]
     return None
+
+
+def _store_record_by_id_from_proc(vm: EcomRuntimeClientSync, store_id: str) -> "tuple[str, dict]":
+    rec = _proc_store_by_id(vm, store_id)
+    if rec and rec.get("path"):
+        return rec.get("path", ""), rec
+    for root in ("/proc/locations", "/proc/stores", "/proc/branches"):
+        try:
+            found = dispatch(vm, Req_Search(tool="search", root=root, pattern=store_id, limit=20))
+        except Exception:
+            continue
+        for match in getattr(found, "matches", []) or []:
+            path = getattr(match, "path", "")
+            if not isinstance(path, str) or not path.endswith(".json"):
+                continue
+            data = _load_json_path(vm, path)
+            if str(data.get("id") or data.get("store_id") or "") == store_id:
+                return path, data
+    return "", {}
+
+
+def _basket_line_quantity(line: dict) -> int:
+    return _coerce_int_or_none(
+        line.get("quantity")
+        or line.get("qty")
+        or line.get("requested_quantity")
+        or line.get("count")
+    ) or 0
+
+
+def _try_checkout_explicit_basket(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
+    text = task_text or ""
+    if re.search(r"\b(3ds|3-ds|payment|bank verification|verification screen|recover)\b", text, re.I):
+        return None
+    basket_ids = _task_ids(text, "basket")
+    if len(basket_ids) != 1:
+        return None
+    if not re.search(r"\b(ready to buy|complete checkout|check(?:\s+it)?\s+out|checkout|put\s+through)\b", text, re.I):
+        return None
+    user, roles = _id_context(vm)
+    if not user or (not user.startswith("cust-") and not user.startswith("cust_") and "customer" not in {r.lower() for r in roles}):
+        return ReportTaskCompletion(
+            tool="report_completion",
+            completed_steps_laconic=["deterministic explicit checkout identity check"],
+            message="The current identity is not a customer identity for this checkout.",
+            grounding_refs=["/docs/security.md", "/docs/checkout.md"],
+            outcome="OUTCOME_DENIED_SECURITY",
+            verified=True,
+        )
+    basket_id = basket_ids[0]
+    basket_path = _find_basket_record_path(vm, basket_id, user)
+    basket = _load_json_path(vm, basket_path)
+    if not basket:
+        return None
+    store_id = str(basket.get("store_id") or basket.get("branch_id") or "")
+    store_path, store = _store_record_by_id_from_proc(vm, store_id)
+    refs = ["/docs/security.md", "/docs/checkout.md", basket_path, store_path]
+    basket_customer_id = str(basket.get("customer_id") or basket.get("customer") or "")
+    if basket_customer_id and basket_customer_id != user:
+        return ReportTaskCompletion(
+            tool="report_completion",
+            completed_steps_laconic=["deterministic explicit checkout ownership check"],
+            message=f"Cannot check out {basket_id}: current customer identity does not own the basket.",
+            grounding_refs=_normalize_refs(refs),
+            outcome="OUTCOME_DENIED_SECURITY",
+            verified=True,
+        )
+    if str(basket.get("status") or basket.get("basket_status") or "").lower() not in {"active", "open", "pending"}:
+        return ReportTaskCompletion(
+            tool="report_completion",
+            completed_steps_laconic=["deterministic explicit checkout status check"],
+            message=f"Cannot check out {basket_id}: basket status is {basket.get('status') or basket.get('basket_status') or ''}.",
+            grounding_refs=_normalize_refs(refs),
+            outcome="OUTCOME_NONE_UNSUPPORTED",
+            verified=True,
+        )
+    lines = basket.get("lines") or basket.get("items") or []
+    if not isinstance(lines, list) or not lines:
+        return None
+    inventory = _store_inventory_map(store, vm, store_path.rsplit("/", 1)[0]) if store else {}
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        sku = str(line.get("sku") or line.get("product_sku") or "")
+        requested = _basket_line_quantity(line)
+        if not sku or requested <= 0:
+            continue
+        if sku.startswith("PT-DIG-"):
+            continue
+        # Keep this fast path narrow: it exists for digital checkout baskets
+        # whose access/download SKUs are absent from branch inventory. Ordinary
+        # physical-stock checkout stays on the existing model/domain-tool path.
+        return None
+    _exec_tool_stdout(vm, "/bin/checkout", [basket_id])
+    return ReportTaskCompletion(
+        tool="report_completion",
+        completed_steps_laconic=["deterministic explicit checkout policy check and mutation"],
+        message=f"Checked out {basket_id}.",
+        grounding_refs=_normalize_refs(refs),
+        outcome="OUTCOME_OK",
+        verified=True,
+    )
 
 
 def _try_checkout_explicit_exception_guard(vm: EcomRuntimeClientSync, task_text: str) -> "ReportTaskCompletion | None":
@@ -6994,6 +7260,7 @@ def _try_deterministic_completion(vm: EcomRuntimeClientSync, task_text: str) -> 
         # tasks (esp. under SQL outage, where it produced wrong answers missing the
         # store ref). Their gates are specific regexes; anything they don't match
         # still falls through to _try_simple_catalogue_lookup as before.
+        _try_inventory_family_export,
         _try_explicit_sku_inventory_count,
         _try_purchase_request_crosslist,
         _try_stock_yesno,
@@ -7003,6 +7270,7 @@ def _try_deterministic_completion(vm: EcomRuntimeClientSync, task_text: str) -> 
         _try_product_check,
         _try_catalogue_freeform_check,
         _try_quote_table,
+        _try_checkout_explicit_basket,
         _try_checkout_explicit_exception_guard,
         _try_checkout_clarification,
         _try_checkout_current_basket,

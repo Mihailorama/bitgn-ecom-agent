@@ -3724,6 +3724,88 @@ def test_red_prod_latest_basket_edit_drops_comparison_cart_ref_on_submit():
     print("red: prod latest basket edit keeps changed cart and drops comparison cart")
 
 
+def test_red_prod_checkout_digital_basket_does_not_require_branch_inventory():
+    vm = FakeVM()
+    basket_path = "/proc/carts/cust-0175/basket-0092.json"
+    store_path = "/proc/locations/Graz/store-graz-puntigam.json"
+    vm.tool_outputs["/bin/id"] = "user: cust-0175\nroles: customer\n"
+    vm.find_outputs["basket-0092.json"] = [basket_path]
+    vm.search_outputs["store-graz-puntigam"] = [(store_path, '"id": "store-graz-puntigam",')]
+    vm.read_outputs[basket_path] = json.dumps(
+        {
+            "id": "basket-0092",
+            "customer_id": "cust-0175",
+            "store_id": "store-graz-puntigam",
+            "status": "active",
+            "lines": [{"sku": "PT-DIG-PLAN-GARDEN-SHED", "quantity": 1}],
+        }
+    )
+    vm.read_outputs[store_path] = json.dumps(
+        {
+            "id": "store-graz-puntigam",
+            "name": "PowerTools Graz Puntigam",
+            "city": "Graz",
+            "is_open": True,
+            "inventory": [],
+        }
+    )
+
+    fn = agent._try_deterministic_completion(
+        vm,
+        "I am ready to buy everything in basket basket-0092. Complete checkout.",
+    )
+
+    assert fn is not None
+    assert fn.outcome == "OUTCOME_OK"
+    assert fn.message == "Checked out basket-0092."
+    assert ("/bin/checkout", ["basket-0092"], "") in vm.exec_calls
+    assert fn.grounding_refs == ["/docs/security.md", "/docs/checkout.md", basket_path, store_path]
+    print("red: prod checkout digital basket does not require branch inventory")
+
+
+def test_red_prod_checkout_non_digital_insufficient_stock_falls_through():
+    vm = FakeVM()
+    basket_path = "/proc/carts/cust-0038/basket-0022.json"
+    store_path = "/proc/locations/Linz/store-linz-urfahr.json"
+    vm.tool_outputs["/bin/id"] = "user: cust-0038\nroles: customer\n"
+    vm.find_outputs["basket-0022.json"] = [basket_path]
+    vm.search_outputs["store-linz-urfahr"] = [(store_path, '"id": "store-linz-urfahr",')]
+    vm.read_outputs[basket_path] = json.dumps(
+        {
+            "id": "basket-0022",
+            "customer_id": "cust-0038",
+            "store_id": "store-linz-urfahr",
+            "status": "active",
+            "lines": [{"sku": "PT-IMP-MIL-M18FID3-2AH", "quantity": 1}],
+        }
+    )
+    vm.read_outputs[store_path] = json.dumps(
+        {
+            "id": "store-linz-urfahr",
+            "inventory": [{"sku": "PT-IMP-MIL-M18FID3-2AH", "on_hand": 0, "reserved": 0}],
+        }
+    )
+
+    fn = agent._try_checkout_explicit_basket(
+        vm,
+        "I am ready to buy everything in basket basket-0022. Complete checkout.",
+    )
+
+    assert fn is None, "non-digital stock checkout should stay on the existing checkout path"
+    assert not any(call[0] == "/bin/checkout" for call in vm.exec_calls)
+    print("red: prod checkout non-digital insufficient stock falls through")
+
+
+def test_red_prod_checkout_solver_does_not_hijack_3ds_recovery():
+    fn = agent._try_checkout_explicit_basket(
+        FakeVM(),
+        "3DS failed during checkout for my basket basket-0074. Please recover the checkout safely.",
+    )
+
+    assert fn is None, "3DS recovery must be handled by the 3DS solver, not checkout"
+    print("red: prod checkout solver does not hijack 3DS recovery")
+
+
 def test_red_checkout_explicit_exception_note_still_checks_stock():
     vm = FakeVM()
     vm.tool_outputs["/bin/id"] = "user: cust_071\nroles: customer\n"
@@ -5023,6 +5105,82 @@ def test_red_prod_explicit_sku_still_short_after_incoming_count():
     assert fn.message == "<COUNT:2>"
     assert fn.grounding_refs == [store_path] + [f"/proc/catalog/Test/{sku}.json" for sku in skus]
     print("red: prod explicit SKU still-short-after-incoming count stays in inventory solver")
+
+
+def test_red_prod_inventory_family_export_writes_exact_csv():
+    vm = FakeVM()
+    export_path = "/exports/inventory-family-test.csv"
+    store_path = "/proc/locations/Graz/store-graz-center.json"
+    product_paths = [
+        "/proc/catalog/Bosch Professional/PT-GRD-BOS-GWS1400-125.json",
+        "/proc/catalog/Bosch Professional/PT-GRD-BOS-GWS1400-150.json",
+    ]
+    vm.tool_outputs["/bin/date"] = "2026-12-23T11:28:21Z\n"
+    vm.sql_outputs[
+        "SELECT store_id AS id, record_path AS path, store_name AS name, city, is_open FROM stores ORDER BY store_id;"
+    ] = (
+        "id,path,name,city,is_open\n"
+        f"store-graz-center,{store_path},PowerTools Graz Center,Graz,1\n"
+    )
+    vm.read_outputs[store_path] = json.dumps(
+        {
+            "id": "store-graz-center",
+            "name": "PowerTools Graz Center",
+            "city": "Graz",
+            "is_open": True,
+            "inventory": [
+                {
+                    "sku": "PT-GRD-BOS-GWS1400-125",
+                    "on_hand": 5,
+                    "reserved": 2,
+                    "incoming": [{"quantity": 4, "arrival_in_days": 1}],
+                }
+            ],
+        }
+    )
+    vm.search_outputs["fam-bosch-gws-1400"] = [
+        (product_paths[1], '"family_id": "fam-bosch-gws-1400",'),
+        (product_paths[0], '"family_id": "fam-bosch-gws-1400",'),
+    ]
+    vm.read_outputs[product_paths[0]] = json.dumps(
+        {
+            "sku": "PT-GRD-BOS-GWS1400-125",
+            "name": "Bosch GWS 1400 angle grinder 125mm",
+            "family_id": "fam-bosch-gws-1400",
+        }
+    )
+    vm.read_outputs[product_paths[1]] = json.dumps(
+        {
+            "sku": "PT-GRD-BOS-GWS1400-150",
+            "name": "Bosch GWS 1400 angle grinder 150mm",
+            "family_id": "fam-bosch-gws-1400",
+        }
+    )
+    task = (
+        f"Create an inventory CSV export at {export_path} for graz center powertools. "
+        "Include `family_id` `fam-bosch-gws-1400` and use exactly these columns: "
+        "`SKU,2026-12-23,2026-12-24,2026-12-25`. Return only the export path."
+    )
+
+    fn = agent._try_deterministic_completion(vm, task)
+
+    expected = (
+        "SKU,2026-12-23,2026-12-24,2026-12-25\n"
+        "PT-GRD-BOS-GWS1400-125,3,4,0\n"
+        "PT-GRD-BOS-GWS1400-150,0,0,0\n"
+    )
+    assert fn is not None, "inventory family export should not fall through to catalogue lookup"
+    assert fn.message == export_path
+    assert vm.write_contents.get(export_path) == expected
+    assert fn.grounding_refs == [
+        "/AGENTS.MD",
+        "/docs/availability-checks.md",
+        store_path,
+        product_paths[0],
+        product_paths[1],
+        export_path,
+    ]
+    print("red: prod inventory family export writes exact CSV")
 
 
 def test_red_dev53_inventory_solver_reads_current_schema_tables():
@@ -8081,6 +8239,9 @@ def main():
     test_red_checkout_put_through_most_recently_checks_stock_and_cites_security()
     test_red_prod_checkout_security_denial_drops_non_subject_cart_refs_on_submit()
     test_red_prod_latest_basket_edit_drops_comparison_cart_ref_on_submit()
+    test_red_prod_checkout_digital_basket_does_not_require_branch_inventory()
+    test_red_prod_checkout_non_digital_insufficient_stock_falls_through()
+    test_red_prod_checkout_solver_does_not_hijack_3ds_recovery()
     test_red_checkout_explicit_exception_note_still_checks_stock()
     test_red_refund_by_amount_current_schema_approved_return_is_unsupported()
     test_red_t43_refund_by_euro_symbol_amount_is_unsupported_not_llm()
@@ -8111,6 +8272,7 @@ def main():
     test_red_prod_explicit_sku_physical_vs_reserved_count()
     test_red_prod_explicit_sku_incoming_due_count_is_inventory_not_catalogue()
     test_red_prod_explicit_sku_still_short_after_incoming_count()
+    test_red_prod_inventory_family_export_writes_exact_csv()
     test_red_dev53_inventory_solver_reads_current_schema_tables()
     test_red_dev53_product_check_names_base_sku_when_extra_claim_absent()
     test_red_dev53_product_check_cites_all_base_candidates_when_extra_claim_absent()
