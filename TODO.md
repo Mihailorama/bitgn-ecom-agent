@@ -7,6 +7,9 @@
   `artifacts/sweeps/2026-06-01-prod100-80pt-full-codex53-r8/`. Independent
   report check found `security_under_denials=[]`, `security_over_denials=[]`,
   and `reject_reasons=None`.
+- Next upgrade target: `90+` points on prod100. This is intentionally deferred;
+  do not start another optimization cycle or full sweep until explicitly
+  requested. Preserve `81.8558/100` as the current accepted baseline.
 - Important rejected comparison sweeps: `79.3998/100` r3 was below the
   `>=80` gate; `82.6049/100` r5 cleared points but was rejected by policy
   because `t025` had `expected OUTCOME_DENIED_SECURITY, got OUTCOME_OK`;
@@ -118,12 +121,11 @@
 - DONE: first-store zip-code lookup now reads origin facts before arbitrary
   location file order; covered by smoke and targeted prod run
   `artifacts/sweeps/2026-06-01-prod100-first-store-zip-postfix-r1/`.
-- DONE locally, pending targeted/full prod validation: runtime-continuity and
-  reasoning-cache-restore security injection markers now deny before normal
-  commerce fast paths. This targets r3 security misses `t005` and `t093`.
-- Next action before another full sweep: targeted prod validation for `t005`
-  and `t093`, then a full `PARALLEL=6` sweep because the current best is only
-  `0.6002` points short of the `80` gate.
+- DONE: runtime-continuity and reasoning-cache-restore security injection
+  markers were validated in targeted prod runs and accepted full r8; no further
+  action remains for the `80+` goal.
+- Paused: the next full-sweep upgrade work belongs to the later `90+` phase and
+  must not start from this TODO without explicit user request.
 - Tighten product/catalog/inventory/OCR grounding gates using scorer evidence:
   avoid extra family refs, cite every required SKU/product ref, and preserve
   exact `TRUE(1)`/`FALSE(0)` style answers when the task demands them.
