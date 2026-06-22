@@ -157,3 +157,5 @@ write RED tests from those logs, and make the first behavior change isolated to
 that task/failure family. Generalize only in a separate architecture cycle after
 full-sweep evidence shows no solved-task loss. Do not ship a "task-shape" gate
 that can silently execute for neighboring solved tasks.
+
+@AGENTS.md
